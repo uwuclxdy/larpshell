@@ -1,0 +1,461 @@
+use colored::*;
+
+use crate::cli::is_interactive_terminal;
+use crate::common::{
+    ANSI_CLEAR_LINE, CTP_BLUE, CTP_PRIMARY, CTP_TEXT, CTP_YELLOW, EXIT_SIGINT, clear_n_lines,
+    count_visual_lines, exit_with_code, flush_stderr, get_terminal_width, show_cursor,
+};
+
+pub enum ConfirmResult {
+    Yes,
+    No,
+    Explain,
+    Edit,
+    Cancel,
+}
+
+enum KeyEvent {
+    Char(char),
+    Backspace,
+    Delete,
+    Left,
+    Right,
+    Home,
+    End,
+    Enter,
+    CtrlC,
+    ArrowUp,
+    Eof,
+    Other,
+}
+
+/// Parse one logical key event from any `Read` source. Works on both raw-mode
+/// terminals and plain pipes (e.g. during tests with piped stdin).
+fn parse_key_from_reader(reader: &mut impl std::io::Read) -> KeyEvent {
+    let mut key_byte = [0u8; 1];
+    if reader.read(&mut key_byte).unwrap_or(0) == 0 {
+        return KeyEvent::Eof;
+    }
+    match key_byte[0] {
+        b'\n' | b'\r' => KeyEvent::Enter,
+        b'\x03' => KeyEvent::CtrlC,
+        127 | b'\x08' => KeyEvent::Backspace,
+        b'\x1b' => {
+            if reader.read(&mut key_byte).unwrap_or(0) == 0 {
+                return KeyEvent::Eof;
+            }
+            if key_byte[0] != b'[' {
+                return KeyEvent::Other;
+            }
+            if reader.read(&mut key_byte).unwrap_or(0) == 0 {
+                return KeyEvent::Eof;
+            }
+            match key_byte[0] {
+                b'A' => KeyEvent::ArrowUp,
+                b'C' => KeyEvent::Right,
+                b'D' => KeyEvent::Left,
+                b'H' => KeyEvent::Home,
+                b'F' => KeyEvent::End,
+                b'3' => {
+                    let _ = reader.read(&mut key_byte); // consume '~'
+                    KeyEvent::Delete
+                }
+                b'1' => {
+                    let _ = reader.read(&mut key_byte); // consume '~'
+                    KeyEvent::Home
+                }
+                b'4' => {
+                    let _ = reader.read(&mut key_byte); // consume '~'
+                    KeyEvent::End
+                }
+                _ => KeyEvent::Other,
+            }
+        }
+        c @ 32..=126 => KeyEvent::Char(c as char),
+        _ => KeyEvent::Other,
+    }
+}
+
+#[cfg(unix)]
+fn read_key_event() -> KeyEvent {
+    use nix::sys::termios::{LocalFlags, SetArg, tcgetattr, tcsetattr};
+
+    let stdin_handle = std::io::stdin();
+
+    // Attempt raw mode; fall back to plain reads (e.g. piped stdin in tests).
+    if let Ok(original) = tcgetattr(&stdin_handle) {
+        let mut raw = original.clone();
+        raw.local_flags
+            .remove(LocalFlags::ICANON | LocalFlags::ECHO | LocalFlags::ISIG);
+        if tcsetattr(&stdin_handle, SetArg::TCSANOW, &raw).is_ok() {
+            let result = parse_key_from_reader(&mut stdin_handle.lock());
+            let _ = tcsetattr(&stdin_handle, SetArg::TCSANOW, &original);
+            return result;
+        }
+        let _ = tcsetattr(&stdin_handle, SetArg::TCSANOW, &original);
+    }
+
+    parse_key_from_reader(&mut std::io::stdin().lock())
+}
+
+#[cfg(not(unix))]
+fn read_key_event() -> KeyEvent {
+    parse_key_from_reader(&mut std::io::stdin().lock())
+}
+
+pub fn display_command(command: &str) -> usize {
+    let width = get_terminal_width();
+    let lines: Vec<&str> = command.lines().collect();
+    if lines.len() == 1 {
+        let visual = count_visual_lines(&format!("$ {}", command), width);
+        eprintln!(
+            "{} {}",
+            "$".custom_color(CTP_PRIMARY),
+            command.custom_color(CTP_TEXT).bold()
+        );
+        visual
+    } else {
+        let mut visual = count_visual_lines("> multiline command:", width);
+        eprintln!(
+            "{} {}",
+            ">".custom_color(CTP_PRIMARY),
+            "multiline command:".custom_color(CTP_TEXT).bold()
+        );
+        for line in lines.iter() {
+            visual += count_visual_lines(&format!("$ {}", line), width);
+            eprintln!(
+                "{} {}",
+                "$".custom_color(CTP_PRIMARY),
+                line.custom_color(CTP_TEXT)
+            );
+        }
+        visual
+    }
+}
+
+pub fn display_explanation(explanation: &str) -> usize {
+    let width = get_terminal_width();
+    let styled = style_html_tags(explanation);
+    let visual = count_visual_lines(&styled, width);
+    let lines: Vec<&str> = styled.lines().collect();
+    for line in &lines {
+        eprintln!("{}", line.custom_color(CTP_TEXT));
+    }
+    visual
+}
+
+fn style_html_tags(text: &str) -> String {
+    if colored::control::SHOULD_COLORIZE.should_colorize() {
+        text.replace("<b>", "\x1b[1m")
+            .replace("</b>", "\x1b[22m")
+            .replace("<i>", "\x1b[3m")
+            .replace("</i>", "\x1b[23m")
+            .replace("<u>", "\x1b[4m")
+            .replace("</u>", "\x1b[24m")
+    } else {
+        text.replace("<b>", "")
+            .replace("</b>", "")
+            .replace("<i>", "")
+            .replace("</i>", "")
+            .replace("<u>", "")
+            .replace("</u>", "")
+    }
+}
+
+/// Prompt for confirmation with explain option
+pub fn confirm_with_explain(
+    cmd_line_count: usize,
+) -> Result<ConfirmResult, Box<dyn std::error::Error>> {
+    if !is_interactive_terminal() {
+        return Ok(ConfirmResult::Yes);
+    }
+
+    let prompt_lines = confirmation_prompt(true);
+    flush_stderr();
+
+    let lines_to_clear = cmd_line_count + prompt_lines;
+
+    loop {
+        match read_key_event() {
+            KeyEvent::Enter | KeyEvent::Char('y' | 'Y') => {
+                clear_n_lines(prompt_lines);
+                return Ok(ConfirmResult::Yes);
+            }
+            KeyEvent::Char('e' | 'E') => {
+                clear_n_lines(prompt_lines);
+                return Ok(ConfirmResult::Explain);
+            }
+            KeyEvent::ArrowUp => {
+                clear_n_lines(lines_to_clear);
+                return Ok(ConfirmResult::Edit);
+            }
+            KeyEvent::Char('n' | 'N') => {
+                clear_n_lines(lines_to_clear);
+                return Ok(ConfirmResult::Cancel);
+            }
+            KeyEvent::CtrlC => {
+                clear_n_lines(lines_to_clear);
+                show_cursor();
+                exit_with_code(EXIT_SIGINT);
+            }
+            KeyEvent::Eof => {
+                clear_n_lines(lines_to_clear);
+                show_cursor();
+                return Ok(ConfirmResult::No);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Prompt without the explain option.
+/// `cmd_line_count` = persistent command lines (kept on Y/Enter).
+/// `expl_line_count` = ephemeral explanation lines (cleared on Y/Enter).
+pub fn confirm_execution(
+    cmd_line_count: usize,
+    expl_line_count: usize,
+) -> Result<ConfirmResult, Box<dyn std::error::Error>> {
+    if !is_interactive_terminal() {
+        return Ok(ConfirmResult::Yes);
+    }
+
+    let prompt_lines = confirmation_prompt(false);
+    flush_stderr();
+
+    let lines_to_clear = cmd_line_count + expl_line_count + prompt_lines;
+
+    loop {
+        match read_key_event() {
+            KeyEvent::Enter | KeyEvent::Char('y' | 'Y') => {
+                clear_n_lines(expl_line_count + prompt_lines);
+                return Ok(ConfirmResult::Yes);
+            }
+            KeyEvent::ArrowUp => {
+                clear_n_lines(lines_to_clear);
+                return Ok(ConfirmResult::Edit);
+            }
+            KeyEvent::Char('n' | 'N') => {
+                clear_n_lines(lines_to_clear);
+                return Ok(ConfirmResult::Cancel);
+            }
+            KeyEvent::CtrlC => {
+                clear_n_lines(lines_to_clear);
+                show_cursor();
+                exit_with_code(EXIT_SIGINT);
+            }
+            KeyEvent::Eof => {
+                clear_n_lines(lines_to_clear);
+                show_cursor();
+                return Ok(ConfirmResult::No);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn confirmation_prompt(with_explain: bool) -> usize {
+    let width = get_terminal_width();
+    let mut visual = 0;
+    if with_explain {
+        let line1 = format!("{}", "Run this?".custom_color(CTP_YELLOW));
+        visual += count_visual_lines(&line1, width);
+        eprintln!("{}", line1);
+        let line2 = format!(
+            "[{}] to execute, [{}] to explain, [{}] to edit, [{}] to cancel",
+            "Y/Enter".custom_color(CTP_PRIMARY).bold(),
+            "E".custom_color(CTP_PRIMARY).bold(),
+            "Arrow Up".custom_color(CTP_PRIMARY).bold(),
+            "N".custom_color(CTP_PRIMARY).bold()
+        );
+        visual += count_visual_lines(&line2, width);
+        eprint!("{}", line2.custom_color(CTP_BLUE));
+    } else {
+        let line1 = format!("{}", "Run this?".custom_color(CTP_YELLOW));
+        visual += count_visual_lines(&line1, width);
+        eprintln!("{}", line1);
+        let line2 = format!(
+            "[{}] to execute, [{}] to edit, [{}] to cancel",
+            "Y/Enter".custom_color(CTP_PRIMARY).bold(),
+            "Arrow Up".custom_color(CTP_PRIMARY).bold(),
+            "N".custom_color(CTP_PRIMARY).bold()
+        );
+        visual += count_visual_lines(&line2, width);
+        eprint!("{}", line2.custom_color(CTP_BLUE));
+    }
+    visual
+}
+
+/// Presents the command for inline editing. The caller must have already cleared the
+/// confirmation prompt lines from the terminal. Returns the edited command on Enter,
+/// or exits with code 130 on Ctrl+C.
+pub fn edit_command(current: &str) -> Option<String> {
+    let width = get_terminal_width();
+    let mut buf: Vec<char> = current.chars().collect();
+    let mut pos = buf.len();
+
+    let hint_text = format!(
+        "[{}] to confirm, [{}] to quit",
+        "Enter".custom_color(CTP_PRIMARY).bold(),
+        "Ctrl+C".custom_color(CTP_PRIMARY).bold()
+    );
+    let hint_rows = count_visual_lines("[Enter] to confirm, [Ctrl+C] to quit", width);
+
+    // Draw: command on current line (no newline), hint on the line below.
+    // Then move cursor back up to the command line.
+    let init: String = buf.iter().collect();
+    eprint!(
+        "{} {}",
+        "$".custom_color(CTP_PRIMARY),
+        init.custom_color(CTP_TEXT).bold()
+    );
+    eprintln!(); // move to hint line
+    eprint!("{}", hint_text.custom_color(CTP_BLUE));
+    // cursor up 1 line, then set absolute column: "$ " = 2 visible chars, 1-indexed
+    eprint!("\x1b[1A\x1b[{}G", 3 + pos);
+    flush_stderr();
+
+    // clear the editor display (command + hint) from the terminal.
+    // cursor is on the first command row; move to last hint row then clear upward.
+    let clear_editor = |buf: &[char]| {
+        let cmd_text = format!("$ {}", buf.iter().collect::<String>());
+        let cmd_rows = count_visual_lines(&cmd_text, width);
+        let total = cmd_rows + hint_rows;
+        // move cursor from first command row to last hint row
+        for _ in 0..total.saturating_sub(1) {
+            eprint!("\x1b[1B");
+        }
+        clear_n_lines(total);
+    };
+
+    let redraw = |buf: &[char], pos: usize| {
+        let s: String = buf.iter().collect();
+        // cursor is on the command line; clear it and redraw
+        eprint!(
+            "{}{} {}",
+            ANSI_CLEAR_LINE,
+            "$".custom_color(CTP_PRIMARY),
+            s.custom_color(CTP_TEXT).bold()
+        );
+        eprint!("\x1b[{}G", 3 + pos);
+        flush_stderr();
+    };
+
+    loop {
+        match read_key_event() {
+            KeyEvent::Enter => {
+                clear_editor(&buf);
+                flush_stderr();
+                return Some(buf.into_iter().collect());
+            }
+            KeyEvent::CtrlC => {
+                clear_editor(&buf);
+                flush_stderr();
+                show_cursor();
+                exit_with_code(EXIT_SIGINT);
+            }
+            KeyEvent::Backspace => {
+                if pos > 0 {
+                    buf.remove(pos - 1);
+                    pos -= 1;
+                    redraw(&buf, pos);
+                }
+            }
+            KeyEvent::Delete => {
+                if pos < buf.len() {
+                    buf.remove(pos);
+                    redraw(&buf, pos);
+                }
+            }
+            KeyEvent::Left => {
+                if pos > 0 {
+                    pos -= 1;
+                    eprint!("\x1b[1D");
+                    flush_stderr();
+                }
+            }
+            KeyEvent::Right => {
+                if pos < buf.len() {
+                    pos += 1;
+                    eprint!("\x1b[1C");
+                    flush_stderr();
+                }
+            }
+            KeyEvent::Home => {
+                pos = 0;
+                eprint!("\x1b[3G"); // column 3: after "$ "
+                flush_stderr();
+            }
+            KeyEvent::End => {
+                pos = buf.len();
+                eprint!("\x1b[{}G", 3 + pos);
+                flush_stderr();
+            }
+            KeyEvent::Char(c) => {
+                buf.insert(pos, c);
+                pos += 1;
+                redraw(&buf, pos);
+            }
+            KeyEvent::Eof => {
+                clear_editor(&buf);
+                flush_stderr();
+                return None;
+            }
+            KeyEvent::ArrowUp | KeyEvent::Other => {}
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn display_command_single_line_returns_one() {
+        assert_eq!(display_command("echo hi"), 1);
+    }
+
+    #[test]
+    fn display_command_multiline_returns_n_plus_one() {
+        assert_eq!(display_command("echo hi\necho bye"), 3);
+        assert_eq!(display_command("a\nb\nc"), 4);
+    }
+
+    #[test]
+    fn display_explanation_single_line_returns_one() {
+        assert_eq!(display_explanation("pipes stdout to a file"), 1);
+    }
+
+    #[test]
+    fn display_explanation_multiline_returns_line_count() {
+        assert_eq!(display_explanation("line one\nline two\nline three"), 3);
+    }
+
+    #[test]
+    fn style_html_tags_converts_bold() {
+        colored::control::set_override(true);
+        let result = style_html_tags("<b>hello</b>");
+        assert_eq!(result, "\x1b[1mhello\x1b[22m");
+    }
+
+    #[test]
+    fn style_html_tags_converts_italic() {
+        colored::control::set_override(true);
+        let result = style_html_tags("<i>hello</i>");
+        assert_eq!(result, "\x1b[3mhello\x1b[23m");
+    }
+
+    #[test]
+    fn style_html_tags_converts_underline() {
+        colored::control::set_override(true);
+        let result = style_html_tags("<u>hello</u>");
+        assert_eq!(result, "\x1b[4mhello\x1b[24m");
+    }
+
+    #[test]
+    fn style_html_tags_strips_when_no_color() {
+        colored::control::set_override(false);
+        let result = style_html_tags("<b>bold</b> and <i>italic</i>");
+        assert_eq!(result, "bold and italic");
+        colored::control::set_override(true);
+    }
+}
