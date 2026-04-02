@@ -1,4 +1,4 @@
-# `larpshell` - LARP The Terminal
+# `larpshell` - LARP using the terminal
 
 We, yes WE as in all of US, the skids from israel, just love using AI, so much so that we simply must spread the slop everywhere, even into the terminals *insert emdash here* as we lack a working brain to learn all those shell commands 😵‍💫. That's why `larpshell` is here to save the day as it does exactly that!! (and it also works with root access (i think), how wonderful is that!)
 
@@ -48,11 +48,12 @@ Select provider and enter credentials. Config is stored in `~/.config/larpshell/
 
 ## Supported Providers
 
-- **Gemini** - free access to the group (gemini) fleshlight at [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
+- **Gemini [FREE]** - free access to the group (gemini) fleshlight at [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
+- **OpenRouter [FREE]** - access to free models with `openrouter/auto`
 - **Ollama** - local models
 - **OpenAI-Compatible APIs** - chatgpt or compatible APIs (LMStudio, Groq, etc.)
 
-> You can get free OpenAI compatible API access to some models at https://www.askcodi.com/ and https://openrouter.ai/models?q=free
+> You can get free OpenRouter model access at https://openrouter.ai/models?q=free
 
 ## Usage
 
