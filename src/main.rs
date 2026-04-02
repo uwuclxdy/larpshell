@@ -12,6 +12,7 @@ mod providers;
 mod shell_integration;
 mod slash_commands;
 mod uninstall;
+mod update;
 
 use std::io::IsTerminal;
 use tokio_util::sync::CancellationToken;
@@ -276,22 +277,35 @@ async fn inner_main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
+    let update_task = tokio::task::spawn(update::is_update_available());
+
     // handle standalone explain subcommand
     if let Some(cmd_parts) = explain_parts {
-        return handle_explain_subcommand(cmd_parts, provider.as_ref()).await;
+        let result = handle_explain_subcommand(cmd_parts, provider.as_ref()).await;
+        update::print_if_available(update_task).await;
+        return result;
     }
 
     let interactive_mode = cli.command.is_empty();
 
     if interactive_mode {
-        // interactive mode: keep running until ctrl+c at prompt
+        // interactive mode: keep running until exit signal at prompt
         let mut prefill: Option<String> = None;
+        let mut sigint_exit = false;
         loop {
             interactive::reserve_preview_space();
-            let raw_input = if let Some(initial) = prefill.take() {
-                get_user_input_prefilled(&initial)?
+            let raw_input = match if let Some(initial) = prefill.take() {
+                get_user_input_prefilled(&initial)
             } else {
-                get_user_input()?
+                get_user_input()
+            } {
+                Ok(v) => v,
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {
+                    sigint_exit = true;
+                    break;
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
+                Err(e) => return Err(Box::new(e)),
             };
             let user_input = match raw_input {
                 Some(input) => input,
@@ -302,7 +316,7 @@ async fn inner_main() -> Result<(), Box<dyn std::error::Error>> {
                 match slash_commands::parse(&user_input) {
                     slash_commands::SlashCmd::Quit => {
                         show_cursor();
-                        exit_with_code(0);
+                        break;
                     }
                     slash_commands::SlashCmd::Api => match interactive_setup() {
                         Err(e) => print_error(&e.to_string()),
@@ -368,11 +382,18 @@ async fn inner_main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
+        update::print_if_available(update_task).await;
+        if sigint_exit {
+            exit_with_code(EXIT_SIGINT);
+        }
+        return Ok(());
     } else {
         // single-command mode: execute once and exit
         let user_input = cli.command.join(" ");
         process_command(&user_input, provider.as_ref(), &config, CommandMode::Single).await?;
     }
+
+    update::print_if_available(update_task).await;
 
     Ok(())
 }
@@ -429,6 +450,7 @@ async fn process_command(
                 if let Some(saved) = saved_for_ctrlc {
                     common::restore_terminal_echo(saved);
                 }
+                update::print_if_resolved();
                 exit_with_code(EXIT_SIGINT);
             });
 
@@ -473,6 +495,7 @@ async fn process_command(
                 CommandMode::Interactive => break 'outer true,
                 CommandMode::Single => {
                     show_cursor();
+                    update::print_if_resolved();
                     exit_with_code(EXIT_SIGINT);
                 }
             },

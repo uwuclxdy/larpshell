@@ -16,10 +16,7 @@ use rustyline::{
     EventHandler, Helper, KeyCode, KeyEvent, Modifiers, RepeatCount,
 };
 
-use crate::common::{
-    CTP_BLUE, CTP_OVERLAY0, CTP_PRIMARY, EXIT_SIGINT, exit_with_code, get_current_directory,
-    show_cursor,
-};
+use crate::common::{CTP_BLUE, CTP_OVERLAY0, CTP_PRIMARY, get_current_directory, show_cursor};
 use crate::slash_commands;
 
 // Number of preview lines currently drawn below the prompt.
@@ -305,12 +302,12 @@ where
         Err(ReadlineError::Interrupted) => {
             clear_slash_preview();
             show_cursor();
-            exit_with_code(EXIT_SIGINT);
+            Err(io::Error::from(io::ErrorKind::Interrupted))
         }
         Err(ReadlineError::Eof) => {
             clear_slash_preview();
             show_cursor();
-            exit_with_code(0);
+            Err(io::Error::from(io::ErrorKind::UnexpectedEof))
         }
         Err(err) => {
             clear_slash_preview();
