@@ -116,7 +116,11 @@ impl OpenAICompatibleProvider {
     }
 
     fn name(&self) -> String {
-        format!("{} ({})", self.display_name, strip_url_for_display(&self.base_url))
+        format!(
+            "{} ({})",
+            self.display_name,
+            strip_url_for_display(&self.base_url)
+        )
     }
 }
 

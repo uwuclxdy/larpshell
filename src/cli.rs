@@ -4,8 +4,8 @@ use std::env;
 use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::common::{CTP_GREEN, CTP_RED, CTP_YELLOW};
 

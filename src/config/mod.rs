@@ -373,8 +373,8 @@ fn configure_openrouter(
     let base_url = prompt_input_with_default("OpenRouter base URL", url_default)?;
 
     let api_key = {
-        let mut text = Text::new("OpenRouter API key")
-            .with_help_message("Required for OpenRouter requests");
+        let mut text =
+            Text::new("OpenRouter API key").with_help_message("Required for OpenRouter requests");
         if let Some(saved) = existing.and_then(|e| e.api_key.as_deref()) {
             text = text.with_default(saved);
         }
