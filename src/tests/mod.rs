@@ -1,8 +1,12 @@
+use crate::config::{ActiveProvider, Config, ProviderSpecificConfig};
+use crate::error::LarpshellError;
+use crate::providers::create_provider;
 use std::fs;
 use std::io::Write;
 use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use toml::from_str;
 
 mod edit;
 mod explain;
@@ -137,6 +141,79 @@ fn run_with_stdin(
     child
         .wait_with_output()
         .expect("failed to wait for larpshell")
+}
+
+// ── provider config tests ───────────────────────────────────────────────────
+
+#[test]
+fn openrouter_config_parsing_and_resolution_succeeds() {
+    let config_toml = r#"
+provider = "openrouter"
+
+[providers.openrouter]
+base_url = "https://openrouter.ai/api/v1"
+api_key = "test-openrouter-key"
+model = "openrouter/auto"
+"#;
+
+    let config: Config = from_str(config_toml).expect("openrouter TOML should parse");
+    assert_eq!(config.active_provider, ActiveProvider::OpenRouter);
+
+    let provider_config = config
+        .get_provider_config()
+        .expect("openrouter provider config should resolve");
+
+    assert_eq!(provider_config.provider_type, ActiveProvider::OpenRouter);
+    match provider_config.config {
+        ProviderSpecificConfig::OpenRouter { openrouter } => {
+            assert_eq!(openrouter.base_url, "https://openrouter.ai/api/v1");
+            assert_eq!(openrouter.api_key.as_deref(), Some("test-openrouter-key"));
+            assert_eq!(openrouter.model, "openrouter/auto");
+        }
+        other => panic!("expected OpenRouter config, got {other:?}"),
+    }
+}
+
+#[test]
+fn openrouter_missing_provider_config_returns_config_error() {
+    let config_toml = r#"
+provider = "openrouter"
+"#;
+
+    let config: Config = from_str(config_toml).expect("openrouter provider enum should parse");
+    let error = config
+        .get_provider_config()
+        .expect_err("missing openrouter config should return an error");
+
+    match error {
+        LarpshellError::ConfigError(message) => {
+            assert!(message.contains("openrouter"));
+            assert!(message.contains("config not found"));
+        }
+        other => panic!("expected config error, got {other:?}"),
+    }
+}
+
+#[test]
+fn create_provider_with_openrouter_config_reports_openrouter_name() {
+    let config_toml = r#"
+provider = "openrouter"
+
+[providers.openrouter]
+base_url = "https://openrouter.ai/api/v1"
+api_key = "test-openrouter-key"
+model = "openrouter/auto"
+"#;
+
+    let config: Config = from_str(config_toml).expect("openrouter TOML should parse");
+    let provider = create_provider(&config)
+        .expect("openrouter provider should be created when support is implemented");
+
+    assert!(
+        provider.name().contains("OpenRouter"),
+        "expected provider name to identify OpenRouter, got {}",
+        provider.name()
+    );
 }
 
 // ── error formatting tests ──────────────────────────────────────────────────

@@ -5,6 +5,7 @@ use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 
 use crate::common::{CTP_GREEN, CTP_RED, CTP_YELLOW};
 
@@ -131,8 +132,9 @@ pub fn parse_cli_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
 }
 
 static CWD_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
+static CWD_LOCK: Mutex<()> = Mutex::new(());
 
-pub fn execute_shell_command(command: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn execute_shell_command_unlocked(command: &str) -> Result<(), Box<dyn std::error::Error>> {
     let trimmed = command.trim();
 
     if trimmed.is_empty() {
@@ -167,6 +169,11 @@ pub fn execute_shell_command(command: &str) -> Result<(), Box<dyn std::error::Er
     let _ = std::fs::remove_file(&cwd_file);
 
     Ok(())
+}
+
+pub fn execute_shell_command(command: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    execute_shell_command_unlocked(command)
 }
 
 pub fn is_interactive_terminal() -> bool {
@@ -212,14 +219,11 @@ pub fn get_home_dir() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
 
     // `set_current_dir` is process-global, so cwd tests must not run in parallel.
-    static CD_LOCK: Mutex<()> = Mutex::new(());
-
     /// Run a test while preserving the original working directory.
     fn with_saved_cwd(f: impl FnOnce() + std::panic::UnwindSafe) {
-        let _guard = CD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let original = env::current_dir().unwrap();
         let result = std::panic::catch_unwind(f);
         env::set_current_dir(&original).unwrap();
@@ -238,7 +242,7 @@ mod tests {
     fn cd_bare_goes_home() {
         with_saved_cwd(|| {
             let home = env::var("HOME").unwrap();
-            execute_shell_command("cd").unwrap();
+            execute_shell_command_unlocked("cd").unwrap();
             assert_eq!(env::current_dir().unwrap(), PathBuf::from(&home));
         });
     }
@@ -246,7 +250,7 @@ mod tests {
     #[test]
     fn cd_absolute_path() {
         with_saved_cwd(|| {
-            execute_shell_command("cd /tmp").unwrap();
+            execute_shell_command_unlocked("cd /tmp").unwrap();
             assert_eq!(env::current_dir().unwrap(), PathBuf::from("/tmp"));
         });
     }
@@ -255,7 +259,7 @@ mod tests {
     fn cd_tilde_expands_to_home() {
         with_saved_cwd(|| {
             let home = env::var("HOME").unwrap();
-            execute_shell_command("cd ~").unwrap();
+            execute_shell_command_unlocked("cd ~").unwrap();
             assert_eq!(env::current_dir().unwrap(), PathBuf::from(&home));
         });
     }
@@ -267,7 +271,7 @@ mod tests {
             let subdir = PathBuf::from(&home);
             // Ensure $HOME exists, then cd ~ should land there.
             assert!(subdir.is_dir(), "$HOME must exist");
-            execute_shell_command("cd ~").unwrap();
+            execute_shell_command_unlocked("cd ~").unwrap();
             assert_eq!(env::current_dir().unwrap(), subdir);
         });
     }
@@ -277,7 +281,7 @@ mod tests {
         with_saved_cwd(|| {
             let before = env::current_dir().unwrap();
             // sh prints an error to stderr; cwd stays unchanged.
-            execute_shell_command("cd /nonexistent_dir_that_should_not_exist").unwrap();
+            execute_shell_command_unlocked("cd /nonexistent_dir_that_should_not_exist").unwrap();
             assert_eq!(env::current_dir().unwrap(), before);
         });
     }
@@ -286,7 +290,7 @@ mod tests {
     fn compound_cd_changes_cwd() {
         with_saved_cwd(|| {
             // `cd /tmp && echo ok` should run both parts and sync cwd back.
-            execute_shell_command("cd /tmp && echo ok").unwrap();
+            execute_shell_command_unlocked("cd /tmp && echo ok").unwrap();
             assert_eq!(env::current_dir().unwrap(), PathBuf::from("/tmp"));
         });
     }
@@ -296,7 +300,7 @@ mod tests {
         with_saved_cwd(|| {
             let before = env::current_dir().unwrap();
             // cd to nonexistent dir fails, `echo ok` never runs, cwd unchanged.
-            execute_shell_command("cd /nonexistent_dir && echo ok").unwrap();
+            execute_shell_command_unlocked("cd /nonexistent_dir && echo ok").unwrap();
             assert_eq!(env::current_dir().unwrap(), before);
         });
     }

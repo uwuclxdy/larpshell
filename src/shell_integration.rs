@@ -36,7 +36,7 @@ pub fn generate_zsh_autocomplete() -> &'static str {
 _larpshell() {
     local -a commands
     commands=(
-        'api:configure API provider (Gemini, Ollama, LM Studio, OpenAI)'
+        'api:configure API provider (Gemini, Ollama, OpenRouter, LM Studio, OpenAI)'
         'explain:explain a shell command'
         'prompt:view or edit system/explain prompts'
         'uninstall:uninstall larpshell'
@@ -77,7 +77,7 @@ _larpshell"#
 pub fn generate_fish_autocomplete() -> &'static str {
     r#"# larpshell autocomplete
 complete -c larpshell -f
-complete -c larpshell -n "__fish_use_subcommand" -a api -d 'configure API provider (Gemini, Ollama, LM Studio, OpenAI)'
+complete -c larpshell -n "__fish_use_subcommand" -a api -d 'configure API provider (Gemini, Ollama, OpenRouter, LM Studio, OpenAI)'
 complete -c larpshell -n "__fish_use_subcommand" -a explain -d 'explain a shell command'
 complete -c larpshell -n "__fish_use_subcommand" -a prompt -d 'view or edit system/explain prompts'
 complete -c larpshell -n "__fish_use_subcommand" -a uninstall -d 'uninstall larpshell'

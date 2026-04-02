@@ -15,6 +15,7 @@ pub use migration::migrate_from_nlsh_rs;
 pub enum ActiveProvider {
     Gemini,
     Ollama,
+    OpenRouter,
     #[serde(rename = "openai")]
     OpenAI,
 }
@@ -50,6 +51,16 @@ impl Config {
                     })?,
                 },
             }),
+            ActiveProvider::OpenRouter => Ok(ProviderConfig {
+                provider_type: ActiveProvider::OpenRouter,
+                config: ProviderSpecificConfig::OpenRouter {
+                    openrouter: self.providers.openrouter.clone().ok_or_else(|| {
+                        LarpshellError::ConfigError(
+                            "openrouter config not found for active provider".to_string(),
+                        )
+                    })?,
+                },
+            }),
             ActiveProvider::OpenAI => Ok(ProviderConfig {
                 provider_type: ActiveProvider::OpenAI,
                 config: ProviderSpecificConfig::OpenAI {
@@ -71,6 +82,8 @@ pub struct MultiProviderConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ollama: Option<OllamaConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub openrouter: Option<OpenRouterConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub openai: Option<OpenAIConfig>,
 }
 
@@ -87,6 +100,7 @@ pub struct ProviderConfig {
 pub enum ProviderSpecificConfig {
     Gemini { gemini: GeminiConfig },
     Ollama { ollama: OllamaConfig },
+    OpenRouter { openrouter: OpenRouterConfig },
     OpenAI { openai: OpenAIConfig },
 }
 
@@ -95,6 +109,7 @@ impl ProviderSpecificConfig {
         match self {
             ProviderSpecificConfig::Gemini { gemini } => &gemini.model,
             ProviderSpecificConfig::Ollama { ollama } => &ollama.model,
+            ProviderSpecificConfig::OpenRouter { openrouter } => &openrouter.model,
             ProviderSpecificConfig::OpenAI { openai } => &openai.model,
         }
     }
@@ -109,6 +124,14 @@ pub struct GeminiConfig {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct OllamaConfig {
     pub base_url: String,
+    pub model: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct OpenRouterConfig {
+    pub base_url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
     pub model: String,
 }
 
@@ -190,6 +213,7 @@ pub fn interactive_setup() -> Result<(), Box<dyn std::error::Error>> {
     const PROVIDER_OPTIONS: &[(&str, ActiveProvider)] = &[
         ("Gemini API", ActiveProvider::Gemini),
         ("Ollama", ActiveProvider::Ollama),
+        ("OpenRouter", ActiveProvider::OpenRouter),
         ("OpenAI Compatible", ActiveProvider::OpenAI),
     ];
 
@@ -215,6 +239,7 @@ pub fn interactive_setup() -> Result<(), Box<dyn std::error::Error>> {
     let has_saved_creds = match selected_variant {
         ActiveProvider::Gemini => multi_providers.gemini.is_some(),
         ActiveProvider::Ollama => multi_providers.ollama.is_some(),
+        ActiveProvider::OpenRouter => multi_providers.openrouter.is_some(),
         ActiveProvider::OpenAI => multi_providers.openai.is_some(),
     };
 
@@ -234,6 +259,9 @@ pub fn interactive_setup() -> Result<(), Box<dyn std::error::Error>> {
         let new_config = match selected_variant {
             ActiveProvider::Gemini => configure_gemini(multi_providers.gemini.as_ref())?,
             ActiveProvider::Ollama => configure_ollama(multi_providers.ollama.as_ref())?,
+            ActiveProvider::OpenRouter => {
+                configure_openrouter(multi_providers.openrouter.as_ref())?
+            }
             ActiveProvider::OpenAI => configure_openai(multi_providers.openai.as_ref())?,
         };
 
@@ -243,6 +271,9 @@ pub fn interactive_setup() -> Result<(), Box<dyn std::error::Error>> {
             }
             ProviderSpecificConfig::Ollama { ollama } => {
                 multi_providers.ollama = Some(ollama.clone());
+            }
+            ProviderSpecificConfig::OpenRouter { openrouter } => {
+                multi_providers.openrouter = Some(openrouter.clone());
             }
             ProviderSpecificConfig::OpenAI { openai } => {
                 multi_providers.openai = Some(openai.clone());
@@ -279,6 +310,10 @@ fn display_config_summary(
         ProviderSpecificConfig::Ollama { ollama } => {
             eprintln!("Model: {}", ollama.model);
             eprintln!("Base URL: {}", ollama.base_url);
+        }
+        ProviderSpecificConfig::OpenRouter { openrouter } => {
+            eprintln!("Model: {}", openrouter.model);
+            eprintln!("Base URL: {}", openrouter.base_url);
         }
         ProviderSpecificConfig::OpenAI { openai } => {
             eprintln!("Model: {}", openai.model);
@@ -325,6 +360,40 @@ fn configure_ollama(
         provider_type: ActiveProvider::Ollama,
         config: ProviderSpecificConfig::Ollama {
             ollama: OllamaConfig { base_url, model },
+        },
+    })
+}
+
+fn configure_openrouter(
+    existing: Option<&OpenRouterConfig>,
+) -> Result<ProviderConfig, Box<dyn std::error::Error>> {
+    let url_default = existing
+        .map(|e| e.base_url.as_str())
+        .unwrap_or("https://openrouter.ai/api/v1");
+    let base_url = prompt_input_with_default("OpenRouter base URL", url_default)?;
+
+    let api_key = {
+        let mut text = Text::new("OpenRouter API key")
+            .with_help_message("Required for OpenRouter requests");
+        if let Some(saved) = existing.and_then(|e| e.api_key.as_deref()) {
+            text = text.with_default(saved);
+        }
+        text.prompt_skippable()?
+    };
+
+    let model_default = existing
+        .map(|e| e.model.as_str())
+        .unwrap_or("openrouter/auto");
+    let model = prompt_input_with_default("Model name", model_default)?;
+
+    Ok(ProviderConfig {
+        provider_type: ActiveProvider::OpenRouter,
+        config: ProviderSpecificConfig::OpenRouter {
+            openrouter: OpenRouterConfig {
+                base_url,
+                api_key,
+                model,
+            },
         },
     })
 }
