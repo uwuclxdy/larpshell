@@ -1,6 +1,6 @@
 # `larpshell` - LARP using the terminal
 
-We, yes WE as in all of US, the skids from israel, just love using AI, so much so that we simply must spread the slop everywhere, even into the terminals *insert emdash here* as we lack a working brain to learn all those shell commands 😵‍💫. That's why `larpshell` is here to save the day as it does exactly that!! (and it also works with root access (i think), how wonderful is that!)
+We, yes WE as in all of US, the skids of israel, just love using AI, so much so that we simply must spread the slop everywhere, even into the terminals *insert emdash here* as we lack a working brain to learn all those shell commands 😵‍💫. That's why `larpshell` is here to save the day as it does exactly that!! (and it also works with root access (i think), how wonderful is that!)
 
 <details>
 <summary><strong>Description for normies</strong></summary>
