@@ -13,6 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
     permissions:
       contents: write
 
@@ -34,8 +35,13 @@ jobs:
               exit 1
             fi
           fi
+          VER="${TAG#v}"
+          if [[ ! "$VER" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Version '${VER}' is not valid semver"
+            exit 1
+          fi
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "version=${VER}" >> "$GITHUB_OUTPUT"
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -63,103 +69,110 @@ jobs:
           generate_release_notes: true
           fail_on_unmatched_files: true
 
-  # ── Job 2: update AUR release package ────────────────────────────────────
-  aur-release:
+  # ── Job 2: update AUR packages ────────────────────────────────────────────
+  aur-publish:
     name: Publish to AUR
     needs: build-and-release
     runs-on: ubuntu-latest
+    container: archlinux:base-devel
 
     permissions:
       contents: write
 
     steps:
+      - name: Install dependencies
+        run: pacman -Syu --noconfirm git openssh pacman-contrib
+
       - name: Checkout
         uses: actions/checkout@v6
         with:
           ref: mommy
           token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Generate Checksums
-        id: checksum
-        run: |
-          VER="${{ needs.build-and-release.outputs.version }}"
-          BIN_URL="https://github.com/uwuclxdy/larpshell/releases/download/v${VER}/larpshell"
-          LIC_URL="https://raw.githubusercontent.com/uwuclxdy/larpshell/v${VER}/LICENSE"
-          BIN_SHA=$(curl -fsSL "$BIN_URL" | sha256sum | awk '{print $1}')
-          LIC_SHA=$(curl -fsSL "$LIC_URL" | sha256sum | awk '{print $1}')
-          echo "bin_sha256=${BIN_SHA}" >> "$GITHUB_OUTPUT"
-          echo "lic_sha256=${LIC_SHA}" >> "$GITHUB_OUTPUT"
-
-      - name: Update PKGBUILD with new version and checksums
-        run: |
-          VER="${{ needs.build-and-release.outputs.version }}"
-          BIN_SHA="${{ steps.checksum.outputs.bin_sha256 }}"
-          LIC_SHA="${{ steps.checksum.outputs.lic_sha256 }}"
-          PKGBUILD="aur/larpshell/PKGBUILD"
-
-          sed -i "s/^pkgver=.*/pkgver=${VER}/" "$PKGBUILD"
-          sed -i "s/^pkgrel=.*/pkgrel=1/"      "$PKGBUILD"
-          sed -i "s/^sha256sums=.*/sha256sums=('${BIN_SHA}' '${LIC_SHA}')/" "$PKGBUILD"
-
-          echo "Updated PKGBUILD:"
-          grep -E '^(pkgver|pkgrel|sha256sums)=' "$PKGBUILD"
-
-      - name: Generate .SRCINFO
-        run: |
-          VER="${{ needs.build-and-release.outputs.version }}"
-          BIN_SHA="${{ steps.checksum.outputs.bin_sha256 }}"
-          LIC_SHA="${{ steps.checksum.outputs.lic_sha256 }}"
-          T=$(printf '\t')
-          {
-            echo "pkgbase = larpshell"
-            echo "${T}pkgdesc = Convert natural language to shell commands using an LLM"
-            echo "${T}pkgver = ${VER}"
-            echo "${T}pkgrel = 1"
-            echo "${T}url = https://github.com/uwuclxdy/larpshell"
-            echo "${T}arch = x86_64"
-            echo "${T}license = MIT"
-            echo "${T}depends = gcc-libs"
-            echo "${T}depends = glibc"
-            echo "${T}source = larpshell-${VER}::https://github.com/uwuclxdy/larpshell/releases/download/v${VER}/larpshell"
-            echo "${T}source = LICENSE-${VER}::https://raw.githubusercontent.com/uwuclxdy/larpshell/v${VER}/LICENSE"
-            echo "${T}sha256sums = ${BIN_SHA}"
-            echo "${T}sha256sums = ${LIC_SHA}"
-            echo ""
-            echo "pkgname = larpshell"
-          } > aur/larpshell/.SRCINFO
+          fetch-depth: 0
 
       - name: Setup AUR SSH
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.AUR_SSH_PRIVATE_KEY }}" > ~/.ssh/aur
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/aur
           chmod 600 ~/.ssh/aur
           ssh-keyscan -t rsa,ecdsa,ed25519 aur.archlinux.org >> ~/.ssh/known_hosts 2>/dev/null
-          cat >> ~/.ssh/config <<EOF
-          Host aur.archlinux.org
-            IdentityFile ~/.ssh/aur
-            User aur
-          EOF
+          printf '%s\n' \
+            "Host aur.archlinux.org" \
+            "  IdentityFile ~/.ssh/aur" \
+            "  User aur" > ~/.ssh/config
+          chmod 600 ~/.ssh/config
 
-      - name: Publish to AUR
+      - name: Setup non-root user
         run: |
-          VER="${{ needs.build-and-release.outputs.version }}"
+          useradd -m builder
+          echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+          chown -R builder:builder .
+
+      - name: Update larpshell PKGBUILD
+        env:
+          VER: ${{ needs.build-and-release.outputs.version }}
+        run: |
+          cd aur/larpshell
+          sed -i "s/^pkgver=.*/pkgver=${VER}/" PKGBUILD
+          sed -i "s/^pkgrel=.*/pkgrel=1/" PKGBUILD
+          chown builder:builder PKGBUILD
+          su builder -c "updpkgsums"
+          su builder -c "makepkg --printsrcinfo > .SRCINFO"
+          echo "=== Updated PKGBUILD ==="
+          grep -E '^(pkgver|pkgrel|sha256sums)=' PKGBUILD
+
+      - name: Update larpshell-git .SRCINFO
+        run: |
+          cd aur/larpshell-git
+          chown builder:builder PKGBUILD
+          su builder -c "makepkg --printsrcinfo > .SRCINFO"
+
+      - name: Publish larpshell to AUR
+        env:
+          AUR_USERNAME: ${{ secrets.AUR_USERNAME }}
+          AUR_EMAIL: ${{ secrets.AUR_EMAIL }}
+          VER: ${{ needs.build-and-release.outputs.version }}
+        run: |
           git clone --depth 1 ssh://aur@aur.archlinux.org/larpshell.git /tmp/aur-larpshell
           cp aur/larpshell/PKGBUILD /tmp/aur-larpshell/PKGBUILD
           cp aur/larpshell/.SRCINFO /tmp/aur-larpshell/.SRCINFO
           cd /tmp/aur-larpshell
-          git config user.name "${{ secrets.AUR_USERNAME }}"
-          git config user.email "${{ secrets.AUR_EMAIL }}"
+          git config user.name "$AUR_USERNAME"
+          git config user.email "$AUR_EMAIL"
           git add PKGBUILD .SRCINFO
           git diff --cached --quiet && echo "No changes to push" || {
             git commit -m "upgpkg: larpshell ${VER}"
             git push origin master
           }
 
-      - name: Commit updated PKGBUILD and .SRCINFO
+      - name: Publish larpshell-git to AUR
+        env:
+          AUR_USERNAME: ${{ secrets.AUR_USERNAME }}
+          AUR_EMAIL: ${{ secrets.AUR_EMAIL }}
         run: |
+          git clone --depth 1 ssh://aur@aur.archlinux.org/larpshell-git.git /tmp/aur-larpshell-git
+          cp aur/larpshell-git/PKGBUILD /tmp/aur-larpshell-git/PKGBUILD
+          cp aur/larpshell-git/.SRCINFO /tmp/aur-larpshell-git/.SRCINFO
+          cd /tmp/aur-larpshell-git
+          git config user.name "$AUR_USERNAME"
+          git config user.email "$AUR_EMAIL"
+          git add PKGBUILD .SRCINFO
+          git diff --cached --quiet && echo "No changes to push" || {
+            git commit -m "update: larpshell-git PKGBUILD"
+            git push origin master
+          }
+
+      - name: Commit updated AUR files to repo
+        env:
+          VER: ${{ needs.build-and-release.outputs.version }}
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add aur/larpshell/PKGBUILD aur/larpshell/.SRCINFO
-          git diff --cached --quiet && echo "No changes to commit" || \
-            git commit -m "chore(aur): update larpshell to ${{ needs.build-and-release.outputs.version }}"
-          git push origin mommy
+          git add aur/larpshell/PKGBUILD aur/larpshell/.SRCINFO aur/larpshell-git/.SRCINFO
+          git diff --cached --quiet && echo "No changes to commit" || {
+            git commit -m "chore(aur): update packages for ${VER}"
+            git push origin mommy
+          }
