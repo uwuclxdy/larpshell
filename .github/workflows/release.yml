@@ -128,17 +128,32 @@ jobs:
             echo "pkgname = larpshell"
           } > aur/larpshell/.SRCINFO
 
+      - name: Setup AUR SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.AUR_SSH_PRIVATE_KEY }}" > ~/.ssh/aur
+          chmod 600 ~/.ssh/aur
+          ssh-keyscan -t rsa,ecdsa,ed25519 aur.archlinux.org >> ~/.ssh/known_hosts 2>/dev/null
+          cat >> ~/.ssh/config <<EOF
+          Host aur.archlinux.org
+            IdentityFile ~/.ssh/aur
+            User aur
+          EOF
+
       - name: Publish to AUR
-        uses: KSXGitHub/github-actions-deploy-aur@v4.1.1
-        with:
-          pkgname: larpshell
-          pkgbuild: aur/larpshell/PKGBUILD
-          assets: aur/larpshell/.SRCINFO
-          commit_username: ${{ secrets.AUR_USERNAME }}
-          commit_email: ${{ secrets.AUR_EMAIL }}
-          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
-          commit_message: "upgpkg: larpshell ${{ needs.build-and-release.outputs.version }}"
-          ssh_keyscan_types: rsa,ecdsa,ed25519
+        run: |
+          VER="${{ needs.build-and-release.outputs.version }}"
+          git clone --depth 1 ssh://aur@aur.archlinux.org/larpshell.git /tmp/aur-larpshell
+          cp aur/larpshell/PKGBUILD /tmp/aur-larpshell/PKGBUILD
+          cp aur/larpshell/.SRCINFO /tmp/aur-larpshell/.SRCINFO
+          cd /tmp/aur-larpshell
+          git config user.name "${{ secrets.AUR_USERNAME }}"
+          git config user.email "${{ secrets.AUR_EMAIL }}"
+          git add PKGBUILD .SRCINFO
+          git diff --cached --quiet && echo "No changes to push" || {
+            git commit -m "upgpkg: larpshell ${VER}"
+            git push origin master
+          }
 
       - name: Commit updated PKGBUILD and .SRCINFO
         run: |
