@@ -1,0 +1,97 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  # ── Job 1: compile binary, create GitHub release ─────────────────────────
+  build-and-release:
+    name: Build and Release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Extract version (strip leading v)
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Build release binary
+        run: cargo build --release --locked
+        env:
+          CARGO_TARGET_DIR: target
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: target/release/larpshell
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+
+  # ── Job 2: update AUR release package ────────────────────────────────────
+  aur-release:
+    name: Publish to AUR
+    needs: build-and-release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Compute SHA256 checksums
+        id: checksum
+        run: |
+          VER="${{ needs.build-and-release.outputs.version }}"
+          BIN_URL="https://github.com/uwuclxdy/larpshell/releases/download/v${VER}/larpshell"
+          LIC_URL="https://raw.githubusercontent.com/uwuclxdy/larpshell/v${VER}/LICENSE"
+          BIN_SHA=$(curl -fsSL "$BIN_URL" | sha256sum | awk '{print $1}')
+          LIC_SHA=$(curl -fsSL "$LIC_URL" | sha256sum | awk '{print $1}')
+          echo "bin_sha256=${BIN_SHA}" >> "$GITHUB_OUTPUT"
+          echo "lic_sha256=${LIC_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Update PKGBUILD with new version and checksums
+        run: |
+          VER="${{ needs.build-and-release.outputs.version }}"
+          BIN_SHA="${{ steps.checksum.outputs.bin_sha256 }}"
+          LIC_SHA="${{ steps.checksum.outputs.lic_sha256 }}"
+          PKGBUILD="aur/larpshell/PKGBUILD"
+
+          sed -i "s/^pkgver=.*/pkgver=${VER}/" "$PKGBUILD"
+          sed -i "s/^pkgrel=.*/pkgrel=1/"      "$PKGBUILD"
+          sed -i "s/^sha256sums=.*/sha256sums=('${BIN_SHA}' '${LIC_SHA}')/" "$PKGBUILD"
+
+          echo "Updated PKGBUILD:"
+          grep -E '^(pkgver|pkgrel|sha256sums)=' "$PKGBUILD"
+
+      - name: Publish to AUR
+        uses: KSXGitHub/github-actions-deploy-aur@v4.1.1
+        with:
+          pkgname: larpshell
+          pkgbuild: aur/larpshell/PKGBUILD
+          commit_username: ${{ secrets.AUR_USERNAME }}
+          commit_email: ${{ secrets.AUR_EMAIL }}
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: "upgpkg: larpshell ${{ needs.build-and-release.outputs.version }}"
+          ssh_keyscan_types: rsa,ecdsa,ed25519
+          post_process: makepkg --printsrcinfo > .SRCINFO
