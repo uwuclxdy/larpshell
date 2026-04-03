@@ -104,22 +104,41 @@ jobs:
           echo "Updated PKGBUILD:"
           grep -E '^(pkgver|pkgrel|sha256sums)=' "$PKGBUILD"
 
+      - name: Generate .SRCINFO
+        run: |
+          VER="${{ needs.build-and-release.outputs.version }}"
+          BIN_SHA="${{ steps.checksum.outputs.bin_sha256 }}"
+          LIC_SHA="${{ steps.checksum.outputs.lic_sha256 }}"
+          T=$(printf '\t')
+          {
+            echo "pkgbase = larpshell"
+            echo "${T}pkgdesc = Convert natural language to shell commands using an LLM"
+            echo "${T}pkgver = ${VER}"
+            echo "${T}pkgrel = 1"
+            echo "${T}url = https://github.com/uwuclxdy/larpshell"
+            echo "${T}arch = x86_64"
+            echo "${T}license = MIT"
+            echo "${T}depends = gcc-libs"
+            echo "${T}depends = glibc"
+            echo "${T}source = larpshell-${VER}::https://github.com/uwuclxdy/larpshell/releases/download/v${VER}/larpshell"
+            echo "${T}source = LICENSE-${VER}::https://raw.githubusercontent.com/uwuclxdy/larpshell/v${VER}/LICENSE"
+            echo "${T}sha256sums = ${BIN_SHA}"
+            echo "${T}sha256sums = ${LIC_SHA}"
+            echo ""
+            echo "pkgname = larpshell"
+          } > aur/larpshell/.SRCINFO
+
       - name: Publish to AUR
         uses: KSXGitHub/github-actions-deploy-aur@v4.1.1
         with:
           pkgname: larpshell
           pkgbuild: aur/larpshell/PKGBUILD
+          assets: aur/larpshell/.SRCINFO
           commit_username: ${{ secrets.AUR_USERNAME }}
           commit_email: ${{ secrets.AUR_EMAIL }}
           ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
           commit_message: "upgpkg: larpshell ${{ needs.build-and-release.outputs.version }}"
           ssh_keyscan_types: rsa,ecdsa,ed25519
-          post_process: makepkg --printsrcinfo > .SRCINFO
-
-      - name: Sync .SRCINFO from AUR
-        run: |
-          git clone --depth 1 https://aur.archlinux.org/larpshell.git /tmp/aur-larpshell
-          cp /tmp/aur-larpshell/.SRCINFO aur/larpshell/.SRCINFO
 
       - name: Commit updated PKGBUILD and .SRCINFO
         run: |
