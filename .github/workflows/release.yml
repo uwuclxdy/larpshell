@@ -94,15 +94,18 @@ jobs:
         env:
           AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
         run: |
-          mkdir -p ~/.ssh
-          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/aur
-          chmod 600 ~/.ssh/aur
-          ssh-keyscan -t rsa,ecdsa,ed25519 aur.archlinux.org >> ~/.ssh/known_hosts 2>/dev/null
+          SSH_DIR="${HOME}/.ssh"
+          mkdir -p "$SSH_DIR"
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > "$SSH_DIR/aur"
+          chmod 600 "$SSH_DIR/aur"
+          ssh-keyscan -t rsa,ecdsa,ed25519 aur.archlinux.org >> "$SSH_DIR/known_hosts"
           printf '%s\n' \
             "Host aur.archlinux.org" \
-            "  IdentityFile ~/.ssh/aur" \
-            "  User aur" > ~/.ssh/config
-          chmod 600 ~/.ssh/config
+            "  IdentityFile ${SSH_DIR}/aur" \
+            "  User aur" \
+            "  StrictHostKeyChecking accept-new" > "$SSH_DIR/config"
+          chmod 600 "$SSH_DIR/config" "$SSH_DIR/known_hosts"
+          ssh -T aur@aur.archlinux.org 2>&1 || true
 
       - name: Setup non-root user
         run: |
