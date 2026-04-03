@@ -1,6 +1,6 @@
 [package]
 name = "larpshell"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 license = "MIT"
 description = "Ctrl+C then Ctrl+V is simply too much work. Just let the LLMs rule your terminal directly!!"
@@ -12,7 +12,7 @@ categories = ["command-line-utilities"]
 
 [dependencies]
 clap = { version = "4.6.0", features = ["derive"] }
-tokio = { version = "1.50.0", features = ["rt-multi-thread", "macros", "signal", "sync"] }
+tokio = { version = "1.51.0", features = ["rt-multi-thread", "macros", "signal", "sync"] }
 tokio-util = "0.7.18"
 reqwest = { version = "0.13.2", features = ["json", "rustls"] }
 serde = { version = "1.0.228", features = ["derive"] }
