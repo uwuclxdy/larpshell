@@ -121,6 +121,7 @@ jobs:
 
       - name: Update larpshell-git PKGBUILD and .SRCINFO
         run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           GITVER="r$(git rev-list --count HEAD).$(git rev-parse --short HEAD)"
           cd aur/larpshell-git
           sed -i "s/^pkgver=.*/pkgver=${GITVER}/" PKGBUILD
