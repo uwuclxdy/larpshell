@@ -1,106 +1,129 @@
-# `larpshell` - LARP using the terminal
+# larpshell
 
-We, yes WE as in all of US, the skids of israel, just love using AI, so much so that we simply must spread the slop everywhere, even into the terminals *insert emdash here* as we lack a working brain to learn all those shell commands 😵‍💫. That's why `larpshell` is here to save the day as it does exactly that!! (and it also works with root access (i think), how wonderful is that!)
+Use shell with natural language.
 
-<details>
-<summary><strong>Description for normies</strong></summary>
+[![Crates.io](https://img.shields.io/crates/v/larpshell)](https://crates.io/crates/larpshell)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-With `larpshell`, you can type what you want to do in your natural language (if you dont remember the command or too lazy to google), and let an LLM translate that into a shell command, then **run it without the hastle of ctrl+c and ctrl+v** :D. For example, you can say "show me the disk usage" and `larpshell` will show you `df -h`). Don't worry, it will ask for your confirmation before executing the command.
+---
 
-</details>
-
->[!IMPORTANT]
-> Regardless if you're the biggest skiddie ever, random larper or just a lazy bum; **ALWAYS review the generated commands before running them**. larpshell tries to make this as easy as possible with an option to manually edit commands before execution.
-
-Oh yea, one more thing, this was entirely Claude's work, I didn't write a single line of code, don't you even worry 😂✌️
+`larpshell` translates natural language into shell commands using AI, then executes them in your terminal (not without asking for confirmation of course). You can also edit the commands before running, or ask for an explanation of what they do. Both prompt templates for command generation and explanation are customizable.
 
 ### Preview
 
 [![asciicast](https://asciinema.org/a/z2Q3GNeVJubnNx0M.svg)](https://asciinema.org/a/z2Q3GNeVJubnNx0M)
 
+>[!IMPORTANT]
+> ALWAYS review the generated commands and know what they do before running them!
+
+## Requirements
+
+[Rust Language](https://www.rust-lang.org/tools/install)
+
 ## Installation
 
-### Requirements
-
-1. [Rust](https://www.rust-lang.org/tools/install)
-
----
-
-from crates.io **(recommended)**:
+From crates.io:
 ```bash
 cargo install larpshell
 ```
 
-from source, latest commit:
+From source:
 ```bash
 curl -sSL https://raw.githubusercontent.com/uwuclxdy/larpshell/main/install.sh | sh
 ```
 
+### Packaged
+
+From [AUR](https://aur.archlinux.org/packages/larpshell) (bin, latest release):
+```
+yay -S larpshell
+```
+
+From [AUR](https://aur.archlinux.org/packages/larpshell-git) (git, latest commit):
+```
+yay -S larpshell-git
+```
+
 ## Setup
 
-### Configure AI provider
+Configure your AI provider:
 
 ```bash
 larpshell api
 ```
 
-Select provider and enter credentials. Config is stored in `~/.config/larpshell/config.toml`.
+Pick a provider and enter credentials. Config is saved in `~/.config/larpshell/config.toml`.
 
-## Supported Providers
+### Supported providers
 
-- **Gemini [FREE]** - free access to the group (gemini) fleshlight at [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
-- **OpenRouter [FREE]** - access to free models with `openrouter/auto`
-- **Ollama** - local models
-- **OpenAI-Compatible APIs** - chatgpt or compatible APIs (LMStudio, Groq, etc.)
-
-> You can get free OpenRouter model access at https://openrouter.ai/models?q=free
+| *Provider* | *About* |
+|----------|-------|
+| **Gemini** | Free API key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
+| **OpenRouter** | Free models available with `openrouter/auto` (default, [free models list](https://openrouter.ai/models?q=free)) |
+| **Ollama** | API key optional |
+| **OpenAI-compatible** | any compatible API (custom base URL support) |
 
 ## Usage
 
+### Single command
+
 ```
-larpshell show disk usage
-$ df -h
+$ larpshell show disk usage
+> df -h
 Run this?
 [Y/Enter] to execute, [E] to explain, [Arrow Up] to edit, [N] to cancel
 ```
 
-Interactive mode:
+### Interactive mode
+
 ```
-larpshell
+$ larpshell
 larpshell> show disk usage
-$ df -h
+> df -h
 Run this?
 [Y/Enter] to execute, [E] to explain, [Arrow Up] to edit, [N] to cancel
 ```
 
-Explain command:
+### Explain a command
+
 ```
-larpshell explain df -h
-$ df -h
+$ larpshell explain df -h
+> df -h
 ✅ Displays free disk space of mounted filesystems in a human readable format.
 Run this?
 [Y/Enter] to execute, [Arrow Up] to edit, [N] to cancel
 ```
 
-Edit generated commands before running:
+### Edit before running
+
+Press Arrow Up at the confirmation prompt. Full cursor control with left/right, home/end, backspace/delete.
+
 ```
-$ df -h --total▉
+> df -h --total▉
 [Enter] to confirm, [Ctrl+C] to quit
 ```
 
-**subcommands:**
-- `--help` - show help
-- `api` - configure API provider
-- `uninstall` - remove larpshell
-- `prompt` - show/edit the prompt templates
-- `explain` - explain a command
+### Subcommands
+
+| Command | Description |
+|---------|-------------|
+| `larpshell api` | Configure AI provider |
+| `larpshell explain <cmd>` | Explain a command with safety rating |
+| `larpshell prompt [system\|explain] [show\|edit]` | View or edit prompt templates |
+| `larpshell uninstall` | Remove larpshell |
+| `larpshell --help` | Show help |
 
 ## How it works
 
-1. translates natural language to shell commands using AI
-2. asks for confirmation
-3. command runs in parent shell and appears in history
+1. You describe what you want in plain language
+2. An AI provider translates your request into a shell command
+3. You review the command, edit it if needed, or ask for an explanation
+4. Press Enter to run it in your shell
 
-## Credits
+Commands run via `sh -c` and preserve your working directory between invocations.
 
-my favoritest company of them all: Anthropic!! thank you for the love of my life ⸺ Claude ❤️❤️❤️❤️❤️❤️mmmmmwagh<3
+> **Review generated commands before running them.** larpshell makes this easy with editing and explanation features, but you own what executes on your machine.
+
+## License
+
+[MIT](LICENSE)
