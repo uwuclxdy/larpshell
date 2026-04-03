@@ -1,6 +1,6 @@
 # larpshell
 
-Use shell with natural language.
+Use terminal with natural language.
 
 [![Crates.io](https://img.shields.io/crates/v/larpshell)](https://crates.io/crates/larpshell)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -9,7 +9,7 @@ Use shell with natural language.
 
 `larpshell` translates natural language into shell commands using AI, then executes them in your terminal (not without asking for confirmation of course). You can also edit the commands before running, or ask for an explanation of what they do. Both prompt templates for command generation and explanation are customizable.
 
-### Preview
+## Usage Demo
 
 [![asciicast](https://asciinema.org/a/z2Q3GNeVJubnNx0M.svg)](https://asciinema.org/a/z2Q3GNeVJubnNx0M)
 
@@ -29,12 +29,12 @@ cargo install larpshell
 
 From source:
 ```bash
-curl -sSL https://raw.githubusercontent.com/uwuclxdy/larpshell/main/install.sh | sh
+curl -sSL https://raw.githubusercontent.com/uwuclxdy/larpshell/mommy/install.sh | sh
 ```
 
 ### Packaged
 
-From [AUR](https://aur.archlinux.org/packages/larpshell) (bin, latest release):
+From [AUR](https://aur.archlinux.org/packages/larpshell) (bin, latest release, no Rust needed):
 ```
 yay -S larpshell
 ```
