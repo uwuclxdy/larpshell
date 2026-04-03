@@ -21,7 +21,7 @@ struct CrateData {
 
 enum InstallMethod {
     Cargo,
-    AUR,
+    Aur,
     Unknown,
 }
 
@@ -32,7 +32,7 @@ fn detect_install_method() -> InstallMethod {
     let path = exe.to_string_lossy();
 
     if path.starts_with("/usr") {
-        InstallMethod::AUR
+        InstallMethod::Aur
     } else if path.contains(".cargo/bin") {
         InstallMethod::Cargo
     } else {
@@ -43,7 +43,7 @@ fn detect_install_method() -> InstallMethod {
 fn update_instruction() -> &'static str {
     match detect_install_method() {
         InstallMethod::Cargo => ", run `cargo install larpshell`",
-        InstallMethod::AUR => ", run `yay -S larpshell` or `yay -S larpshell-git`",
+        InstallMethod::Aur => ", run `yay -S larpshell` or `yay -S larpshell-git`",
         InstallMethod::Unknown => "",
     }
 }
