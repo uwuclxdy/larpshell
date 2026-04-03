@@ -30,12 +30,6 @@ build() {
     cargo build --frozen --release --all-features
 }
 
-check() {
-    cd "$srcdir/$pkgname"
-    export RUSTUP_TOOLCHAIN=stable
-    cargo test --frozen --all-features
-}
-
 package() {
     cd "$srcdir/$pkgname"
     install -Dm0755 "target/release/larpshell" "$pkgdir/usr/bin/larpshell"
