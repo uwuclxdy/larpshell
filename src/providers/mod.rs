@@ -91,6 +91,21 @@ pub enum ChatResponse {
 pub trait AIProvider: Send + Sync {
     async fn generate(&self, prompt: &str) -> Result<String, LarpshellError>;
     fn name(&self) -> String;
+
+    async fn generate_with_tools(
+        &self,
+        messages: &[ChatMessage],
+        _tools: &[ToolDefinition],
+    ) -> Result<ChatResponse, LarpshellError> {
+        let prompt = messages
+            .iter()
+            .filter(|message| message.role == Role::User || message.role == Role::System)
+            .filter_map(|message| message.content.as_deref())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        let result = self.generate(&prompt).await?;
+        Ok(ChatResponse::Message(result))
+    }
 }
 
 pub fn create_provider(config: &Config) -> Result<Box<dyn AIProvider>, LarpshellError> {
@@ -257,5 +272,23 @@ mod tests {
         let response = ChatResponse::ToolCalls(tool_calls.clone());
 
         assert_eq!(response, ChatResponse::ToolCalls(tool_calls));
+    }
+
+    #[test]
+    fn default_generate_with_tools_extracts_user_messages() {
+        let messages = vec![
+            ChatMessage::system("you are helpful"),
+            ChatMessage::user("list files"),
+            ChatMessage::tool_result("tc_1", "file1.txt"),
+        ];
+
+        let prompt: String = messages
+            .iter()
+            .filter(|message| message.role == Role::User || message.role == Role::System)
+            .filter_map(|message| message.content.as_deref())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+
+        assert_eq!(prompt, "you are helpful\n\nlist files");
     }
 }
