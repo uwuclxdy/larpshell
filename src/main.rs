@@ -86,7 +86,7 @@ async fn generate_with_cancellation(
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 
-fn execute_or_print(command: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn execute_or_print(command: &str) -> Result<(), LarpshellError> {
     if std::io::stdout().is_terminal() || std::env::var("LARPSHELL_FORCE_INTERACTIVE").is_ok() {
         execute_shell_command(command)?;
     } else {
@@ -97,7 +97,7 @@ fn execute_or_print(command: &str) -> Result<(), Box<dyn std::error::Error>> {
 
 // ── subcommand handlers ─────────────────────────────────────────────────────
 
-fn handle_history_subcommand(enable: bool) -> Result<(), Box<dyn std::error::Error>> {
+fn handle_history_subcommand(enable: bool) -> Result<(), LarpshellError> {
     config::set_history_enabled(enable)?;
     if enable {
         cli::print_ok("history enabled — prompts will be saved across sessions.");
@@ -107,7 +107,7 @@ fn handle_history_subcommand(enable: bool) -> Result<(), Box<dyn std::error::Err
     Ok(())
 }
 
-fn handle_agent_subcommand(enable: bool) -> Result<(), Box<dyn std::error::Error>> {
+fn handle_agent_subcommand(enable: bool) -> Result<(), LarpshellError> {
     config::set_agent_enabled(enable)?;
     if enable {
         cli::print_ok("agent mode enabled — tools will be available for context gathering.");
@@ -120,7 +120,7 @@ fn handle_agent_subcommand(enable: bool) -> Result<(), Box<dyn std::error::Error
 fn handle_prompt_subcommand(
     kind: &PromptKind,
     action: &PromptAction,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), LarpshellError> {
     match (kind, action) {
         (PromptKind::System, PromptAction::Show) => {
             let content =
@@ -165,7 +165,7 @@ fn handle_prompt_subcommand(
 async fn handle_explain_subcommand(
     cmd_parts: Vec<String>,
     provider: &dyn providers::AIProvider,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), LarpshellError> {
     if cmd_parts.is_empty() {
         print_error("no command provided.");
         exit_with_code(1);
@@ -204,7 +204,7 @@ fn do_nlsh_rs_migration() {
 /// low‑level implementation of `main` which returns a `Result`.  the
 /// top‑level `main` wrapper will call this and take care of printing a
 /// nicely styled error message when it fails.
-async fn inner_main() -> Result<(), Box<dyn std::error::Error>> {
+async fn inner_main() -> Result<(), LarpshellError> {
     #[cfg(unix)]
     setup_terminal();
 
@@ -283,8 +283,7 @@ async fn inner_main() -> Result<(), Box<dyn std::error::Error>> {
     let mut config = match load_config() {
         Ok(cfg) => cfg,
         Err(e) => {
-            if let Some(io_err) = e.downcast_ref::<std::io::Error>()
-                && io_err.kind() == std::io::ErrorKind::NotFound
+            if matches!(&e, LarpshellError::IoError(io_err) if io_err.kind() == std::io::ErrorKind::NotFound)
             {
                 print_error("no API provider configured.");
                 eprintln!(
@@ -293,8 +292,7 @@ async fn inner_main() -> Result<(), Box<dyn std::error::Error>> {
                 );
                 exit_with_code(1);
             }
-            let err = LarpshellError::ConfigError(e.to_string());
-            print_error(&err.to_string());
+            print_error(&e.to_string());
             exit_with_code(1);
         }
     };
@@ -407,7 +405,7 @@ async fn inner_main() -> Result<(), Box<dyn std::error::Error>> {
                     break;
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
-                Err(e) => return Err(Box::new(e)),
+                Err(e) => return Err(LarpshellError::IoError(e)),
             };
             let user_input = match raw_input {
                 Some(input) => input,
@@ -464,10 +462,7 @@ async fn inner_main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     slash_commands::SlashCmd::Explain { args } => {
                         if let Err(e) = handle_explain_subcommand(args, provider.as_ref()).await
-                            && !matches!(
-                                e.downcast_ref::<LarpshellError>(),
-                                Some(LarpshellError::Cancelled)
-                            )
+                            && !matches!(e, LarpshellError::Cancelled)
                         {
                             print_error(&e.to_string());
                         }
@@ -522,10 +517,7 @@ async fn inner_main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 Ok(None) => {}
                 Err(e) => {
-                    if !matches!(
-                        e.downcast_ref::<LarpshellError>(),
-                        Some(LarpshellError::Cancelled)
-                    ) {
+                    if !matches!(e, LarpshellError::Cancelled) {
                         print_error(&e.to_string());
                     }
                 }
@@ -562,11 +554,7 @@ async fn inner_main() -> Result<(), Box<dyn std::error::Error>> {
 #[tokio::main]
 async fn main() {
     if let Err(e) = inner_main().await {
-        if let Some(nl) = e.downcast_ref::<LarpshellError>() {
-            nl.print();
-        } else {
-            print_error(&e.to_string());
-        }
+        e.print();
         exit_with_code(1);
     }
 }
@@ -578,7 +566,7 @@ async fn process_command(
     provider: &dyn providers::AIProvider,
     config: &Config,
     mode: CommandMode,
-) -> Result<Option<String>, Box<dyn std::error::Error>> {
+) -> Result<Option<String>, LarpshellError> {
     let model_name = config.get_provider_config()?.config.model().to_string();
     hide_cursor();
     eprint_flush(&format!(
@@ -592,7 +580,7 @@ async fn process_command(
     let response = match &mode {
         CommandMode::Interactive => match generate_with_cancellation(provider, &prompt).await {
             Ok(res) => res,
-            Err(e) => return Err(Box::new(e)),
+            Err(e) => return Err(e),
         },
         CommandMode::Single => {
             // In single mode, Ctrl+C exits immediately
@@ -632,7 +620,7 @@ async fn process_command(
                     if let Some(saved) = saved_echo {
                         common::restore_terminal_echo(saved);
                     }
-                    return Err(Box::new(e));
+                    return Err(e);
                 }
             }
         }
@@ -641,7 +629,7 @@ async fn process_command(
     let mut command = clean_response(&response);
 
     if command.trim().is_empty() {
-        return Err(Box::new(LarpshellError::EmptyResponse(provider.name())));
+        return Err(LarpshellError::EmptyResponse(provider.name()));
     }
 
     let cancelled = 'outer: loop {
@@ -703,12 +691,12 @@ async fn process_command_agent(
     config: &Config,
     mode: CommandMode,
     tool_registry: &ToolRegistry,
-) -> Result<Option<String>, Box<dyn std::error::Error>> {
+) -> Result<Option<String>, LarpshellError> {
     let response = agent::run_agent_loop(user_input, provider, config, tool_registry).await?;
 
     let mut command = clean_response(&response);
     if command.trim().is_empty() {
-        return Err(Box::new(LarpshellError::EmptyResponse(provider.name())));
+        return Err(LarpshellError::EmptyResponse(provider.name()));
     }
 
     let cancelled = 'outer: loop {
@@ -769,7 +757,7 @@ async fn process_command_agent(
 async fn get_explanation(
     command: &str,
     provider: &dyn providers::AIProvider,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, LarpshellError> {
     let effective = config::load_explain_prompt().filter(|p| validate_explain_prompt(p));
     let query = create_explain_prompt(command, effective.as_deref());
 

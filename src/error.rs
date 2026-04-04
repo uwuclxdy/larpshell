@@ -35,6 +35,15 @@ pub enum LarpshellError {
     #[error("io error: {0}")]
     IoError(#[from] std::io::Error),
 
+    #[error("environment variable error: {0}")]
+    EnvVarError(#[from] std::env::VarError),
+
+    #[error("toml deserialize error: {0}")]
+    TomlDeError(#[from] toml::de::Error),
+
+    #[error("toml serialize error: {0}")]
+    TomlSeError(#[from] toml::ser::Error),
+
     #[error("request cancelled")]
     Cancelled,
 

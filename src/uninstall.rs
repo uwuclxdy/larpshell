@@ -5,9 +5,10 @@ use std::process::Command;
 
 use crate::cli::{print_ok, print_warning};
 use crate::common::{CTP_GREEN, CTP_YELLOW, clear_line, show_cursor};
+use crate::error::LarpshellError;
 use crate::shell_integration::remove_shell_integration;
 
-pub fn uninstall_larpshell() -> Result<(), Box<dyn std::error::Error>> {
+pub fn uninstall_larpshell() -> Result<(), LarpshellError> {
     eprintln!(
         "{}",
         "uninstalling larpshell...".custom_color(CTP_YELLOW).bold()
@@ -39,7 +40,7 @@ fn handle_shell_integration() {
     }
 }
 
-fn uninstall_cargo_crate() -> Result<(), Box<dyn std::error::Error>> {
+fn uninstall_cargo_crate() -> Result<(), LarpshellError> {
     let output = Command::new("cargo")
         .args(["uninstall", "larpshell"])
         .output()?;
@@ -59,17 +60,18 @@ fn uninstall_cargo_crate() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn remove_config_optional() -> Result<(), Box<dyn std::error::Error>> {
+fn remove_config_optional() -> Result<(), LarpshellError> {
     eprintln!();
     show_cursor();
     let remove_config = Confirm::new("Remove configuration?")
         .with_default(false)
-        .prompt()?;
+        .prompt()
+        .map_err(|e| LarpshellError::ConfigError(e.to_string()))?;
     clear_line();
 
     if remove_config {
         let config_dir = dirs::config_dir()
-            .ok_or("failed to get config directory")?
+            .ok_or_else(|| LarpshellError::ConfigError("failed to get config directory".to_string()))?
             .join("larpshell");
 
         if config_dir.exists() {
@@ -82,7 +84,7 @@ fn remove_config_optional() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn remove_repo_optional() -> Result<(), Box<dyn std::error::Error>> {
+fn remove_repo_optional() -> Result<(), LarpshellError> {
     let current_dir = std::env::current_dir()?;
     let cargo_toml = current_dir.join("Cargo.toml");
 
@@ -93,12 +95,15 @@ fn remove_repo_optional() -> Result<(), Box<dyn std::error::Error>> {
             show_cursor();
             let remove_repo = Confirm::new("Remove current directory (larpshell repository)?")
                 .with_default(false)
-                .prompt()?;
+                .prompt()
+                .map_err(|e| LarpshellError::ConfigError(e.to_string()))?;
             clear_line();
 
             if remove_repo {
                 eprintln!("{}", "  removing directory...".dimmed());
-                let parent = current_dir.parent().ok_or("cannot remove root directory")?;
+                let parent = current_dir
+                    .parent()
+                    .ok_or_else(|| LarpshellError::ConfigError("cannot remove root directory".to_string()))?;
                 std::env::set_current_dir(parent)?;
                 fs::remove_dir_all(&current_dir)?;
                 print_ok("removed larpshell repository");

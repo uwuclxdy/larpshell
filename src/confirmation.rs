@@ -5,6 +5,7 @@ use crate::common::{
     ANSI_CLEAR_LINE, CTP_BLUE, CTP_PRIMARY, CTP_TEXT, CTP_YELLOW, EXIT_SIGINT, clear_n_lines,
     count_visual_lines, exit_with_code, flush_stderr, get_terminal_width, show_cursor,
 };
+use crate::error::LarpshellError;
 
 pub enum ConfirmResult {
     Yes,
@@ -174,7 +175,7 @@ fn style_html_tags(text: &str) -> String {
 /// Prompt for confirmation with explain option
 pub fn confirm_with_explain(
     cmd_line_count: usize,
-) -> Result<ConfirmResult, Box<dyn std::error::Error>> {
+) -> Result<ConfirmResult, LarpshellError> {
     if !is_interactive_terminal() {
         return Ok(ConfirmResult::Yes);
     }
@@ -224,7 +225,7 @@ pub fn confirm_with_explain(
 pub fn confirm_execution(
     cmd_line_count: usize,
     expl_line_count: usize,
-) -> Result<ConfirmResult, Box<dyn std::error::Error>> {
+) -> Result<ConfirmResult, LarpshellError> {
     if !is_interactive_terminal() {
         return Ok(ConfirmResult::Yes);
     }

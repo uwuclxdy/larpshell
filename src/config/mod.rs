@@ -167,7 +167,7 @@ pub fn load_sys_prompt() -> Option<String> {
     fs::read_to_string(get_sys_prompt_path().ok()?).ok()
 }
 
-pub fn save_sys_prompt(content: &str) -> Result<(), Box<dyn std::error::Error>> {
+pub fn save_sys_prompt(content: &str) -> Result<(), LarpshellError> {
     Ok(fs::write(get_sys_prompt_path()?, content)?)
 }
 
@@ -180,7 +180,7 @@ pub fn load_explain_prompt() -> Option<String> {
     fs::read_to_string(get_explain_prompt_path().ok()?).ok()
 }
 
-pub fn save_explain_prompt(content: &str) -> Result<(), Box<dyn std::error::Error>> {
+pub fn save_explain_prompt(content: &str) -> Result<(), LarpshellError> {
     Ok(fs::write(get_explain_prompt_path()?, content)?)
 }
 
@@ -210,14 +210,14 @@ pub fn set_history_enabled(enabled: bool) -> Result<(), LarpshellError> {
     Ok(())
 }
 
-pub fn set_agent_enabled(enabled: bool) -> Result<(), Box<dyn std::error::Error>> {
+pub fn set_agent_enabled(enabled: bool) -> Result<(), LarpshellError> {
     let mut config = load_config()?;
     config.agent = enabled;
     save_config(&config)?;
     Ok(())
 }
 
-pub fn load_config() -> Result<Config, Box<dyn std::error::Error>> {
+pub fn load_config() -> Result<Config, LarpshellError> {
     let config_path = get_config_path()?;
     let contents = fs::read_to_string(&config_path)?;
 
@@ -228,20 +228,20 @@ pub fn load_config() -> Result<Config, Box<dyn std::error::Error>> {
                 let contents = fs::read_to_string(&config_path)?;
                 Ok(toml::from_str(&contents)?)
             } else {
-                Err(Box::new(e))
+                Err(LarpshellError::TomlDeError(e))
             }
         }
     }
 }
 
-pub fn save_config(config: &Config) -> Result<(), Box<dyn std::error::Error>> {
+pub fn save_config(config: &Config) -> Result<(), LarpshellError> {
     let config_path = get_config_path()?;
     let toml_string = toml::to_string_pretty(config)?;
     fs::write(&config_path, toml_string)?;
     Ok(())
 }
 
-pub fn interactive_setup() -> Result<(), Box<dyn std::error::Error>> {
+pub fn interactive_setup() -> Result<(), LarpshellError> {
     let existing_config = load_config().ok();
     let current_provider = existing_config.as_ref().map(|c| c.active_provider);
 
@@ -281,7 +281,8 @@ pub fn interactive_setup() -> Result<(), Box<dyn std::error::Error>> {
     let has_saved = if has_saved_creds && Some(selected_variant) != current_provider {
         let result = Confirm::new("Use saved credentials?")
             .with_default(true)
-            .prompt()?;
+            .prompt()
+            .map_err(|e| LarpshellError::ConfigError(e.to_string()))?;
         clear_line();
         result
     } else {
@@ -333,7 +334,7 @@ pub fn interactive_setup() -> Result<(), Box<dyn std::error::Error>> {
 fn display_config_summary(
     config: &Config,
     provider_name: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), LarpshellError> {
     print_ok_bold("Configuration saved!");
     eprintln!();
     eprintln!("Provider: {}", provider_name);
@@ -362,7 +363,7 @@ fn display_config_summary(
 
 fn configure_gemini(
     existing: Option<&GeminiConfig>,
-) -> Result<ProviderConfig, Box<dyn std::error::Error>> {
+) -> Result<ProviderConfig, LarpshellError> {
     let api_key = if let Some(e) = existing {
         prompt_input_with_default("Gemini API key", &e.api_key)?
     } else {
@@ -384,7 +385,7 @@ fn configure_gemini(
 
 fn configure_ollama(
     existing: Option<&OllamaConfig>,
-) -> Result<ProviderConfig, Box<dyn std::error::Error>> {
+) -> Result<ProviderConfig, LarpshellError> {
     let url_default = existing
         .map(|e| e.base_url.as_str())
         .unwrap_or("http://localhost:11434");
@@ -402,7 +403,7 @@ fn configure_ollama(
 
 fn configure_openrouter(
     existing: Option<&OpenRouterConfig>,
-) -> Result<ProviderConfig, Box<dyn std::error::Error>> {
+) -> Result<ProviderConfig, LarpshellError> {
     let url_default = existing
         .map(|e| e.base_url.as_str())
         .unwrap_or("https://openrouter.ai/api/v1");
@@ -414,7 +415,8 @@ fn configure_openrouter(
         if let Some(saved) = existing.and_then(|e| e.api_key.as_deref()) {
             text = text.with_default(saved);
         }
-        text.prompt_skippable()?
+        text.prompt_skippable()
+            .map_err(|e| LarpshellError::ConfigError(e.to_string()))?
     };
 
     let model_default = existing
@@ -436,7 +438,7 @@ fn configure_openrouter(
 
 fn configure_openai(
     existing: Option<&OpenAIConfig>,
-) -> Result<ProviderConfig, Box<dyn std::error::Error>> {
+) -> Result<ProviderConfig, LarpshellError> {
     let url_default = existing
         .map(|e| e.base_url.as_str())
         .unwrap_or("https://api.openai.com/v1");
@@ -448,7 +450,8 @@ fn configure_openai(
         if let Some(saved) = existing.and_then(|e| e.api_key.as_deref()) {
             text = text.with_default(saved);
         }
-        text.prompt_skippable()?
+        text.prompt_skippable()
+            .map_err(|e| LarpshellError::ConfigError(e.to_string()))?
     };
 
     let model = prompt_model_name(existing.map(|e| e.model.as_str()))?;
@@ -465,7 +468,7 @@ fn configure_openai(
     })
 }
 
-fn prompt_model_name(default: Option<&str>) -> Result<String, Box<dyn std::error::Error>> {
+fn prompt_model_name(default: Option<&str>) -> Result<String, LarpshellError> {
     loop {
         let model = if let Some(def) = default {
             prompt_input_with_default("Model name:", def)?

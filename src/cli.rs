@@ -8,6 +8,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::common::{CTP_GREEN, CTP_RED, CTP_YELLOW};
+use crate::error::LarpshellError;
 
 const SYMBOL_CHECK: &str = "\u{2713}";
 const SYMBOL_ERROR: &str = "error:";
@@ -70,7 +71,7 @@ pub enum PromptAction {
     Edit,
 }
 
-pub fn parse_cli_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
+pub fn parse_cli_args() -> Result<CliArgs, LarpshellError> {
     use clap::{Parser, Subcommand};
 
     #[derive(Parser)]
@@ -166,7 +167,7 @@ pub fn parse_cli_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
 static CWD_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 static CWD_LOCK: Mutex<()> = Mutex::new(());
 
-fn execute_shell_command_unlocked(command: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn execute_shell_command_unlocked(command: &str) -> Result<(), LarpshellError> {
     let trimmed = command.trim();
 
     if trimmed.is_empty() {
@@ -203,7 +204,7 @@ fn execute_shell_command_unlocked(command: &str) -> Result<(), Box<dyn std::erro
     Ok(())
 }
 
-pub fn execute_shell_command(command: &str) -> Result<(), Box<dyn std::error::Error>> {
+pub fn execute_shell_command(command: &str) -> Result<(), LarpshellError> {
     let _guard = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     execute_shell_command_unlocked(command)
 }
@@ -219,25 +220,31 @@ pub fn prompt_select(
     prompt: &str,
     items: &[String],
     default: usize,
-) -> Result<usize, Box<dyn std::error::Error>> {
+) -> Result<usize, LarpshellError> {
     let selection = Select::new(prompt, items.to_vec())
         .with_starting_cursor(default)
-        .prompt()?;
+        .prompt()
+        .map_err(|e| LarpshellError::ConfigError(e.to_string()))?;
     Ok(items
         .iter()
         .position(|x| x == &selection)
         .unwrap_or(default))
 }
 
-pub fn prompt_input(prompt: &str) -> Result<String, Box<dyn std::error::Error>> {
-    Ok(Text::new(prompt).prompt()?)
+pub fn prompt_input(prompt: &str) -> Result<String, LarpshellError> {
+    Ok(Text::new(prompt)
+        .prompt()
+        .map_err(|e| LarpshellError::ConfigError(e.to_string()))?)
 }
 
 pub fn prompt_input_with_default(
     prompt: &str,
     default: &str,
-) -> Result<String, Box<dyn std::error::Error>> {
-    Ok(Text::new(prompt).with_default(default).prompt()?)
+) -> Result<String, LarpshellError> {
+    Ok(Text::new(prompt)
+        .with_default(default)
+        .prompt()
+        .map_err(|e| LarpshellError::ConfigError(e.to_string()))?)
 }
 
 pub fn get_home_dir() -> PathBuf {

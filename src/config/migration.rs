@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 
+use crate::error::LarpshellError;
 use crate::prompt::DEFAULT_EXPLAIN_PROMPT;
 const OLD_EXPLAIN_PROMPT_V1: &str = include_str!("../prompts/old_explain_v1.md");
 const OLD_EXPLAIN_PROMPT_V2: &str = include_str!("../prompts/old_explain_v2.md");
@@ -21,7 +22,7 @@ struct V1Config {
     providers: MultiProviderConfig,
 }
 
-type MigrationResult = Result<String, Box<dyn std::error::Error>>;
+type MigrationResult = Result<String, LarpshellError>;
 
 trait Migrator {
     fn can_migrate(&self, content: &str) -> bool;
@@ -43,7 +44,9 @@ impl Migrator for ConfigMigrator {
             "ollama" => ActiveProvider::Ollama,
             "openai" => ActiveProvider::OpenAI,
             other => {
-                return Err(format!("unknown provider type in config: {other}").into());
+                return Err(LarpshellError::ConfigError(format!(
+                    "unknown provider type in config: {other}"
+                )));
             }
         };
 
@@ -78,7 +81,7 @@ fn get_explain_prompt_migrators() -> Vec<Box<dyn Migrator>> {
     vec![Box::new(ExplainPromptMigrator)]
 }
 
-pub fn migrate_explain_prompt() -> Result<bool, Box<dyn std::error::Error>> {
+pub fn migrate_explain_prompt() -> Result<bool, LarpshellError> {
     let explain_prompt_path = get_explain_prompt_path()?;
 
     if !explain_prompt_path.exists() {
@@ -99,7 +102,7 @@ pub fn migrate_explain_prompt() -> Result<bool, Box<dyn std::error::Error>> {
     Ok(false)
 }
 
-pub fn migrate_config(config_path: &Path) -> Result<bool, Box<dyn std::error::Error>> {
+pub fn migrate_config(config_path: &Path) -> Result<bool, LarpshellError> {
     let content = fs::read_to_string(config_path)?;
     let migrators = get_migrators();
 
@@ -118,8 +121,9 @@ pub fn migrate_config(config_path: &Path) -> Result<bool, Box<dyn std::error::Er
 /// old directory.  Skips the copy if larpshell already has a config, but still
 /// removes the old dir.  Returns `Ok(false)` immediately when there is nothing
 /// to do (no `~/.config/nlsh-rs/` present).
-pub fn migrate_from_nlsh_rs() -> Result<bool, Box<dyn std::error::Error>> {
-    let config_base = dirs::config_dir().ok_or("failed to get config directory")?;
+pub fn migrate_from_nlsh_rs() -> Result<bool, LarpshellError> {
+    let config_base = dirs::config_dir()
+        .ok_or_else(|| LarpshellError::ConfigError("failed to get config directory".to_string()))?;
     let old_dir = config_base.join("nlsh-rs");
 
     if !old_dir.exists() {
