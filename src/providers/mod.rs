@@ -69,6 +69,7 @@ impl ChatMessage {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ToolCall {
     pub id: String,
+    #[serde(rename = "function")]
     pub name: String,
     pub arguments: serde_json::Value,
 }
@@ -116,37 +117,59 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn chat_message_user_sets_role_and_content() {
+    fn chat_message_user_sets_role_and_serializes_content() {
         let message = ChatMessage::user("hello");
 
         assert_eq!(message.role, Role::User);
         assert_eq!(message.content.as_deref(), Some("hello"));
         assert_eq!(message.tool_calls, None);
         assert_eq!(message.tool_call_id, None);
+        assert_eq!(
+            serde_json::to_value(&message).unwrap(),
+            json!({
+                "role": "user",
+                "content": "hello"
+            })
+        );
     }
 
     #[test]
-    fn chat_message_system_sets_role_and_content() {
+    fn chat_message_system_sets_role_and_serializes_content() {
         let message = ChatMessage::system("system prompt");
 
         assert_eq!(message.role, Role::System);
         assert_eq!(message.content.as_deref(), Some("system prompt"));
         assert_eq!(message.tool_calls, None);
         assert_eq!(message.tool_call_id, None);
+        assert_eq!(
+            serde_json::to_value(&message).unwrap(),
+            json!({
+                "role": "system",
+                "content": "system prompt"
+            })
+        );
     }
 
     #[test]
-    fn chat_message_tool_result_sets_tool_metadata() {
+    fn chat_message_tool_result_sets_tool_metadata_and_serializes_content() {
         let message = ChatMessage::tool_result("call-1", "done");
 
         assert_eq!(message.role, Role::Tool);
         assert_eq!(message.content.as_deref(), Some("done"));
         assert_eq!(message.tool_call_id.as_deref(), Some("call-1"));
         assert_eq!(message.tool_calls, None);
+        assert_eq!(
+            serde_json::to_value(&message).unwrap(),
+            json!({
+                "role": "tool",
+                "content": "done",
+                "tool_call_id": "call-1"
+            })
+        );
     }
 
     #[test]
-    fn chat_message_assistant_tool_calls_sets_calls() {
+    fn chat_message_assistant_tool_calls_sets_calls_and_skips_content() {
         let tool_calls = vec![ToolCall {
             id: String::from("call-1"),
             name: String::from("search"),
@@ -156,8 +179,19 @@ mod tests {
 
         assert_eq!(message.role, Role::Assistant);
         assert_eq!(message.content, None);
-        assert_eq!(message.tool_calls, Some(tool_calls));
+        assert_eq!(message.tool_calls, Some(tool_calls.clone()));
         assert_eq!(message.tool_call_id, None);
+        assert_eq!(
+            serde_json::to_value(&message).unwrap(),
+            json!({
+                "role": "assistant",
+                "tool_calls": [{
+                    "id": "call-1",
+                    "function": "search",
+                    "arguments": { "query": "rust" }
+                }]
+            })
+        );
     }
 
     #[test]
@@ -184,6 +218,24 @@ mod tests {
                         "query": { "type": "string" }
                     }
                 }
+            })
+        );
+    }
+
+    #[test]
+    fn tool_call_serializes_function_name_and_json_arguments() {
+        let tool_call = ToolCall {
+            id: String::from("call-1"),
+            name: String::from("search"),
+            arguments: json!({ "query": "rust" }),
+        };
+
+        assert_eq!(
+            serde_json::to_value(&tool_call).unwrap(),
+            json!({
+                "id": "call-1",
+                "function": "search",
+                "arguments": { "query": "rust" }
             })
         );
     }
