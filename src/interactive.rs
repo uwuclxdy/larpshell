@@ -280,10 +280,10 @@ where
             Event::Any,
             EventHandler::Conditional(Box::new(SlashPreviewHandler)),
         );
-        if config::history_enabled() {
-            if let Ok(path) = config::get_history_path() {
-                let _ = ed.load_history(&path);
-            }
+        if config::history_enabled()
+            && let Ok(path) = config::get_history_path()
+        {
+            let _ = ed.load_history(&path);
         }
         ed
     });
@@ -300,10 +300,10 @@ where
             let trimmed = line.trim();
             if !trimmed.is_empty() {
                 let _ = editor.add_history_entry(&line);
-                if config::history_enabled() {
-                    if let Ok(path) = config::get_history_path() {
-                        let _ = editor.save_history(&path);
-                    }
+                if config::history_enabled()
+                    && let Ok(path) = config::get_history_path()
+                {
+                    let _ = editor.save_history(&path);
                 }
                 Ok(Some(trimmed.to_string()))
             } else {

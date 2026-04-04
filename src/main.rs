@@ -345,9 +345,9 @@ async fn inner_main() -> Result<(), Box<dyn std::error::Error>> {
         return result;
     }
 
-    let interactive_mode = cli.command.is_empty() && std::io::stdin().is_terminal();
+    let interactive_mode = cli.command.is_empty() && cli::is_interactive_terminal();
 
-    if cli.command.is_empty() && !std::io::stdin().is_terminal() {
+    if cli.command.is_empty() && !cli::is_interactive_terminal() {
         use std::io::Read;
         let mut buf = String::new();
         std::io::stdin().read_to_string(&mut buf)?;
@@ -483,15 +483,15 @@ async fn inner_main() -> Result<(), Box<dyn std::error::Error>> {
                 let registry = tool_registry.get_or_insert_with(|| {
                     let mut registry = ToolRegistry::with_builtins();
                     for mcp_config in agent::mcp::load_mcp_configs() {
-                        if let Ok(mut client) = agent::mcp::StdioMcpClient::spawn(&mcp_config) {
-                            if client.initialize().is_ok() {
-                                if let Ok(tools) = client.list_tools() {
-                                    for tool in tools {
-                                        registry.register_mcp_tool(tool, mcp_config.name.clone());
-                                    }
+                        if let Ok(mut client) = agent::mcp::StdioMcpClient::spawn(&mcp_config)
+                            && client.initialize().is_ok()
+                        {
+                            if let Ok(tools) = client.list_tools() {
+                                for tool in tools {
+                                    registry.register_mcp_tool(tool, mcp_config.name.clone());
                                 }
-                                registry.add_mcp_client(client);
                             }
+                            registry.add_mcp_client(client);
                         }
                     }
                     registry

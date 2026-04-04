@@ -110,7 +110,7 @@ fn confirm_tool_call() -> ToolConfirmResult {
     #[cfg(unix)]
     {
         use nix::sys::termios::FlushArg;
-        let _ = nix::sys::termios::tcflush(&std::io::stdin(), FlushArg::TCIFLUSH);
+        let _ = nix::sys::termios::tcflush(std::io::stdin(), FlushArg::TCIFLUSH);
     }
 
     loop {

@@ -247,22 +247,22 @@ impl OpenAICompatibleProvider {
             LarpshellError::InvalidResponse(format!("no response from {}", self.provider_slug))
         })?;
 
-        if let Some(ref tool_calls) = choice.message.tool_calls {
-            if !tool_calls.is_empty() {
-                let calls = tool_calls
-                    .iter()
-                    .map(|tool_call| {
-                        let arguments =
-                            serde_json::from_str(&tool_call.function.arguments).unwrap_or_default();
-                        crate::providers::ToolCall {
-                            id: tool_call.id.clone(),
-                            name: tool_call.function.name.clone(),
-                            arguments,
-                        }
-                    })
-                    .collect();
-                return Ok(ChatResponse::ToolCalls(calls));
-            }
+        if let Some(ref tool_calls) = choice.message.tool_calls
+            && !tool_calls.is_empty()
+        {
+            let calls = tool_calls
+                .iter()
+                .map(|tool_call| {
+                    let arguments =
+                        serde_json::from_str(&tool_call.function.arguments).unwrap_or_default();
+                    crate::providers::ToolCall {
+                        id: tool_call.id.clone(),
+                        name: tool_call.function.name.clone(),
+                        arguments,
+                    }
+                })
+                .collect();
+            return Ok(ChatResponse::ToolCalls(calls));
         }
 
         let content = choice.message.content.clone().ok_or_else(|| {

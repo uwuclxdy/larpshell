@@ -79,7 +79,7 @@ fn parse_key_from_reader(reader: &mut impl std::io::Read) -> KeyEvent {
 #[cfg(unix)]
 fn flush_stdin_input() {
     use nix::sys::termios::{FlushArg, tcflush};
-    let _ = tcflush(&std::io::stdin(), FlushArg::TCIFLUSH);
+    let _ = tcflush(std::io::stdin(), FlushArg::TCIFLUSH);
 }
 
 #[cfg(not(unix))]
