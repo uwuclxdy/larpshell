@@ -300,7 +300,19 @@ async fn inner_main() -> Result<(), Box<dyn std::error::Error>> {
         return result;
     }
 
-    let interactive_mode = cli.command.is_empty();
+    let interactive_mode = cli.command.is_empty() && std::io::stdin().is_terminal();
+
+    if cli.command.is_empty() && !std::io::stdin().is_terminal() {
+        use std::io::Read;
+        let mut buf = String::new();
+        std::io::stdin().read_to_string(&mut buf)?;
+        let user_input = buf.trim().to_string();
+        if !user_input.is_empty() {
+            process_command(&user_input, provider.as_ref(), &config, CommandMode::Single).await?;
+        }
+        update::print_if_available(update_task).await;
+        return Ok(());
+    }
 
     if interactive_mode {
         // interactive mode: keep running until exit signal at prompt
