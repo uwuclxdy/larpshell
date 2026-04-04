@@ -380,7 +380,7 @@ async fn inner_main() -> Result<(), LarpshellError> {
                         interactive_setup()?;
                     }
                     slash_commands::SlashCmd::Agent { enable } => {
-                        handle_agent_subcommand(Some(if enable { Switch::Enable } else { Switch::Disable }))?;
+                        handle_agent_subcommand(enable.map(|e| if e { Switch::Enable } else { Switch::Disable }))?;
                     }
                     slash_commands::SlashCmd::Uninstall => {
                         uninstall_larpshell()?;
@@ -393,6 +393,11 @@ async fn inner_main() -> Result<(), LarpshellError> {
                     }
                     slash_commands::SlashCmd::Explain { args } => {
                         handle_explain_subcommand(args, provider.as_ref()).await?;
+                    }
+                    slash_commands::SlashCmd::Help => {
+                        for cmd in slash_commands::COMMANDS {
+                            cli::print_ok(&format!("/{:<12} {}", cmd.name, cmd.description));
+                        }
                     }
                     slash_commands::SlashCmd::Unknown(s) => {
                         print_error(&format!("unknown command '{s}'"));
@@ -451,11 +456,11 @@ async fn inner_main() -> Result<(), LarpshellError> {
                         },
                     },
                     slash_commands::SlashCmd::Agent { enable } => {
-                        match handle_agent_subcommand(Some(if enable { Switch::Enable } else { Switch::Disable })) {
+                        match handle_agent_subcommand(enable.map(|e| if e { Switch::Enable } else { Switch::Disable })) {
                             Ok(()) => match load_config() {
                                 Ok(new_config) => {
                                     config = new_config;
-                                    if !enable {
+                                    if enable == Some(false) {
                                         tool_registry = None;
                                     }
                                 }
@@ -484,6 +489,11 @@ async fn inner_main() -> Result<(), LarpshellError> {
                             && !matches!(e, LarpshellError::Cancelled)
                         {
                             print_error(&e.to_string());
+                        }
+                    }
+                    slash_commands::SlashCmd::Help => {
+                        for cmd in slash_commands::COMMANDS {
+                            print_warning(&format!("/{:<12} {}", cmd.name, cmd.description));
                         }
                     }
                     slash_commands::SlashCmd::Unknown(s) => {

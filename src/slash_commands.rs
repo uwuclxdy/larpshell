@@ -77,6 +77,10 @@ pub const COMMANDS: &[SlashCommand] = &[
         description: "manage system or explain prompts",
     },
     SlashCommand {
+        name: "help",
+        description: "list available slash commands",
+    },
+    SlashCommand {
         name: "quit",
         description: "exit interactive mode",
     },
@@ -151,7 +155,7 @@ pub fn filter(typed: &str) -> Vec<&'static SlashCommand> {
 #[derive(Debug)]
 pub enum SlashCmd {
     Agent {
-        enable: bool,
+        enable: Option<bool>,
     },
     Api,
     Uninstall,
@@ -165,6 +169,7 @@ pub enum SlashCmd {
     Explain {
         args: Vec<String>,
     },
+    Help,
     Quit,
     Unknown(String),
 }
@@ -173,11 +178,16 @@ pub fn parse(input: &str) -> SlashCmd {
     let mut parts = input.split_whitespace();
     match parts.next() {
         Some("/agent") => {
-            let enable = matches!(parts.next(), Some("on"));
+            let enable = match parts.next() {
+                Some("on") => Some(true),
+                Some("off") => Some(false),
+                _ => None,
+            };
             SlashCmd::Agent { enable }
         }
         Some("/api") => SlashCmd::Api,
         Some("/uninstall") => SlashCmd::Uninstall,
+        Some("/help") => SlashCmd::Help,
         Some("/quit") => SlashCmd::Quit,
         Some("/history") => {
             let enable = matches!(parts.next(), Some("on"));
@@ -290,7 +300,7 @@ mod tests {
     #[test]
     fn parse_agent_on() {
         match parse("/agent on") {
-            SlashCmd::Agent { enable } => assert!(enable),
+            SlashCmd::Agent { enable } => assert_eq!(enable, Some(true)),
             _ => panic!("expected Agent"),
         }
     }
@@ -298,15 +308,15 @@ mod tests {
     #[test]
     fn parse_agent_off() {
         match parse("/agent off") {
-            SlashCmd::Agent { enable } => assert!(!enable),
+            SlashCmd::Agent { enable } => assert_eq!(enable, Some(false)),
             _ => panic!("expected Agent"),
         }
     }
 
     #[test]
-    fn parse_agent_no_arg_defaults_to_off() {
+    fn parse_agent_no_arg_shows_status() {
         match parse("/agent") {
-            SlashCmd::Agent { enable } => assert!(!enable),
+            SlashCmd::Agent { enable } => assert_eq!(enable, None),
             _ => panic!("expected Agent"),
         }
     }
