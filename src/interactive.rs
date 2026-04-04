@@ -16,7 +16,7 @@ use rustyline::{
     EventHandler, Helper, KeyCode, KeyEvent, Modifiers, RepeatCount,
 };
 
-use crate::common::{CTP_BLUE, CTP_OVERLAY0, CTP_PRIMARY, get_current_directory, show_cursor};
+use crate::common::{CTP_BLUE, CTP_OVERLAY0, CTP_PRIMARY, current_directory, show_cursor};
 use crate::config;
 use crate::slash_commands;
 
@@ -281,13 +281,13 @@ where
             EventHandler::Conditional(Box::new(SlashPreviewHandler)),
         );
         if config::history_enabled()
-            && let Ok(path) = config::get_history_path()
+            && let Ok(path) = config::history_path()
         {
             let _ = ed.load_history(&path);
         }
         ed
     });
-    let cwd = get_current_directory();
+    let cwd = current_directory();
     let prompt = format!(
         "{}:{}{} ",
         "larpshell".custom_color(CTP_BLUE).bold(),
@@ -301,7 +301,7 @@ where
             if !trimmed.is_empty() {
                 let _ = editor.add_history_entry(&line);
                 if config::history_enabled()
-                    && let Ok(path) = config::get_history_path()
+                    && let Ok(path) = config::history_path()
                 {
                     let _ = editor.save_history(&path);
                 }
@@ -327,11 +327,11 @@ where
     }
 }
 
-pub fn get_user_input_prefilled(initial: &str) -> Result<Option<String>, io::Error> {
+pub fn user_input_prefilled(initial: &str) -> Result<Option<String>, io::Error> {
     with_editor(|editor, prompt| editor.readline_with_initial(prompt, (initial, "")))
 }
 
-pub fn get_user_input() -> Result<Option<String>, io::Error> {
+pub fn user_input() -> Result<Option<String>, io::Error> {
     with_editor(|editor, prompt| editor.readline(prompt))
 }
 

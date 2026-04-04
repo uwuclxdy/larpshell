@@ -19,7 +19,7 @@ use std::io::IsTerminal;
 use tokio_util::sync::CancellationToken;
 
 use agent::tools::ToolRegistry;
-use cli::get_home_dir;
+use cli::home_dir;
 use cli::{
     PromptAction, PromptKind, execute_shell_command, parse_cli_args, print_error, print_warning,
 };
@@ -36,7 +36,7 @@ use confirmation::{
     edit_command,
 };
 use error::LarpshellError;
-use interactive::{get_user_input, get_user_input_prefilled};
+use interactive::{user_input, user_input_prefilled};
 use prompt::{
     DEFAULT_EXPLAIN_PROMPT, DEFAULT_PROMPT_TEMPLATE, clean_response, create_explain_prompt,
     create_prompts, create_system_prompt, validate_explain_prompt, validate_sys_prompt,
@@ -135,7 +135,7 @@ fn handle_prompt_subcommand(
             println!("{}", content);
         }
         (PromptKind::System, PromptAction::Edit) => {
-            let path = config::get_sys_prompt_path()?;
+            let path = config::sys_prompt_path()?;
             if !path.exists() {
                 config::save_sys_prompt(DEFAULT_PROMPT_TEMPLATE)?;
             }
@@ -153,7 +153,7 @@ fn handle_prompt_subcommand(
             println!("{}", content);
         }
         (PromptKind::Explain, PromptAction::Edit) => {
-            let path = config::get_explain_prompt_path()?;
+            let path = config::explain_prompt_path()?;
             if !path.exists() {
                 config::save_explain_prompt(DEFAULT_EXPLAIN_PROMPT)?;
             }
@@ -191,7 +191,7 @@ async fn handle_explain_subcommand(
 
 fn do_nlsh_rs_migration() {
     // No-op if nlsh-rs is not installed.
-    let binary = get_home_dir().join(".cargo/bin/nlsh-rs");
+    let binary = home_dir().join(".cargo/bin/nlsh-rs");
     if !binary.exists() {
         return;
     }
@@ -402,9 +402,9 @@ async fn inner_main() -> Result<(), LarpshellError> {
         loop {
             interactive::reserve_preview_space();
             let raw_input = match if let Some(initial) = prefill.take() {
-                get_user_input_prefilled(&initial)
+                user_input_prefilled(&initial)
             } else {
-                get_user_input()
+                user_input()
             } {
                 Ok(v) => v,
                 Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {
@@ -574,7 +574,7 @@ async fn process_command(
     config: &Config,
     mode: CommandMode,
 ) -> Result<Option<String>, LarpshellError> {
-    let model_name = config.get_provider_config()?.config.model().to_string();
+    let model_name = config.provider_config()?.config.model().to_string();
     hide_cursor();
     eprint_flush(&format!(
         "{}",

@@ -52,15 +52,15 @@ pub const ANSI_HIDE_CURSOR: &str = "\x1b[?25l";
 pub const ANSI_CLEAR_LINE: &str = "\r\x1b[K";
 pub const ANSI_CURSOR_UP_CLEAR: &str = "\x1b[1A\x1b[K";
 
-pub fn get_current_directory() -> String {
+pub fn current_directory() -> String {
     env::current_dir()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|_| "/".to_string())
 }
 
-pub fn get_os() -> String {
+pub fn os_name() -> String {
     if cfg!(target_os = "linux") {
-        get_linux_info()
+        linux_info()
     } else if cfg!(target_os = "macos") {
         "macOS".to_string()
     } else if cfg!(target_os = "windows") {
@@ -70,29 +70,29 @@ pub fn get_os() -> String {
     }
 }
 
-pub fn get_shell() -> String {
+pub fn shell_name() -> String {
     env::var("SHELL")
         .ok()
         .and_then(|s| s.split('/').next_back().map(|s| s.to_string()))
         .unwrap_or_else(|| "sh".to_string())
 }
 
-pub fn get_username() -> String {
+pub fn username() -> String {
     env::var("USER")
         .or_else(|_| env::var("USERNAME"))
         .unwrap_or_else(|_| "user".to_string())
 }
 
 /// returns linux distro and kernel version.
-fn get_linux_info() -> String {
-    let distro = get_linux_distro();
-    let kernel = get_kernel_version();
+fn linux_info() -> String {
+    let distro = linux_distro();
+    let kernel = kernel_version();
 
     format!("linux ({}; kernel: {})", distro, kernel)
 }
 
 /// reads /etc/os-release to get the distro name and version.
-fn get_linux_distro() -> String {
+fn linux_distro() -> String {
     if let Ok(contents) = fs::read_to_string("/etc/os-release") {
         let mut name = None;
         let mut version = None;
@@ -116,7 +116,7 @@ fn get_linux_distro() -> String {
 }
 
 /// gets the kernel version from `uname -r` or `/proc/sys/kernel/osrelease`.
-fn get_kernel_version() -> String {
+fn kernel_version() -> String {
     Command::new("uname")
         .arg("-r")
         .output()
@@ -168,7 +168,7 @@ pub fn flush_stderr() {
 
 /// gets the terminal width in columns.
 #[cfg(unix)]
-pub fn get_terminal_width() -> usize {
+pub fn terminal_width() -> usize {
     unsafe {
         let mut ws: libc::winsize = std::mem::zeroed();
         if libc::ioctl(libc::STDERR_FILENO, libc::TIOCGWINSZ, &mut ws) == 0 && ws.ws_col > 0 {
@@ -179,7 +179,7 @@ pub fn get_terminal_width() -> usize {
 }
 
 #[cfg(not(unix))]
-pub fn get_terminal_width() -> usize {
+pub fn terminal_width() -> usize {
     Command::new("tput")
         .arg("cols")
         .output()

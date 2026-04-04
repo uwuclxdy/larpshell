@@ -6,8 +6,8 @@ use colored::*;
 use crate::cli::print_warning;
 use crate::common::{
     CTP_BLUE, CTP_GREEN, CTP_OVERLAY0, CTP_PRIMARY, CTP_RED, CTP_TEXT, CTP_YELLOW, clear_line,
-    count_visual_lines, eprint_flush, get_current_directory, get_os, get_shell, get_terminal_width,
-    get_username, hide_cursor, show_cursor,
+    count_visual_lines, eprint_flush, current_directory, os_name, shell_name, terminal_width,
+    username, hide_cursor, show_cursor,
 };
 use crate::config::Config;
 use crate::error::LarpshellError;
@@ -34,13 +34,13 @@ Environment context:
 User request: {request}";
 
 fn build_agent_system_prompt(user_request: &str) -> String {
-    let cwd = get_current_directory();
-    let os = get_os();
-    let shell = get_shell();
+    let cwd = current_directory();
+    let os = os_name();
+    let shell = shell_name();
     let home = dirs::home_dir()
         .map(|path| path.display().to_string())
         .unwrap_or_else(|| "~".to_string());
-    let user = get_username();
+    let user = username();
 
     AGENT_SYSTEM_PROMPT
         .replace("{cwd}", &cwd)
@@ -65,7 +65,7 @@ enum Key {
 }
 
 fn display_tool_call(tool_call: &ToolCall) -> usize {
-    let width = get_terminal_width();
+    let width = terminal_width();
     let mut lines = 0;
 
     let tool_line = format!(
@@ -208,7 +208,7 @@ async fn run_agent_loop_with_confirm<F>(
 where
     F: FnMut(&ToolCall) -> ToolConfirmResult,
 {
-    let model_name = config.get_provider_config()?.config.model().to_string();
+    let model_name = config.provider_config()?.config.model().to_string();
     hide_cursor();
     eprint_flush(&format!(
         "{}",
@@ -480,7 +480,7 @@ mod tests {
 
     #[test]
     fn test_config_uses_ollama_provider() {
-        let provider_config = test_config().get_provider_config().unwrap();
+        let provider_config = test_config().provider_config().unwrap();
         assert!(matches!(
             provider_config.config,
             ProviderSpecificConfig::Ollama { .. }

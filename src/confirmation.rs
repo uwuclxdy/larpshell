@@ -3,7 +3,7 @@ use colored::*;
 use crate::cli::is_interactive_terminal;
 use crate::common::{
     ANSI_CLEAR_LINE, CTP_BLUE, CTP_PRIMARY, CTP_TEXT, CTP_YELLOW, EXIT_SIGINT, clear_n_lines,
-    count_visual_lines, exit_with_code, flush_stderr, get_terminal_width, show_cursor,
+    count_visual_lines, exit_with_code, flush_stderr, terminal_width, show_cursor,
 };
 use crate::error::LarpshellError;
 
@@ -120,7 +120,7 @@ fn read_key_event() -> KeyEvent {
 }
 
 pub fn display_command(command: &str) -> usize {
-    let width = get_terminal_width();
+    let width = terminal_width();
     let lines: Vec<&str> = command.lines().collect();
     if lines.len() == 1 {
         let visual = count_visual_lines(&format!("$ {}", command), width);
@@ -150,7 +150,7 @@ pub fn display_command(command: &str) -> usize {
 }
 
 pub fn display_explanation(explanation: &str) -> usize {
-    let width = get_terminal_width();
+    let width = terminal_width();
     let styled = style_html_tags(explanation);
     let visual = count_visual_lines(&styled, width);
     let lines: Vec<&str> = styled.lines().collect();
@@ -272,7 +272,7 @@ pub fn confirm_execution(
 }
 
 fn confirmation_prompt(mode: ConfirmPromptMode) -> usize {
-    let width = get_terminal_width();
+    let width = terminal_width();
     let mut visual = 0;
     if matches!(mode, ConfirmPromptMode::WithExplain) {
         let line1 = format!("{}", "Run this?".custom_color(CTP_YELLOW));
@@ -307,7 +307,7 @@ fn confirmation_prompt(mode: ConfirmPromptMode) -> usize {
 /// confirmation prompt lines from the terminal. Returns the edited command on Enter,
 /// or exits with code 130 on Ctrl+C.
 pub fn edit_command(current: &str) -> Option<String> {
-    let width = get_terminal_width();
+    let width = terminal_width();
     let mut buf: Vec<char> = current.chars().collect();
     let mut pos = buf.len();
 

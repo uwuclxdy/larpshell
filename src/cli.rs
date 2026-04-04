@@ -247,7 +247,7 @@ pub fn prompt_input_with_default(
         .map_err(LarpshellError::InquireError)
 }
 
-pub fn get_home_dir() -> PathBuf {
+pub fn home_dir() -> PathBuf {
     env::var("HOME")
         .ok()
         .or_else(|| env::var("USERPROFILE").ok())

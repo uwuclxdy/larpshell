@@ -239,7 +239,7 @@ model = "openrouter/auto"
     assert_eq!(config.active_provider, ActiveProvider::OpenRouter);
 
     let provider_config = config
-        .get_provider_config()
+        .provider_config()
         .expect("openrouter provider config should resolve");
 
     assert_eq!(provider_config.provider_type, ActiveProvider::OpenRouter);
@@ -261,7 +261,7 @@ provider = "openrouter"
 
     let config: Config = from_str(config_toml).expect("openrouter provider enum should parse");
     let error = config
-        .get_provider_config()
+        .provider_config()
         .expect_err("missing openrouter config should return an error");
 
     match error {

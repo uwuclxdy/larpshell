@@ -31,7 +31,7 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn get_provider_config(&self) -> Result<ProviderConfig, LarpshellError> {
+    pub fn provider_config(&self) -> Result<ProviderConfig, LarpshellError> {
         match self.active_provider {
             ActiveProvider::Gemini => Ok(ProviderConfig {
                 provider_type: ActiveProvider::Gemini,
@@ -155,51 +155,51 @@ pub fn ensure_config_dir() -> Result<PathBuf, LarpshellError> {
     Ok(config_dir)
 }
 
-fn get_config_path() -> Result<PathBuf, LarpshellError> {
+fn config_path() -> Result<PathBuf, LarpshellError> {
     Ok(ensure_config_dir()?.join("config.toml"))
 }
 
-pub fn get_sys_prompt_path() -> Result<PathBuf, LarpshellError> {
+pub fn sys_prompt_path() -> Result<PathBuf, LarpshellError> {
     Ok(ensure_config_dir()?.join("sys-prompt.txt"))
 }
 
 pub fn load_sys_prompt() -> Option<String> {
-    fs::read_to_string(get_sys_prompt_path().ok()?).ok()
+    fs::read_to_string(sys_prompt_path().ok()?).ok()
 }
 
 pub fn save_sys_prompt(content: &str) -> Result<(), LarpshellError> {
-    Ok(fs::write(get_sys_prompt_path()?, content)?)
+    Ok(fs::write(sys_prompt_path()?, content)?)
 }
 
-pub fn get_explain_prompt_path() -> Result<PathBuf, LarpshellError> {
+pub fn explain_prompt_path() -> Result<PathBuf, LarpshellError> {
     Ok(ensure_config_dir()?.join("explain-prompt.txt"))
 }
 
 pub fn load_explain_prompt() -> Option<String> {
     let _ = migration::migrate_explain_prompt();
-    fs::read_to_string(get_explain_prompt_path().ok()?).ok()
+    fs::read_to_string(explain_prompt_path().ok()?).ok()
 }
 
 pub fn save_explain_prompt(content: &str) -> Result<(), LarpshellError> {
-    Ok(fs::write(get_explain_prompt_path()?, content)?)
+    Ok(fs::write(explain_prompt_path()?, content)?)
 }
 
-fn get_history_disabled_path() -> Result<PathBuf, LarpshellError> {
+fn history_disabled_path() -> Result<PathBuf, LarpshellError> {
     Ok(ensure_config_dir()?.join(".history-disabled"))
 }
 
-pub fn get_history_path() -> Result<PathBuf, LarpshellError> {
+pub fn history_path() -> Result<PathBuf, LarpshellError> {
     Ok(ensure_config_dir()?.join(".history"))
 }
 
 pub fn history_enabled() -> bool {
-    get_history_disabled_path()
+    history_disabled_path()
         .map(|p| !p.exists())
         .unwrap_or(true)
 }
 
 pub fn set_history_enabled(enabled: bool) -> Result<(), LarpshellError> {
-    let path = get_history_disabled_path()?;
+    let path = history_disabled_path()?;
     if !enabled {
         fs::write(&path, "")
             .map_err(|e| LarpshellError::ConfigError(format!("failed to disable history: {e}")))?;
@@ -218,7 +218,7 @@ pub fn set_agent_enabled(enabled: bool) -> Result<(), LarpshellError> {
 }
 
 pub fn load_config() -> Result<Config, LarpshellError> {
-    let config_path = get_config_path()?;
+    let config_path = config_path()?;
     let contents = fs::read_to_string(&config_path)?;
 
     match toml::from_str::<Config>(&contents) {
@@ -235,7 +235,7 @@ pub fn load_config() -> Result<Config, LarpshellError> {
 }
 
 pub fn save_config(config: &Config) -> Result<(), LarpshellError> {
-    let config_path = get_config_path()?;
+    let config_path = config_path()?;
     let toml_string = toml::to_string_pretty(config)?;
     fs::write(&config_path, toml_string)?;
     Ok(())
@@ -339,7 +339,7 @@ fn display_config_summary(
     eprintln!();
     eprintln!("Provider: {}", provider_name);
 
-    let provider_config = config.get_provider_config()?;
+    let provider_config = config.provider_config()?;
     match &provider_config.config {
         ProviderSpecificConfig::Gemini { gemini } => {
             eprintln!("Model: {}", gemini.model);

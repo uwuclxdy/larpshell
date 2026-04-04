@@ -1,6 +1,6 @@
-use crate::common::{get_current_directory, get_os, get_shell, get_username};
+use crate::common::{current_directory, os_name, shell_name, username};
 use crate::config::{
-    get_explain_prompt_path, get_sys_prompt_path, save_explain_prompt, save_sys_prompt,
+    explain_prompt_path, sys_prompt_path, save_explain_prompt, save_sys_prompt,
 };
 use crate::error::LarpshellError;
 
@@ -25,13 +25,13 @@ Rules:
 User request: {request}";
 
 pub fn create_system_prompt(user_request: &str, template: Option<&str>) -> String {
-    let cwd = get_current_directory();
-    let os = get_os();
-    let shell = get_shell();
+    let cwd = current_directory();
+    let os = os_name();
+    let shell = shell_name();
     let home = dirs::home_dir()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|| "~".to_string());
-    let user = get_username();
+    let user = username();
 
     let tmpl = template.unwrap_or(DEFAULT_PROMPT_TEMPLATE);
 
@@ -90,13 +90,13 @@ pub fn clean_explanation(response: &str, command: &str) -> String {
 }
 
 pub fn create_prompts() -> Result<(), LarpshellError> {
-    let sys_path = get_sys_prompt_path()?;
+    let sys_path = sys_prompt_path()?;
     if !sys_path.exists() {
         save_sys_prompt(DEFAULT_PROMPT_TEMPLATE)
             .map_err(|e| LarpshellError::ConfigError(e.to_string()))?;
     }
 
-    let explain_path = get_explain_prompt_path()?;
+    let explain_path = explain_prompt_path()?;
     if !explain_path.exists() {
         save_explain_prompt(DEFAULT_EXPLAIN_PROMPT)
             .map_err(|e| LarpshellError::ConfigError(e.to_string()))?;

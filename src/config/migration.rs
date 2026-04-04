@@ -7,7 +7,7 @@ use crate::prompt::DEFAULT_EXPLAIN_PROMPT;
 const OLD_EXPLAIN_PROMPT_V1: &str = include_str!("../prompts/old_explain_v1.md");
 const OLD_EXPLAIN_PROMPT_V2: &str = include_str!("../prompts/old_explain_v2.md");
 
-use super::{ActiveProvider, Config, MultiProviderConfig, get_explain_prompt_path};
+use super::{ActiveProvider, Config, MultiProviderConfig, explain_prompt_path};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct V1ProviderSection {
@@ -61,7 +61,7 @@ impl Migrator for ConfigMigrator {
     }
 }
 
-fn get_migrators() -> Vec<Box<dyn Migrator>> {
+fn migrators() -> Vec<Box<dyn Migrator>> {
     vec![Box::new(ConfigMigrator)]
 }
 
@@ -77,19 +77,19 @@ impl Migrator for ExplainPromptMigrator {
     }
 }
 
-fn get_explain_prompt_migrators() -> Vec<Box<dyn Migrator>> {
+fn explain_prompt_migrators() -> Vec<Box<dyn Migrator>> {
     vec![Box::new(ExplainPromptMigrator)]
 }
 
 pub fn migrate_explain_prompt() -> Result<bool, LarpshellError> {
-    let explain_prompt_path = get_explain_prompt_path()?;
+    let explain_prompt_path = explain_prompt_path()?;
 
     if !explain_prompt_path.exists() {
         return Ok(false);
     }
 
     let content = fs::read_to_string(&explain_prompt_path)?;
-    let migrators = get_explain_prompt_migrators();
+    let migrators = explain_prompt_migrators();
 
     for migrator in migrators {
         if migrator.can_migrate(&content) {
@@ -104,7 +104,7 @@ pub fn migrate_explain_prompt() -> Result<bool, LarpshellError> {
 
 pub fn migrate_config(config_path: &Path) -> Result<bool, LarpshellError> {
     let content = fs::read_to_string(config_path)?;
-    let migrators = get_migrators();
+    let migrators = migrators();
 
     for migrator in migrators {
         if migrator.can_migrate(&content) {

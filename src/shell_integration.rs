@@ -1,7 +1,7 @@
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 
-use crate::cli::get_home_dir;
+use crate::cli::home_dir;
 use crate::error::LarpshellError;
 
 pub fn generate_bash_autocomplete() -> &'static str {
@@ -184,7 +184,7 @@ fn verify_and_fix_autocomplete() -> Result<(), LarpshellError> {
 }
 
 fn verify_and_fix_bash_autocomplete() -> Result<(), LarpshellError> {
-    let home = get_home_dir();
+    let home = home_dir();
     let completion_path = home.join(".local/share/bash-completion/completions/larpshell");
 
     if !completion_path.exists() {
@@ -207,7 +207,7 @@ fn verify_and_fix_bash_autocomplete() -> Result<(), LarpshellError> {
 }
 
 fn verify_and_fix_zsh_autocomplete() -> Result<(), LarpshellError> {
-    let home = get_home_dir();
+    let home = home_dir();
     let completion_path = home.join(".local/share/zsh/site-functions/_larpshell");
 
     if !completion_path.exists() {
@@ -230,7 +230,7 @@ fn verify_and_fix_zsh_autocomplete() -> Result<(), LarpshellError> {
 }
 
 fn verify_and_fix_fish_autocomplete() -> Result<(), LarpshellError> {
-    let home = get_home_dir();
+    let home = home_dir();
     let completion_path = home.join(".config/fish/completions/larpshell.fish");
 
     if !completion_path.exists() {
@@ -252,7 +252,7 @@ fn verify_and_fix_fish_autocomplete() -> Result<(), LarpshellError> {
 }
 
 fn verify_and_fix_bash_integration() -> Result<(), LarpshellError> {
-    let home = get_home_dir();
+    let home = home_dir();
     let bashrc_path = home.join(".bashrc");
 
     if !bashrc_path.exists() {
@@ -279,7 +279,7 @@ fn verify_and_fix_bash_integration() -> Result<(), LarpshellError> {
 }
 
 fn verify_and_fix_fish_integration() -> Result<(), LarpshellError> {
-    let home = get_home_dir();
+    let home = home_dir();
     let fish_function_path = home.join(".config/fish/functions/larpshell.fish");
 
     if !fish_function_path.exists() {
@@ -301,7 +301,7 @@ fn verify_and_fix_fish_integration() -> Result<(), LarpshellError> {
 }
 
 fn setup_bash_integration() -> Result<bool, LarpshellError> {
-    let home = get_home_dir();
+    let home = home_dir();
     let bashrc_path = home.join(".bashrc");
 
     if !bashrc_path.exists() {
@@ -323,7 +323,7 @@ fn setup_bash_integration() -> Result<bool, LarpshellError> {
 }
 
 fn setup_fish_integration() -> Result<bool, LarpshellError> {
-    let home = get_home_dir();
+    let home = home_dir();
     let fish_functions_dir = home.join(".config/fish/functions");
     let fish_function_path = fish_functions_dir.join("larpshell.fish");
 
@@ -399,7 +399,7 @@ fn remove_marked_function_block(content: &str, marker: &str, function_sig: &str)
 }
 
 pub fn remove_bash_integration() -> Result<bool, LarpshellError> {
-    let home = get_home_dir();
+    let home = home_dir();
     let bashrc_path = home.join(".bashrc");
 
     if !bashrc_path.exists() {
@@ -423,7 +423,7 @@ pub fn remove_bash_integration() -> Result<bool, LarpshellError> {
 }
 
 pub fn remove_fish_integration() -> Result<bool, LarpshellError> {
-    let home = get_home_dir();
+    let home = home_dir();
     let fish_function_path = home.join(".config/fish/functions/larpshell.fish");
 
     if fish_function_path.exists() {
@@ -442,7 +442,7 @@ fn setup_autocomplete() -> Result<bool, LarpshellError> {
 }
 
 fn setup_bash_autocomplete() -> Result<bool, LarpshellError> {
-    let home = get_home_dir();
+    let home = home_dir();
     let completion_dir = home.join(".local/share/bash-completion/completions");
     let completion_path = completion_dir.join("larpshell");
 
@@ -465,7 +465,7 @@ fn setup_bash_autocomplete() -> Result<bool, LarpshellError> {
 }
 
 fn setup_zsh_autocomplete() -> Result<bool, LarpshellError> {
-    let home = get_home_dir();
+    let home = home_dir();
     let zsh_config = home.join(".zshrc");
     if !zsh_config.exists() {
         return Ok(false);
@@ -501,7 +501,7 @@ fn setup_zsh_autocomplete() -> Result<bool, LarpshellError> {
 }
 
 fn setup_fish_autocomplete() -> Result<bool, LarpshellError> {
-    let home = get_home_dir();
+    let home = home_dir();
     let fish_config_dir = home.join(".config/fish");
     if !fish_config_dir.exists() {
         return Ok(false);
@@ -528,7 +528,7 @@ fn setup_fish_autocomplete() -> Result<bool, LarpshellError> {
 }
 
 fn remove_bash_autocomplete() -> Result<bool, LarpshellError> {
-    let home = get_home_dir();
+    let home = home_dir();
     let completion_path = home.join(".local/share/bash-completion/completions/larpshell");
 
     if completion_path.exists() {
@@ -540,7 +540,7 @@ fn remove_bash_autocomplete() -> Result<bool, LarpshellError> {
 }
 
 fn remove_zsh_completion_file() -> Result<bool, LarpshellError> {
-    let home = get_home_dir();
+    let home = home_dir();
     let completion_path = home.join(".local/share/zsh/site-functions/_larpshell");
 
     if completion_path.exists() {
@@ -596,7 +596,7 @@ fn remove_zsh_fpath_block(
 }
 
 fn remove_zsh_fpath_from_zshrc() -> Result<bool, LarpshellError> {
-    let home = get_home_dir();
+    let home = home_dir();
     remove_zsh_fpath_block(&home.join(".zshrc"), "# larpshell autocomplete")
 }
 
@@ -607,7 +607,7 @@ fn remove_zsh_autocomplete() -> Result<bool, LarpshellError> {
 }
 
 fn remove_fish_autocomplete() -> Result<bool, LarpshellError> {
-    let home = get_home_dir();
+    let home = home_dir();
     let completion_path = home.join(".config/fish/completions/larpshell.fish");
 
     if completion_path.exists() {
@@ -645,7 +645,7 @@ pub fn migrate_nlsh_rs_shell() -> Result<bool, LarpshellError> {
 }
 
 fn migrate_nlsh_rs_bash() -> Result<bool, LarpshellError> {
-    let home = get_home_dir();
+    let home = home_dir();
     let bashrc = home.join(".bashrc");
     if !bashrc.exists() {
         return Ok(false);
@@ -663,7 +663,7 @@ fn migrate_nlsh_rs_bash() -> Result<bool, LarpshellError> {
 }
 
 fn migrate_nlsh_rs_fish_fn() -> Result<bool, LarpshellError> {
-    let home = get_home_dir();
+    let home = home_dir();
     let path = home.join(".config/fish/functions/nlsh-rs.fish");
     if path.exists() {
         fs::remove_file(&path)?;
@@ -674,7 +674,7 @@ fn migrate_nlsh_rs_fish_fn() -> Result<bool, LarpshellError> {
 }
 
 fn migrate_nlsh_rs_completions() -> Result<bool, LarpshellError> {
-    let home = get_home_dir();
+    let home = home_dir();
     let mut removed = false;
     for path in [
         home.join(".local/share/bash-completion/completions/nlsh-rs"),
@@ -690,6 +690,6 @@ fn migrate_nlsh_rs_completions() -> Result<bool, LarpshellError> {
 }
 
 fn migrate_nlsh_rs_zsh_comment() -> Result<bool, LarpshellError> {
-    let home = get_home_dir();
+    let home = home_dir();
     remove_zsh_fpath_block(&home.join(".zshrc"), "# nlsh-rs autocomplete")
 }
