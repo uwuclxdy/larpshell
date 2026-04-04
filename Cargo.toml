@@ -1,9 +1,9 @@
 [package]
 name = "larpshell"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2024"
 license = "MIT"
-description = "Ctrl+C then Ctrl+V is simply too much work. Just let the LLMs rule your terminal directly!!"
+description = "Ctrl+C then Ctrl+V is simply too much work. Just let an LLM rule your terminal directly!!"
 homepage = "https://github.com/uwuclxdy/larpshell"
 repository = "https://github.com/uwuclxdy/larpshell"
 readme = "README.md"
