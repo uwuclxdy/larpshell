@@ -51,6 +51,12 @@ enum CommandMode {
     Single,
 }
 
+/// Switch to enable or disable features.
+enum Switch {
+    Enable,
+    Disable,
+}
+
 // ── cancellation wrapper ────────────────────────────────────────────────────
 
 async fn generate_with_cancellation(
@@ -97,9 +103,9 @@ fn execute_or_print(command: &str) -> Result<(), LarpshellError> {
 
 // ── subcommand handlers ─────────────────────────────────────────────────────
 
-fn handle_history_subcommand(enable: bool) -> Result<(), LarpshellError> {
-    config::set_history_enabled(enable)?;
-    if enable {
+fn handle_history_subcommand(switch: Switch) -> Result<(), LarpshellError> {
+    config::set_history_enabled(matches!(switch, Switch::Enable))?;
+    if matches!(switch, Switch::Enable) {
         cli::print_ok("history enabled — prompts will be saved across sessions.");
     } else {
         cli::print_ok("history disabled.");
@@ -107,9 +113,9 @@ fn handle_history_subcommand(enable: bool) -> Result<(), LarpshellError> {
     Ok(())
 }
 
-fn handle_agent_subcommand(enable: bool) -> Result<(), LarpshellError> {
-    config::set_agent_enabled(enable)?;
-    if enable {
+fn handle_agent_subcommand(switch: Switch) -> Result<(), LarpshellError> {
+    config::set_agent_enabled(matches!(switch, Switch::Enable))?;
+    if matches!(switch, Switch::Enable) {
         cli::print_ok("agent mode enabled — tools will be available for context gathering.");
     } else {
         cli::print_ok("agent mode disabled.");
@@ -259,11 +265,11 @@ async fn inner_main() -> Result<(), LarpshellError> {
                 return Ok(());
             }
             cli::Subcommands::History { enable } => {
-                handle_history_subcommand(*enable)?;
+                handle_history_subcommand(if *enable { Switch::Enable } else { Switch::Disable })?;
                 return Ok(());
             }
             cli::Subcommands::Agent { enable } => {
-                handle_agent_subcommand(*enable)?;
+                handle_agent_subcommand(if *enable { Switch::Enable } else { Switch::Disable })?;
                 return Ok(());
             }
             cli::Subcommands::Prompt { kind, action } => {
@@ -361,13 +367,13 @@ async fn inner_main() -> Result<(), LarpshellError> {
                         interactive_setup()?;
                     }
                     slash_commands::SlashCmd::Agent { enable } => {
-                        handle_agent_subcommand(enable)?;
+                        handle_agent_subcommand(if enable { Switch::Enable } else { Switch::Disable })?;
                     }
                     slash_commands::SlashCmd::Uninstall => {
                         uninstall_larpshell()?;
                     }
                     slash_commands::SlashCmd::History { enable } => {
-                        handle_history_subcommand(enable)?;
+                        handle_history_subcommand(if enable { Switch::Enable } else { Switch::Disable })?;
                     }
                     slash_commands::SlashCmd::Prompt { kind, action } => {
                         handle_prompt_subcommand(&kind, &action)?;
@@ -432,7 +438,7 @@ async fn inner_main() -> Result<(), LarpshellError> {
                         },
                     },
                     slash_commands::SlashCmd::Agent { enable } => {
-                        match handle_agent_subcommand(enable) {
+                        match handle_agent_subcommand(if enable { Switch::Enable } else { Switch::Disable }) {
                             Ok(()) => match load_config() {
                                 Ok(new_config) => {
                                     config = new_config;
@@ -451,7 +457,7 @@ async fn inner_main() -> Result<(), LarpshellError> {
                         }
                     }
                     slash_commands::SlashCmd::History { enable } => {
-                        if let Err(e) = handle_history_subcommand(enable) {
+                        if let Err(e) = handle_history_subcommand(if enable { Switch::Enable } else { Switch::Disable }) {
                             print_error(&e.to_string());
                         }
                     }

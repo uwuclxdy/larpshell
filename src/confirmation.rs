@@ -15,6 +15,11 @@ pub enum ConfirmResult {
     Cancel,
 }
 
+enum ConfirmPromptMode {
+    WithExplain,
+    Simple,
+}
+
 enum KeyEvent {
     Char(char),
     Backspace,
@@ -180,7 +185,7 @@ pub fn confirm_with_explain(
         return Ok(ConfirmResult::Yes);
     }
 
-    let prompt_lines = confirmation_prompt(true);
+    let prompt_lines = confirmation_prompt(ConfirmPromptMode::WithExplain);
     flush_stderr();
     flush_stdin_input();
 
@@ -230,7 +235,7 @@ pub fn confirm_execution(
         return Ok(ConfirmResult::Yes);
     }
 
-    let prompt_lines = confirmation_prompt(false);
+    let prompt_lines = confirmation_prompt(ConfirmPromptMode::Simple);
     flush_stderr();
     flush_stdin_input();
 
@@ -265,10 +270,10 @@ pub fn confirm_execution(
     }
 }
 
-fn confirmation_prompt(with_explain: bool) -> usize {
+fn confirmation_prompt(mode: ConfirmPromptMode) -> usize {
     let width = get_terminal_width();
     let mut visual = 0;
-    if with_explain {
+    if matches!(mode, ConfirmPromptMode::WithExplain) {
         let line1 = format!("{}", "Run this?".custom_color(CTP_YELLOW));
         visual += count_visual_lines(&line1, width);
         eprintln!("{}", line1);
