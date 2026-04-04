@@ -1,3 +1,4 @@
+pub mod mcp;
 pub mod tools;
 
 use colored::*;
