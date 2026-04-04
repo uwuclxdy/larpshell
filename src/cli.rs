@@ -55,7 +55,7 @@ pub enum Subcommands {
         command: Vec<String>,
     },
     Agent {
-        enable: bool,
+        enable: Option<bool>,
     },
 }
 
@@ -105,7 +105,7 @@ pub fn parse_cli_args() -> Result<CliArgs, LarpshellError> {
         },
         Agent {
             #[arg(value_enum)]
-            toggle: ClapAgentToggle,
+            toggle: Option<ClapAgentToggle>,
         },
     }
 
@@ -153,7 +153,7 @@ pub fn parse_cli_args() -> Result<CliArgs, LarpshellError> {
         }),
         Some(Commands::Explain { command }) => Some(Subcommands::Explain { command }),
         Some(Commands::Agent { toggle }) => Some(Subcommands::Agent {
-            enable: matches!(toggle, ClapAgentToggle::On),
+            enable: toggle.map(|t| matches!(t, ClapAgentToggle::On)),
         }),
         None => None,
     };

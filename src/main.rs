@@ -114,12 +114,24 @@ fn handle_history_subcommand(switch: Switch) -> Result<(), LarpshellError> {
     Ok(())
 }
 
-fn handle_agent_subcommand(switch: Switch) -> Result<(), LarpshellError> {
-    config::set_agent_enabled(matches!(switch, Switch::Enable))?;
-    if matches!(switch, Switch::Enable) {
-        cli::print_ok("agent mode enabled — tools will be available for context gathering.");
-    } else {
-        cli::print_ok("agent mode disabled.");
+fn handle_agent_subcommand(switch: Option<Switch>) -> Result<(), LarpshellError> {
+    match switch {
+        Some(Switch::Enable) => {
+            config::set_agent_enabled(true)?;
+            cli::print_ok("agent mode enabled — tools will be available for context gathering.");
+        }
+        Some(Switch::Disable) => {
+            config::set_agent_enabled(false)?;
+            cli::print_ok("agent mode disabled.");
+        }
+        None => {
+            let enabled = config::load_config()?.agent;
+            if enabled {
+                cli::print_ok("agent mode is currently enabled.");
+            } else {
+                cli::print_ok("agent mode is currently disabled.");
+            }
+        }
     }
     Ok(())
 }
@@ -270,7 +282,7 @@ async fn inner_main() -> Result<(), LarpshellError> {
                 return Ok(());
             }
             cli::Subcommands::Agent { enable } => {
-                handle_agent_subcommand(if *enable { Switch::Enable } else { Switch::Disable })?;
+                handle_agent_subcommand(enable.map(|e| if e { Switch::Enable } else { Switch::Disable }))?;
                 return Ok(());
             }
             cli::Subcommands::Prompt { kind, action } => {
@@ -368,7 +380,7 @@ async fn inner_main() -> Result<(), LarpshellError> {
                         interactive_setup()?;
                     }
                     slash_commands::SlashCmd::Agent { enable } => {
-                        handle_agent_subcommand(if enable { Switch::Enable } else { Switch::Disable })?;
+                        handle_agent_subcommand(Some(if enable { Switch::Enable } else { Switch::Disable }))?;
                     }
                     slash_commands::SlashCmd::Uninstall => {
                         uninstall_larpshell()?;
@@ -439,7 +451,7 @@ async fn inner_main() -> Result<(), LarpshellError> {
                         },
                     },
                     slash_commands::SlashCmd::Agent { enable } => {
-                        match handle_agent_subcommand(if enable { Switch::Enable } else { Switch::Disable }) {
+                        match handle_agent_subcommand(Some(if enable { Switch::Enable } else { Switch::Disable })) {
                             Ok(()) => match load_config() {
                                 Ok(new_config) => {
                                     config = new_config;
