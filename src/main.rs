@@ -52,6 +52,7 @@ enum CommandMode {
 }
 
 /// Switch to enable or disable features.
+#[derive(Debug, Clone, Copy, PartialEq)]
 enum Switch {
     Enable,
     Disable,

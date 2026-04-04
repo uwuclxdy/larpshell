@@ -15,6 +15,7 @@ pub enum ConfirmResult {
     Cancel,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
 enum ConfirmPromptMode {
     WithExplain,
     Simple,
