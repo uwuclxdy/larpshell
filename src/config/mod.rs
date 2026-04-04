@@ -282,7 +282,7 @@ pub fn interactive_setup() -> Result<(), LarpshellError> {
         let result = Confirm::new("Use saved credentials?")
             .with_default(true)
             .prompt()
-            .map_err(|e| LarpshellError::ConfigError(e.to_string()))?;
+            .map_err(LarpshellError::InquireError)?;
         clear_line();
         result
     } else {

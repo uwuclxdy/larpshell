@@ -44,6 +44,9 @@ pub enum LarpshellError {
     #[error("toml serialize error: {0}")]
     TomlSeError(#[from] toml::ser::Error),
 
+    #[error("user input error: {0}")]
+    InquireError(#[from] inquire::InquireError),
+
     #[error("request cancelled")]
     Cancelled,
 

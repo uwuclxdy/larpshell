@@ -224,7 +224,7 @@ pub fn prompt_select(
     let selection = Select::new(prompt, items.to_vec())
         .with_starting_cursor(default)
         .prompt()
-        .map_err(|e| LarpshellError::ConfigError(e.to_string()))?;
+        .map_err(LarpshellError::InquireError)?;
     Ok(items
         .iter()
         .position(|x| x == &selection)
@@ -232,19 +232,19 @@ pub fn prompt_select(
 }
 
 pub fn prompt_input(prompt: &str) -> Result<String, LarpshellError> {
-    Ok(Text::new(prompt)
+    Text::new(prompt)
         .prompt()
-        .map_err(|e| LarpshellError::ConfigError(e.to_string()))?)
+        .map_err(LarpshellError::InquireError)
 }
 
 pub fn prompt_input_with_default(
     prompt: &str,
     default: &str,
 ) -> Result<String, LarpshellError> {
-    Ok(Text::new(prompt)
+    Text::new(prompt)
         .with_default(default)
         .prompt()
-        .map_err(|e| LarpshellError::ConfigError(e.to_string()))?)
+        .map_err(LarpshellError::InquireError)
 }
 
 pub fn get_home_dir() -> PathBuf {

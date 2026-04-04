@@ -66,7 +66,7 @@ fn remove_config_optional() -> Result<(), LarpshellError> {
     let remove_config = Confirm::new("Remove configuration?")
         .with_default(false)
         .prompt()
-        .map_err(|e| LarpshellError::ConfigError(e.to_string()))?;
+        .map_err(LarpshellError::InquireError)?;
     clear_line();
 
     if remove_config {
@@ -96,7 +96,7 @@ fn remove_repo_optional() -> Result<(), LarpshellError> {
             let remove_repo = Confirm::new("Remove current directory (larpshell repository)?")
                 .with_default(false)
                 .prompt()
-                .map_err(|e| LarpshellError::ConfigError(e.to_string()))?;
+                .map_err(LarpshellError::InquireError)?;
             clear_line();
 
             if remove_repo {
