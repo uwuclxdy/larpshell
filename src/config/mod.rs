@@ -182,6 +182,34 @@ pub fn save_explain_prompt(content: &str) -> Result<(), Box<dyn std::error::Erro
     Ok(fs::write(get_explain_prompt_path()?, content)?)
 }
 
+fn get_history_disabled_path() -> Result<PathBuf, LarpshellError> {
+    Ok(ensure_config_dir()?.join(".history-disabled"))
+}
+
+pub fn get_history_path() -> Result<PathBuf, LarpshellError> {
+    Ok(ensure_config_dir()?.join(".history"))
+}
+
+pub fn history_enabled() -> bool {
+    get_history_disabled_path()
+        .map(|p| !p.exists())
+        .unwrap_or(true)
+}
+
+pub fn set_history_enabled(enabled: bool) -> Result<(), LarpshellError> {
+    let path = get_history_disabled_path()?;
+    if !enabled {
+        fs::write(&path, "").map_err(|e| {
+            LarpshellError::ConfigError(format!("failed to disable history: {e}"))
+        })?;
+    } else if path.exists() {
+        fs::remove_file(&path).map_err(|e| {
+            LarpshellError::ConfigError(format!("failed to enable history: {e}"))
+        })?;
+    }
+    Ok(())
+}
+
 pub fn load_config() -> Result<Config, Box<dyn std::error::Error>> {
     let config_path = get_config_path()?;
     let contents = fs::read_to_string(&config_path)?;

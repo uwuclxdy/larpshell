@@ -33,6 +33,17 @@ static PROMPT_ACTIONS: &[ArgChoice] = &[
     },
 ];
 
+static HISTORY_TOGGLES: &[ArgChoice] = &[
+    ArgChoice {
+        value: "on",
+        description: "save prompts across sessions",
+    },
+    ArgChoice {
+        value: "off",
+        description: "stop saving history",
+    },
+];
+
 pub const COMMANDS: &[SlashCommand] = &[
     SlashCommand {
         name: "api",
@@ -41,6 +52,10 @@ pub const COMMANDS: &[SlashCommand] = &[
     SlashCommand {
         name: "explain",
         description: "explain a shell command",
+    },
+    SlashCommand {
+        name: "history",
+        description: "enable or disable prompt history",
     },
     SlashCommand {
         name: "prompt",
@@ -76,6 +91,10 @@ pub fn arg_completions(line: &str) -> Option<(usize, Vec<&'static ArgChoice>)> {
     };
 
     let pool: &[ArgChoice] = match cmd {
+        "/history" => match prior_args.len() {
+            0 => HISTORY_TOGGLES,
+            _ => return None,
+        },
         "/prompt" => match prior_args.len() {
             0 => PROMPT_KINDS,
             1 => PROMPT_ACTIONS,
@@ -114,6 +133,7 @@ pub fn filter(typed: &str) -> Vec<&'static SlashCommand> {
 pub enum SlashCmd {
     Api,
     Uninstall,
+    History { enable: bool },
     Prompt {
         kind: PromptKind,
         action: PromptAction,
@@ -131,6 +151,10 @@ pub fn parse(input: &str) -> SlashCmd {
         Some("/api") => SlashCmd::Api,
         Some("/uninstall") => SlashCmd::Uninstall,
         Some("/quit") => SlashCmd::Quit,
+        Some("/history") => {
+            let enable = matches!(parts.next(), Some("on"));
+            SlashCmd::History { enable }
+        }
         Some("/explain") => SlashCmd::Explain {
             args: parts.map(|s| s.to_string()).collect(),
         },

@@ -43,6 +43,9 @@ pub struct CliArgs {
 pub enum Subcommands {
     Api,
     Uninstall,
+    History {
+        enable: bool,
+    },
     Prompt {
         kind: PromptKind,
         action: PromptAction,
@@ -83,6 +86,10 @@ pub fn parse_cli_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
     enum Commands {
         Api,
         Uninstall,
+        History {
+            #[arg(value_enum)]
+            toggle: ClapHistoryToggle,
+        },
         Prompt {
             #[arg(value_enum, default_value_t = ClapPromptKind::System)]
             kind: ClapPromptKind,
@@ -92,6 +99,12 @@ pub fn parse_cli_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
         Explain {
             command: Vec<String>,
         },
+    }
+
+    #[derive(clap::ValueEnum, Clone)]
+    enum ClapHistoryToggle {
+        On,
+        Off,
     }
 
     #[derive(clap::ValueEnum, Clone)]
@@ -111,6 +124,9 @@ pub fn parse_cli_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
     let subcommand = match cli.subcommand {
         Some(Commands::Api) => Some(Subcommands::Api),
         Some(Commands::Uninstall) => Some(Subcommands::Uninstall),
+        Some(Commands::History { toggle }) => Some(Subcommands::History {
+            enable: matches!(toggle, ClapHistoryToggle::On),
+        }),
         Some(Commands::Prompt { kind, action }) => Some(Subcommands::Prompt {
             kind: match kind {
                 ClapPromptKind::System => PromptKind::System,

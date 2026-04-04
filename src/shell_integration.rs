@@ -79,10 +79,12 @@ pub fn generate_fish_autocomplete() -> &'static str {
 complete -c larpshell -f
 complete -c larpshell -n "__fish_use_subcommand" -a api -d 'configure API provider (Gemini, Ollama, OpenRouter, LM Studio, OpenAI)'
 complete -c larpshell -n "__fish_use_subcommand" -a explain -d 'explain a shell command'
+complete -c larpshell -n "__fish_use_subcommand" -a history -d 'enable or disable prompt history'
 complete -c larpshell -n "__fish_use_subcommand" -a prompt -d 'view or edit system/explain prompts'
 complete -c larpshell -n "__fish_use_subcommand" -a uninstall -d 'uninstall larpshell'
 complete -c larpshell -l help -d 'show help information'
 complete -c larpshell -l version -d 'show version information'
+complete -c larpshell -n "__fish_seen_subcommand_from history" -a "on off" -d 'toggle history'
 complete -c larpshell -n "__fish_seen_subcommand_from prompt" -a system -d 'system prompt'
 complete -c larpshell -n "__fish_seen_subcommand_from prompt" -a explain -d 'explain prompt'
 complete -c larpshell -n "__fish_seen_subcommand_from prompt; and __fish_seen_subcommand_from system explain" -a "show edit" -d 'prompt action'"#
@@ -96,7 +98,7 @@ pub fn generate_bash_function() -> &'static str {
     fi
 
     case "$1" in
-        api|explain|uninstall|prompt|--help|-h|--version|-V)
+        api|explain|history|uninstall|prompt|--help|-h|--version|-V)
             command larpshell "$@"
             return $?
             ;;
@@ -124,7 +126,7 @@ pub fn generate_fish_function() -> &'static str {
     end
 
     switch $argv[1]
-        case api explain uninstall prompt -- help --help -h --version -V
+        case api explain history uninstall prompt -- help --help -h --version -V
             command larpshell $argv
             return $status
     end

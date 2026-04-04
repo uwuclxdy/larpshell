@@ -17,6 +17,7 @@ use rustyline::{
 };
 
 use crate::common::{CTP_BLUE, CTP_OVERLAY0, CTP_PRIMARY, get_current_directory, show_cursor};
+use crate::config;
 use crate::slash_commands;
 
 // Number of preview lines currently drawn below the prompt.
@@ -279,6 +280,11 @@ where
             Event::Any,
             EventHandler::Conditional(Box::new(SlashPreviewHandler)),
         );
+        if config::history_enabled() {
+            if let Ok(path) = config::get_history_path() {
+                let _ = ed.load_history(&path);
+            }
+        }
         ed
     });
     let cwd = get_current_directory();
@@ -294,6 +300,11 @@ where
             let trimmed = line.trim();
             if !trimmed.is_empty() {
                 let _ = editor.add_history_entry(&line);
+                if config::history_enabled() {
+                    if let Ok(path) = config::get_history_path() {
+                        let _ = editor.save_history(&path);
+                    }
+                }
                 Ok(Some(trimmed.to_string()))
             } else {
                 Ok(None)

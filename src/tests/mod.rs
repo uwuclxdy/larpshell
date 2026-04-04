@@ -143,6 +143,44 @@ fn run_with_stdin(
         .expect("failed to wait for larpshell")
 }
 
+// ── history subcommand tests ─────────────────────────────────────────────────
+
+#[test]
+fn history_on_prints_confirmation() {
+    let home = temp_home("history_on");
+    let out = run(&home, &["history", "on"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "history on should exit 0; stderr: {stderr}");
+    assert!(
+        stderr.contains("history") && (stderr.contains("on") || stderr.contains("enabled")),
+        "expected confirmation message; stderr: {stderr}"
+    );
+    let disabled_flag = home.join("config").join("larpshell").join(".history-disabled");
+    assert!(!disabled_flag.exists(), ".history-disabled must not exist after 'history on'");
+}
+
+#[test]
+fn history_off_creates_disabled_flag_and_prints_confirmation() {
+    let home = temp_home("history_off");
+
+    let out = run(&home, &["history", "off"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "history off should exit 0; stderr: {stderr}");
+    assert!(
+        stderr.contains("history") && (stderr.contains("off") || stderr.contains("disabled")),
+        "expected confirmation message; stderr: {stderr}"
+    );
+    let disabled_flag = home.join("config").join("larpshell").join(".history-disabled");
+    assert!(disabled_flag.exists(), ".history-disabled must exist after 'history off'");
+}
+
+#[test]
+fn history_enabled_by_default() {
+    let home = temp_home("history_default");
+    let disabled_flag = home.join("config").join("larpshell").join(".history-disabled");
+    assert!(!disabled_flag.exists(), ".history-disabled must not exist in a fresh home");
+}
+
 // ── provider config tests ───────────────────────────────────────────────────
 
 #[test]

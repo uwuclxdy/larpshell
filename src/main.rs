@@ -95,6 +95,16 @@ fn execute_or_print(command: &str) -> Result<(), Box<dyn std::error::Error>> {
 
 // ── subcommand handlers ─────────────────────────────────────────────────────
 
+fn handle_history_subcommand(enable: bool) -> Result<(), Box<dyn std::error::Error>> {
+    config::set_history_enabled(enable)?;
+    if enable {
+        cli::print_ok("history enabled — prompts will be saved across sessions.");
+    } else {
+        cli::print_ok("history disabled.");
+    }
+    Ok(())
+}
+
 fn handle_prompt_subcommand(
     kind: &PromptKind,
     action: &PromptAction,
@@ -236,6 +246,10 @@ async fn inner_main() -> Result<(), Box<dyn std::error::Error>> {
                 uninstall_larpshell()?;
                 return Ok(());
             }
+            cli::Subcommands::History { enable } => {
+                handle_history_subcommand(*enable)?;
+                return Ok(());
+            }
             cli::Subcommands::Prompt { kind, action } => {
                 handle_prompt_subcommand(kind, action)?;
                 return Ok(());
@@ -333,6 +347,11 @@ async fn inner_main() -> Result<(), Box<dyn std::error::Error>> {
                     },
                     slash_commands::SlashCmd::Uninstall => {
                         if let Err(e) = uninstall_larpshell() {
+                            print_error(&e.to_string());
+                        }
+                    }
+                    slash_commands::SlashCmd::History { enable } => {
+                        if let Err(e) = handle_history_subcommand(enable) {
                             print_error(&e.to_string());
                         }
                     }
