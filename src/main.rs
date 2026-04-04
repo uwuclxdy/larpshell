@@ -435,6 +435,7 @@ async fn inner_main() -> Result<(), LarpshellError> {
                 Some(input) => input,
                 None => continue,
             };
+            clear_line();
 
             if user_input.starts_with('/') {
                 match slash_commands::parse(&user_input) {
