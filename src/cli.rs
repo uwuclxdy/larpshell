@@ -53,6 +53,9 @@ pub enum Subcommands {
     Explain {
         command: Vec<String>,
     },
+    Agent {
+        enable: bool,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -99,6 +102,10 @@ pub fn parse_cli_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
         Explain {
             command: Vec<String>,
         },
+        Agent {
+            #[arg(value_enum)]
+            toggle: ClapAgentToggle,
+        },
     }
 
     #[derive(clap::ValueEnum, Clone)]
@@ -117,6 +124,12 @@ pub fn parse_cli_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
     enum ClapPromptAction {
         Show,
         Edit,
+    }
+
+    #[derive(clap::ValueEnum, Clone)]
+    enum ClapAgentToggle {
+        On,
+        Off,
     }
 
     let cli = Cli::parse();
@@ -138,6 +151,9 @@ pub fn parse_cli_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
             },
         }),
         Some(Commands::Explain { command }) => Some(Subcommands::Explain { command }),
+        Some(Commands::Agent { toggle }) => Some(Subcommands::Agent {
+            enable: matches!(toggle, ClapAgentToggle::On),
+        }),
         None => None,
     };
 

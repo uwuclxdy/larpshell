@@ -26,6 +26,8 @@ pub struct Config {
     pub active_provider: ActiveProvider,
     #[serde(default)]
     pub providers: MultiProviderConfig,
+    #[serde(default)]
+    pub agent: bool,
 }
 
 impl Config {
@@ -199,14 +201,19 @@ pub fn history_enabled() -> bool {
 pub fn set_history_enabled(enabled: bool) -> Result<(), LarpshellError> {
     let path = get_history_disabled_path()?;
     if !enabled {
-        fs::write(&path, "").map_err(|e| {
-            LarpshellError::ConfigError(format!("failed to disable history: {e}"))
-        })?;
+        fs::write(&path, "")
+            .map_err(|e| LarpshellError::ConfigError(format!("failed to disable history: {e}")))?;
     } else if path.exists() {
-        fs::remove_file(&path).map_err(|e| {
-            LarpshellError::ConfigError(format!("failed to enable history: {e}"))
-        })?;
+        fs::remove_file(&path)
+            .map_err(|e| LarpshellError::ConfigError(format!("failed to enable history: {e}")))?;
     }
+    Ok(())
+}
+
+pub fn set_agent_enabled(enabled: bool) -> Result<(), Box<dyn std::error::Error>> {
+    let mut config = load_config()?;
+    config.agent = enabled;
+    save_config(&config)?;
     Ok(())
 }
 
@@ -314,6 +321,7 @@ pub fn interactive_setup() -> Result<(), Box<dyn std::error::Error>> {
     let config = Config {
         active_provider,
         providers: multi_providers,
+        agent: false,
     };
 
     save_config(&config)?;

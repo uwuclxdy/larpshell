@@ -105,6 +105,16 @@ fn handle_history_subcommand(enable: bool) -> Result<(), Box<dyn std::error::Err
     Ok(())
 }
 
+fn handle_agent_subcommand(enable: bool) -> Result<(), Box<dyn std::error::Error>> {
+    config::set_agent_enabled(enable)?;
+    if enable {
+        cli::print_ok("agent mode enabled — tools will be available for context gathering.");
+    } else {
+        cli::print_ok("agent mode disabled.");
+    }
+    Ok(())
+}
+
 fn handle_prompt_subcommand(
     kind: &PromptKind,
     action: &PromptAction,
@@ -248,6 +258,10 @@ async fn inner_main() -> Result<(), Box<dyn std::error::Error>> {
             }
             cli::Subcommands::History { enable } => {
                 handle_history_subcommand(*enable)?;
+                return Ok(());
+            }
+            cli::Subcommands::Agent { enable } => {
+                handle_agent_subcommand(*enable)?;
                 return Ok(());
             }
             cli::Subcommands::Prompt { kind, action } => {

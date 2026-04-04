@@ -50,6 +50,7 @@ impl Migrator for ConfigMigrator {
         let new_config = Config {
             active_provider,
             providers: old_config.providers,
+            agent: false,
         };
 
         let new_content = toml::to_string_pretty(&new_config)?;

@@ -6,6 +6,7 @@ use std::io::Write;
 use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::sync::OnceLock;
 use toml::from_str;
 
 mod edit;
@@ -16,7 +17,20 @@ fn binary() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/debug/larpshell")
 }
 
+fn ensure_binary_built() {
+    static BUILD_ONCE: OnceLock<()> = OnceLock::new();
+    BUILD_ONCE.get_or_init(|| {
+        let status = Command::new("cargo")
+            .args(["build", "--bin", "larpshell"])
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .status()
+            .expect("failed to build larpshell test binary");
+        assert!(status.success(), "cargo build --bin larpshell failed");
+    });
+}
+
 fn run(home: &std::path::Path, args: &[&str]) -> std::process::Output {
+    ensure_binary_built();
     Command::new(binary())
         .args(args)
         .env("HOME", home)
@@ -150,13 +164,22 @@ fn history_on_prints_confirmation() {
     let home = temp_home("history_on");
     let out = run(&home, &["history", "on"]);
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(out.status.success(), "history on should exit 0; stderr: {stderr}");
+    assert!(
+        out.status.success(),
+        "history on should exit 0; stderr: {stderr}"
+    );
     assert!(
         stderr.contains("history") && (stderr.contains("on") || stderr.contains("enabled")),
         "expected confirmation message; stderr: {stderr}"
     );
-    let disabled_flag = home.join("config").join("larpshell").join(".history-disabled");
-    assert!(!disabled_flag.exists(), ".history-disabled must not exist after 'history on'");
+    let disabled_flag = home
+        .join("config")
+        .join("larpshell")
+        .join(".history-disabled");
+    assert!(
+        !disabled_flag.exists(),
+        ".history-disabled must not exist after 'history on'"
+    );
 }
 
 #[test]
@@ -165,20 +188,35 @@ fn history_off_creates_disabled_flag_and_prints_confirmation() {
 
     let out = run(&home, &["history", "off"]);
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(out.status.success(), "history off should exit 0; stderr: {stderr}");
+    assert!(
+        out.status.success(),
+        "history off should exit 0; stderr: {stderr}"
+    );
     assert!(
         stderr.contains("history") && (stderr.contains("off") || stderr.contains("disabled")),
         "expected confirmation message; stderr: {stderr}"
     );
-    let disabled_flag = home.join("config").join("larpshell").join(".history-disabled");
-    assert!(disabled_flag.exists(), ".history-disabled must exist after 'history off'");
+    let disabled_flag = home
+        .join("config")
+        .join("larpshell")
+        .join(".history-disabled");
+    assert!(
+        disabled_flag.exists(),
+        ".history-disabled must exist after 'history off'"
+    );
 }
 
 #[test]
 fn history_enabled_by_default() {
     let home = temp_home("history_default");
-    let disabled_flag = home.join("config").join("larpshell").join(".history-disabled");
-    assert!(!disabled_flag.exists(), ".history-disabled must not exist in a fresh home");
+    let disabled_flag = home
+        .join("config")
+        .join("larpshell")
+        .join(".history-disabled");
+    assert!(
+        !disabled_flag.exists(),
+        ".history-disabled must not exist in a fresh home"
+    );
 }
 
 // ── provider config tests ───────────────────────────────────────────────────
@@ -268,4 +306,80 @@ fn connection_failure_prints_pretty_error() {
     eprintln!("stderr for debug: {:?}", stderr);
     // should include the styled prefix and the friendly message
     assert!(stderr.contains("error:") && stderr.contains("failed to connect"));
+}
+
+// ── agent config tests ─────────────────────────────────────────────────────
+
+#[test]
+fn agent_field_defaults_to_false() {
+    let config_toml = r#"
+provider = "ollama"
+
+[providers.ollama]
+base_url = "http://localhost:11434"
+model = "test"
+"#;
+    let config: Config = from_str(config_toml).expect("should parse without agent field");
+    assert!(!config.agent, "agent should default to false");
+}
+
+#[test]
+fn agent_field_parses_when_present() {
+    let config_toml = r#"
+provider = "ollama"
+agent = true
+
+[providers.ollama]
+base_url = "http://localhost:11434"
+model = "test"
+"#;
+    let config: Config = from_str(config_toml).expect("should parse with agent field");
+    assert!(config.agent, "agent should be true");
+}
+
+#[test]
+fn agent_subcommand_on_prints_confirmation() {
+    let home = temp_home("agent_on");
+    let port = mock_ollama(&[]);
+    write_ollama_config(&home, port);
+    let out = run(&home, &["agent", "on"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        out.status.success(),
+        "agent on should exit 0; stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("agent") && stderr.contains("enabled"),
+        "expected confirmation message; stderr: {stderr}"
+    );
+    let config_path = home.join("config").join("larpshell").join("config.toml");
+    let contents = fs::read_to_string(config_path).unwrap();
+    assert!(
+        contents.contains("agent = true"),
+        "config should have agent = true"
+    );
+}
+
+#[test]
+fn agent_subcommand_off_prints_confirmation() {
+    let home = temp_home("agent_off");
+    let port = mock_ollama(&[]);
+    write_ollama_config(&home, port);
+    run(&home, &["agent", "on"]);
+    let out = run(&home, &["agent", "off"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        out.status.success(),
+        "agent off should exit 0; stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("agent") && stderr.contains("disabled"),
+        "expected confirmation message; stderr: {stderr}"
+    );
+    let config_path = home.join("config").join("larpshell").join("config.toml");
+    let contents = fs::read_to_string(config_path).unwrap();
+    assert!(
+        contents.contains("agent = false"),
+        "config should have agent = false"
+    );
 }
