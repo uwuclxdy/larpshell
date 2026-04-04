@@ -322,7 +322,38 @@ async fn inner_main() -> Result<(), Box<dyn std::error::Error>> {
         std::io::stdin().read_to_string(&mut buf)?;
         let user_input = buf.trim().to_string();
         if !user_input.is_empty() {
-            process_command(&user_input, provider.as_ref(), &config, CommandMode::Single).await?;
+            if user_input.starts_with('/') {
+                match slash_commands::parse(&user_input) {
+                    slash_commands::SlashCmd::Quit => {
+                        update::print_if_available(update_task).await;
+                        return Ok(());
+                    }
+                    slash_commands::SlashCmd::Api => {
+                        interactive_setup()?;
+                    }
+                    slash_commands::SlashCmd::Agent { enable } => {
+                        handle_agent_subcommand(enable)?;
+                    }
+                    slash_commands::SlashCmd::Uninstall => {
+                        uninstall_larpshell()?;
+                    }
+                    slash_commands::SlashCmd::History { enable } => {
+                        handle_history_subcommand(enable)?;
+                    }
+                    slash_commands::SlashCmd::Prompt { kind, action } => {
+                        handle_prompt_subcommand(&kind, &action)?;
+                    }
+                    slash_commands::SlashCmd::Explain { args } => {
+                        handle_explain_subcommand(args, provider.as_ref()).await?;
+                    }
+                    slash_commands::SlashCmd::Unknown(s) => {
+                        print_error(&format!("unknown command '{s}'"));
+                    }
+                }
+            } else {
+                process_command(&user_input, provider.as_ref(), &config, CommandMode::Single)
+                    .await?;
+            }
         }
         update::print_if_available(update_task).await;
         return Ok(());
@@ -371,6 +402,15 @@ async fn inner_main() -> Result<(), Box<dyn std::error::Error>> {
                             },
                         },
                     },
+                    slash_commands::SlashCmd::Agent { enable } => {
+                        match handle_agent_subcommand(enable) {
+                            Ok(()) => match load_config() {
+                                Ok(new_config) => config = new_config,
+                                Err(e) => print_error(&format!("failed to reload config: {e}")),
+                            },
+                            Err(e) => print_error(&e.to_string()),
+                        }
+                    }
                     slash_commands::SlashCmd::Uninstall => {
                         if let Err(e) = uninstall_larpshell() {
                             print_error(&e.to_string());

@@ -44,10 +44,25 @@ static HISTORY_TOGGLES: &[ArgChoice] = &[
     },
 ];
 
+static AGENT_TOGGLES: &[ArgChoice] = &[
+    ArgChoice {
+        value: "on",
+        description: "enable agent mode with tools",
+    },
+    ArgChoice {
+        value: "off",
+        description: "disable agent mode",
+    },
+];
+
 pub const COMMANDS: &[SlashCommand] = &[
     SlashCommand {
         name: "api",
         description: "configure API provider",
+    },
+    SlashCommand {
+        name: "agent",
+        description: "enable or disable agent mode",
     },
     SlashCommand {
         name: "explain",
@@ -95,6 +110,10 @@ pub fn arg_completions(line: &str) -> Option<(usize, Vec<&'static ArgChoice>)> {
             0 => HISTORY_TOGGLES,
             _ => return None,
         },
+        "/agent" => match prior_args.len() {
+            0 => AGENT_TOGGLES,
+            _ => return None,
+        },
         "/prompt" => match prior_args.len() {
             0 => PROMPT_KINDS,
             1 => PROMPT_ACTIONS,
@@ -131,9 +150,14 @@ pub fn filter(typed: &str) -> Vec<&'static SlashCommand> {
 
 #[derive(Debug)]
 pub enum SlashCmd {
+    Agent {
+        enable: bool,
+    },
     Api,
     Uninstall,
-    History { enable: bool },
+    History {
+        enable: bool,
+    },
     Prompt {
         kind: PromptKind,
         action: PromptAction,
@@ -148,6 +172,10 @@ pub enum SlashCmd {
 pub fn parse(input: &str) -> SlashCmd {
     let mut parts = input.split_whitespace();
     match parts.next() {
+        Some("/agent") => {
+            let enable = matches!(parts.next(), Some("on"));
+            SlashCmd::Agent { enable }
+        }
         Some("/api") => SlashCmd::Api,
         Some("/uninstall") => SlashCmd::Uninstall,
         Some("/quit") => SlashCmd::Quit,
@@ -257,6 +285,45 @@ mod tests {
             }
             _ => panic!("expected Prompt"),
         }
+    }
+
+    #[test]
+    fn parse_agent_on() {
+        match parse("/agent on") {
+            SlashCmd::Agent { enable } => assert!(enable),
+            _ => panic!("expected Agent"),
+        }
+    }
+
+    #[test]
+    fn parse_agent_off() {
+        match parse("/agent off") {
+            SlashCmd::Agent { enable } => assert!(!enable),
+            _ => panic!("expected Agent"),
+        }
+    }
+
+    #[test]
+    fn parse_agent_no_arg_defaults_to_off() {
+        match parse("/agent") {
+            SlashCmd::Agent { enable } => assert!(!enable),
+            _ => panic!("expected Agent"),
+        }
+    }
+
+    #[test]
+    fn arg_completions_agent_returns_toggles() {
+        let (start, candidates) = arg_completions("/agent ").unwrap();
+        assert_eq!(start, 7);
+        let values: Vec<_> = candidates.iter().map(|candidate| candidate.value).collect();
+        assert_eq!(values, ["on", "off"]);
+    }
+
+    #[test]
+    fn filter_includes_agent() {
+        let results = filter("/a");
+        let names: Vec<_> = results.iter().map(|command| command.name).collect();
+        assert!(names.contains(&"agent"), "filter /a should include agent");
     }
 
     #[test]

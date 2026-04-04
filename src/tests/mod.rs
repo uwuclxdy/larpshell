@@ -105,6 +105,7 @@ fn run_with_stdin_interactive(
     args: &[&str],
     stdin_data: &[u8],
 ) -> std::process::Output {
+    ensure_binary_built();
     let mut child = Command::new(binary())
         .args(args)
         .env("HOME", home)
@@ -134,6 +135,7 @@ fn run_with_stdin(
     args: &[&str],
     stdin_data: &[u8],
 ) -> std::process::Output {
+    ensure_binary_built();
     let mut child = Command::new(binary())
         .args(args)
         .env("HOME", home)
