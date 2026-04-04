@@ -77,8 +77,17 @@ fn parse_key_from_reader(reader: &mut impl std::io::Read) -> KeyEvent {
 }
 
 #[cfg(unix)]
+fn flush_stdin_input() {
+    use nix::sys::termios::{FlushArg, tcflush};
+    let _ = tcflush(&std::io::stdin(), FlushArg::TCIFLUSH);
+}
+
+#[cfg(not(unix))]
+fn flush_stdin_input() {}
+
+#[cfg(unix)]
 fn read_key_event() -> KeyEvent {
-    use nix::sys::termios::{FlushArg, LocalFlags, SetArg, tcflush, tcgetattr, tcsetattr};
+    use nix::sys::termios::{LocalFlags, SetArg, tcgetattr, tcsetattr};
 
     let stdin_handle = std::io::stdin();
 
@@ -88,9 +97,6 @@ fn read_key_event() -> KeyEvent {
         raw.local_flags
             .remove(LocalFlags::ICANON | LocalFlags::ECHO | LocalFlags::ISIG);
         if tcsetattr(&stdin_handle, SetArg::TCSANOW, &raw).is_ok() {
-            // Discard any buffered input (e.g. the Enter that submitted the query)
-            // so it does not auto-confirm the prompt.
-            let _ = tcflush(&stdin_handle, FlushArg::TCIFLUSH);
             let result = parse_key_from_reader(&mut stdin_handle.lock());
             let _ = tcsetattr(&stdin_handle, SetArg::TCSANOW, &original);
             return result;
@@ -175,6 +181,7 @@ pub fn confirm_with_explain(
 
     let prompt_lines = confirmation_prompt(true);
     flush_stderr();
+    flush_stdin_input();
 
     let lines_to_clear = cmd_line_count + prompt_lines;
 
@@ -224,6 +231,7 @@ pub fn confirm_execution(
 
     let prompt_lines = confirmation_prompt(false);
     flush_stderr();
+    flush_stdin_input();
 
     let lines_to_clear = cmd_line_count + expl_line_count + prompt_lines;
 
@@ -297,11 +305,11 @@ pub fn edit_command(current: &str) -> Option<String> {
     let mut pos = buf.len();
 
     let hint_text = format!(
-        "[{}] to confirm, [{}] to quit",
+        "[{}] to confirm, [{}] to cancel",
         "Enter".custom_color(CTP_PRIMARY).bold(),
         "Ctrl+C".custom_color(CTP_PRIMARY).bold()
     );
-    let hint_rows = count_visual_lines("[Enter] to confirm, [Ctrl+C] to quit", width);
+    let hint_rows = count_visual_lines("[Enter] to confirm, [Ctrl+C] to cancel", width);
 
     // Draw: command on current line (no newline), hint on the line below.
     // Then move cursor back up to the command line.
@@ -353,8 +361,7 @@ pub fn edit_command(current: &str) -> Option<String> {
             KeyEvent::CtrlC => {
                 clear_editor(&buf);
                 flush_stderr();
-                show_cursor();
-                exit_with_code(EXIT_SIGINT);
+                return None;
             }
             KeyEvent::Backspace => {
                 if pos > 0 {

@@ -532,7 +532,7 @@ async fn process_command(
             },
             ConfirmResult::Edit => match edit_command(&command) {
                 Some(new_cmd) => command = new_cmd,
-                None => break 'outer false,
+                None => continue 'outer,
             },
             ConfirmResult::Explain => {
                 let explanation = get_explanation(&command, provider).await?;
@@ -552,7 +552,7 @@ async fn process_command(
                     },
                     ConfirmResult::Edit => match edit_command(&command) {
                         Some(new_cmd) => command = new_cmd,
-                        None => break 'outer false,
+                        None => continue 'outer,
                     },
                     ConfirmResult::Explain => break 'outer false,
                 }
