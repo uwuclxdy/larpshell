@@ -11,9 +11,12 @@ pub fn generate_bash_autocomplete() -> &'static str {
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
     if [ $COMP_CWORD -eq 1 ]; then
-        COMPREPLY=( $(compgen -W "api prompt explain uninstall --help --version" -- "$cur") )
+        COMPREPLY=( $(compgen -W "api agent history prompt explain uninstall --help --version" -- "$cur") )
     elif [ $COMP_CWORD -eq 2 ]; then
         case "$prev" in
+            agent|history)
+                COMPREPLY=( $(compgen -W "on off" -- "$cur") )
+                ;;
             prompt)
                 COMPREPLY=( $(compgen -W "system explain" -- "$cur") )
                 ;;
@@ -37,7 +40,9 @@ _larpshell() {
     local -a commands
     commands=(
         'api:configure API provider (Gemini, Ollama, OpenRouter, LM Studio, OpenAI)'
+        'agent:enable or disable agent mode'
         'explain:explain a shell command'
+        'history:enable or disable prompt history'
         'prompt:view or edit system/explain prompts'
         'uninstall:uninstall larpshell'
     )
@@ -54,6 +59,14 @@ _larpshell() {
             ;;
         args)
             case "${words[1]}" in
+                agent|history)
+                    local -a toggles
+                    toggles=('on:enable' 'off:disable')
+                    _arguments '1: :->toggle'
+                    case "$state" in
+                        toggle) _describe -t toggles 'toggle' toggles ;;
+                    esac
+                    ;;
                 prompt)
                     local -a kinds actions
                     kinds=('system:system prompt' 'explain:explain prompt')
@@ -78,12 +91,14 @@ pub fn generate_fish_autocomplete() -> &'static str {
     r#"# larpshell autocomplete
 complete -c larpshell -f
 complete -c larpshell -n "__fish_use_subcommand" -a api -d 'configure API provider (Gemini, Ollama, OpenRouter, LM Studio, OpenAI)'
+complete -c larpshell -n "__fish_use_subcommand" -a agent -d 'enable or disable agent mode'
 complete -c larpshell -n "__fish_use_subcommand" -a explain -d 'explain a shell command'
 complete -c larpshell -n "__fish_use_subcommand" -a history -d 'enable or disable prompt history'
 complete -c larpshell -n "__fish_use_subcommand" -a prompt -d 'view or edit system/explain prompts'
 complete -c larpshell -n "__fish_use_subcommand" -a uninstall -d 'uninstall larpshell'
 complete -c larpshell -l help -d 'show help information'
 complete -c larpshell -l version -d 'show version information'
+complete -c larpshell -n "__fish_seen_subcommand_from agent" -a "on off" -d 'toggle agent mode'
 complete -c larpshell -n "__fish_seen_subcommand_from history" -a "on off" -d 'toggle history'
 complete -c larpshell -n "__fish_seen_subcommand_from prompt" -a system -d 'system prompt'
 complete -c larpshell -n "__fish_seen_subcommand_from prompt" -a explain -d 'explain prompt'
@@ -98,7 +113,7 @@ pub fn generate_bash_function() -> &'static str {
     fi
 
     case "$1" in
-        api|explain|history|uninstall|prompt|--help|-h|--version|-V)
+        api|agent|explain|history|uninstall|prompt|--help|-h|--version|-V)
             command larpshell "$@"
             return $?
             ;;
