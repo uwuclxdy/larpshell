@@ -3,6 +3,7 @@
 Use terminal with natural language.
 
 [![Crates.io](https://img.shields.io/crates/v/larpshell)](https://crates.io/crates/larpshell)
+[![Release](https://github.com/uwuclxdy/larpshell/actions/workflows/release.yml/badge.svg)](https://github.com/uwuclxdy/larpshell/actions/workflows/release.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 ---
