@@ -9,6 +9,7 @@ use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 use toml::from_str;
 
+mod agent;
 mod edit;
 mod explain;
 mod slash;
