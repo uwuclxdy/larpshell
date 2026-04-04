@@ -17,10 +17,11 @@ pub enum Role {
     Tool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ChatMessage {
     pub role: Role,
-    pub content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<ToolCall>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -31,7 +32,7 @@ impl ChatMessage {
     pub fn user(content: impl Into<String>) -> Self {
         Self {
             role: Role::User,
-            content: content.into(),
+            content: Some(content.into()),
             tool_calls: None,
             tool_call_id: None,
         }
@@ -40,7 +41,7 @@ impl ChatMessage {
     pub fn system(content: impl Into<String>) -> Self {
         Self {
             role: Role::System,
-            content: content.into(),
+            content: Some(content.into()),
             tool_calls: None,
             tool_call_id: None,
         }
@@ -49,7 +50,7 @@ impl ChatMessage {
     pub fn tool_result(tool_call_id: impl Into<String>, content: impl Into<String>) -> Self {
         Self {
             role: Role::Tool,
-            content: content.into(),
+            content: Some(content.into()),
             tool_calls: None,
             tool_call_id: Some(tool_call_id.into()),
         }
@@ -58,7 +59,7 @@ impl ChatMessage {
     pub fn assistant_tool_calls(tool_calls: Vec<ToolCall>) -> Self {
         Self {
             role: Role::Assistant,
-            content: String::new(),
+            content: None,
             tool_calls: Some(tool_calls),
             tool_call_id: None,
         }
@@ -69,7 +70,7 @@ impl ChatMessage {
 pub struct ToolCall {
     pub id: String,
     pub name: String,
-    pub arguments: String,
+    pub arguments: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -119,7 +120,7 @@ mod tests {
         let message = ChatMessage::user("hello");
 
         assert_eq!(message.role, Role::User);
-        assert_eq!(message.content, "hello");
+        assert_eq!(message.content.as_deref(), Some("hello"));
         assert_eq!(message.tool_calls, None);
         assert_eq!(message.tool_call_id, None);
     }
@@ -129,7 +130,7 @@ mod tests {
         let message = ChatMessage::system("system prompt");
 
         assert_eq!(message.role, Role::System);
-        assert_eq!(message.content, "system prompt");
+        assert_eq!(message.content.as_deref(), Some("system prompt"));
         assert_eq!(message.tool_calls, None);
         assert_eq!(message.tool_call_id, None);
     }
@@ -139,8 +140,8 @@ mod tests {
         let message = ChatMessage::tool_result("call-1", "done");
 
         assert_eq!(message.role, Role::Tool);
-        assert_eq!(message.content, "done");
-        assert_eq!(message.tool_call_id, Some(String::from("call-1")));
+        assert_eq!(message.content.as_deref(), Some("done"));
+        assert_eq!(message.tool_call_id.as_deref(), Some("call-1"));
         assert_eq!(message.tool_calls, None);
     }
 
@@ -149,12 +150,12 @@ mod tests {
         let tool_calls = vec![ToolCall {
             id: String::from("call-1"),
             name: String::from("search"),
-            arguments: String::from("{\"query\":\"rust\"}"),
+            arguments: json!({ "query": "rust" }),
         }];
         let message = ChatMessage::assistant_tool_calls(tool_calls.clone());
 
         assert_eq!(message.role, Role::Assistant);
-        assert_eq!(message.content, "");
+        assert_eq!(message.content, None);
         assert_eq!(message.tool_calls, Some(tool_calls));
         assert_eq!(message.tool_call_id, None);
     }
@@ -191,26 +192,18 @@ mod tests {
     fn chat_response_message_variant_contains_text() {
         let response = ChatResponse::Message(String::from("hello"));
 
-        match response {
-            ChatResponse::Message(content) => assert_eq!(content, "hello"),
-            ChatResponse::ToolCalls(_) => panic!("expected message response"),
-        }
+        assert_eq!(response, ChatResponse::Message(String::from("hello")));
     }
 
     #[test]
     fn chat_response_tool_calls_variant_contains_calls() {
-        let response = ChatResponse::ToolCalls(vec![ToolCall {
+        let tool_calls = vec![ToolCall {
             id: String::from("call-1"),
             name: String::from("search"),
-            arguments: String::from("{}"),
-        }]);
+            arguments: json!({}),
+        }];
+        let response = ChatResponse::ToolCalls(tool_calls.clone());
 
-        match response {
-            ChatResponse::ToolCalls(tool_calls) => {
-                assert_eq!(tool_calls.len(), 1);
-                assert_eq!(tool_calls[0].name, "search");
-            }
-            ChatResponse::Message(_) => panic!("expected tool call response"),
-        }
+        assert_eq!(response, ChatResponse::ToolCalls(tool_calls));
     }
 }
