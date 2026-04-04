@@ -132,6 +132,15 @@ fn confirm_tool_call() -> ToolConfirmResult {
     }
 }
 
+fn parse_byte(b: u8) -> Key {
+    match b {
+        b'\n' | b'\r' => Key::Enter,
+        b'\x03' => Key::CtrlC,
+        ch @ 32..=126 => Key::Char(ch as char),
+        _ => Key::Other,
+    }
+}
+
 fn read_key() -> Key {
     #[cfg(unix)]
     {
@@ -149,12 +158,7 @@ fn read_key() -> Key {
                     if std::io::Read::read(&mut stdin.lock(), &mut buffer).unwrap_or(0) == 0 {
                         Key::Other
                     } else {
-                        match buffer[0] {
-                            b'\n' | b'\r' => Key::Enter,
-                            b'\x03' => Key::CtrlC,
-                            ch @ 32..=126 => Key::Char(ch as char),
-                            _ => Key::Other,
-                        }
+                        parse_byte(buffer[0])
                     };
                 let _ = tcsetattr(&stdin, SetArg::TCSANOW, &original);
                 return read_result;
@@ -169,17 +173,13 @@ fn read_key() -> Key {
         return Key::Other;
     }
 
-    match buffer[0] {
-        b'\n' | b'\r' => Key::Enter,
-        b'\x03' => Key::CtrlC,
-        ch @ 32..=126 => Key::Char(ch as char),
-        _ => Key::Other,
-    }
+    parse_byte(buffer[0])
 }
 
 fn display_tool_result(result: &str) {
     let truncated = if result.len() > 500 {
-        format!("{}...\n  [truncated for display]", &result[..500])
+        let head: String = result.chars().take(500).collect();
+        format!("{head}...\n  [truncated for display]")
     } else {
         result.to_string()
     };
@@ -204,7 +204,7 @@ async fn run_agent_loop_with_confirm<F>(
     config: &Config,
     tool_registry: &ToolRegistry,
     mut confirm_tool: F,
-) -> Result<String, Box<dyn std::error::Error>>
+) -> Result<String, LarpshellError>
 where
     F: FnMut(&ToolCall) -> ToolConfirmResult,
 {
@@ -231,7 +231,7 @@ where
             Err(error) => {
                 clear_line();
                 show_cursor();
-                return Err(Box::new(error));
+                return Err(error);
             }
         };
 
@@ -270,7 +270,7 @@ where
                             ));
                         }
                         ToolConfirmResult::Cancel => {
-                            return Err(Box::new(LarpshellError::Cancelled));
+                            return Err(LarpshellError::Cancelled);
                         }
                     }
                 }
@@ -283,9 +283,7 @@ where
         }
     }
 
-    Err(Box::new(LarpshellError::AgentMaxIterations(
-        MAX_AGENT_ITERATIONS,
-    )))
+    Err(LarpshellError::AgentMaxIterations(MAX_AGENT_ITERATIONS))
 }
 
 pub async fn run_agent_loop(
@@ -293,7 +291,7 @@ pub async fn run_agent_loop(
     provider: &dyn AIProvider,
     config: &Config,
     tool_registry: &ToolRegistry,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, LarpshellError> {
     run_agent_loop_with_confirm(user_input, provider, config, tool_registry, |_| {
         confirm_tool_call()
     })
@@ -475,8 +473,8 @@ mod tests {
         .unwrap_err();
 
         assert!(matches!(
-            error.downcast_ref::<LarpshellError>(),
-            Some(LarpshellError::AgentMaxIterations(MAX_AGENT_ITERATIONS))
+            error,
+            LarpshellError::AgentMaxIterations(MAX_AGENT_ITERATIONS)
         ));
     }
 

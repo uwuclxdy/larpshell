@@ -1,7 +1,7 @@
 use crate::providers::ToolDefinition;
-use std::cell::RefCell;
 use std::fs;
 use std::path::Path;
+use std::sync::Mutex;
 
 pub struct RegisteredTool {
     pub definition: ToolDefinition,
@@ -16,7 +16,7 @@ impl RegisteredTool {
 
 pub struct ToolRegistry {
     tools: Vec<RegisteredTool>,
-    mcp_clients: Vec<RefCell<crate::agent::mcp::StdioMcpClient>>,
+    mcp_clients: Vec<Mutex<crate::agent::mcp::StdioMcpClient>>,
 }
 
 impl ToolRegistry {
@@ -32,14 +32,16 @@ impl ToolRegistry {
     }
 
     pub fn register_mcp_tool(&mut self, definition: ToolDefinition, _server_name: String) {
+        // Register the definition so it appears in definitions() sent to the LLM.
+        // Execution is always routed through mcp_clients, never through this executor.
         self.tools.push(RegisteredTool {
             definition,
-            executor: Box::new(|_| Err("MCP tool: routed via client".to_string())),
+            executor: Box::new(|_| unreachable!("MCP tools are executed via mcp_clients")),
         });
     }
 
     pub fn add_mcp_client(&mut self, client: crate::agent::mcp::StdioMcpClient) {
-        self.mcp_clients.push(RefCell::new(client));
+        self.mcp_clients.push(Mutex::new(client));
     }
 
     pub fn definitions(&self) -> Vec<ToolDefinition> {
@@ -50,11 +52,13 @@ impl ToolRegistry {
     }
 
     pub fn execute(&self, name: &str, args: serde_json::Value) -> Result<String, String> {
-        for client_cell in &self.mcp_clients {
-            let client = client_cell.borrow();
-            if name.starts_with(&format!("{}_", client.server_name())) {
-                drop(client);
-                let mut client = client_cell.borrow_mut();
+        for client_mutex in &self.mcp_clients {
+            let prefix = {
+                let client = client_mutex.lock().unwrap();
+                format!("{}_", client.server_name())
+            };
+            if name.starts_with(&prefix) {
+                let mut client = client_mutex.lock().unwrap();
                 return client.call_tool(name, args);
             }
         }
@@ -113,7 +117,7 @@ fn execute_read_file(file_path: &str) -> Result<String, String> {
     if metadata.len() as usize > MAX_FILE_SIZE {
         let content =
             fs::read_to_string(path).map_err(|error| format!("cannot read file: {error}"))?;
-        let truncated: String = content.chars().take(MAX_FILE_SIZE).collect();
+        let truncated = content.get(..MAX_FILE_SIZE).unwrap_or(&content);
         Ok(format!(
             "{truncated}\n\n[truncated — file is {} bytes, showing first {MAX_FILE_SIZE}]",
             metadata.len()
@@ -234,6 +238,9 @@ fn search_recursive(dir: &Path, pattern: &str, matches: &mut Vec<String>) {
     };
 
     for entry in entries.flatten() {
+        if matches.len() >= MAX_SEARCH_MATCHES {
+            return;
+        }
         let path = entry.path();
         if path.is_dir() {
             let name = entry.file_name();
@@ -241,14 +248,8 @@ fn search_recursive(dir: &Path, pattern: &str, matches: &mut Vec<String>) {
             if name_str.starts_with('.') || name_str == "node_modules" || name_str == "target" {
                 continue;
             }
-            if matches.len() < MAX_SEARCH_MATCHES {
-                search_recursive(&path, pattern, matches);
-            }
+            search_recursive(&path, pattern, matches);
         } else if path.is_file() {
-            if matches.len() >= MAX_SEARCH_MATCHES {
-                return;
-            }
-
             let extension = path.extension().and_then(|ext| ext.to_str()).unwrap_or("");
             let text_extensions = [
                 "rs", "toml", "json", "yaml", "yml", "md", "txt", "sh", "py", "js", "ts", "html",

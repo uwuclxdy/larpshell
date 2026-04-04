@@ -240,7 +240,10 @@ pub fn load_mcp_configs() -> Vec<McpServerConfig> {
 
     let contents = match std::fs::read_to_string(&mcp_path) {
         Ok(contents) => contents,
-        Err(_) => return Vec::new(),
+        Err(error) => {
+            crate::cli::print_warning(&format!("failed to read mcp.json: {error}"));
+            return Vec::new();
+        }
     };
 
     let parsed: Result<McpConfigFile, _> = serde_json::from_str(&contents);
