@@ -40,6 +40,9 @@ pub enum LarpshellError {
 
     #[error("empty response from {0}")]
     EmptyResponse(String),
+
+    #[error("agent reached maximum iterations ({0}) without producing a command")]
+    AgentMaxIterations(usize),
 }
 
 impl LarpshellError {
@@ -155,6 +158,12 @@ mod tests {
         assert_eq!(
             err.to_string(),
             "rate limit exceeded; please try again later"
+        );
+
+        let err = LarpshellError::AgentMaxIterations(10);
+        assert_eq!(
+            err.to_string(),
+            "agent reached maximum iterations (10) without producing a command"
         );
     }
 }
