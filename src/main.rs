@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod tests;
 
+mod agent;
 mod cli;
 mod common;
 mod config;
