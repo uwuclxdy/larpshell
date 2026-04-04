@@ -78,7 +78,7 @@ fn parse_key_from_reader(reader: &mut impl std::io::Read) -> KeyEvent {
 
 #[cfg(unix)]
 fn read_key_event() -> KeyEvent {
-    use nix::sys::termios::{LocalFlags, SetArg, tcgetattr, tcsetattr};
+    use nix::sys::termios::{FlushArg, LocalFlags, SetArg, tcflush, tcgetattr, tcsetattr};
 
     let stdin_handle = std::io::stdin();
 
@@ -88,6 +88,9 @@ fn read_key_event() -> KeyEvent {
         raw.local_flags
             .remove(LocalFlags::ICANON | LocalFlags::ECHO | LocalFlags::ISIG);
         if tcsetattr(&stdin_handle, SetArg::TCSANOW, &raw).is_ok() {
+            // Discard any buffered input (e.g. the Enter that submitted the query)
+            // so it does not auto-confirm the prompt.
+            let _ = tcflush(&stdin_handle, FlushArg::TCIFLUSH);
             let result = parse_key_from_reader(&mut stdin_handle.lock());
             let _ = tcsetattr(&stdin_handle, SetArg::TCSANOW, &original);
             return result;
