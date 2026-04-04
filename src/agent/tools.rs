@@ -1,4 +1,5 @@
 use crate::providers::ToolDefinition;
+use std::cell::RefCell;
 use std::fs;
 use std::path::Path;
 
@@ -15,15 +16,30 @@ impl RegisteredTool {
 
 pub struct ToolRegistry {
     tools: Vec<RegisteredTool>,
+    mcp_clients: Vec<RefCell<crate::agent::mcp::StdioMcpClient>>,
 }
 
 impl ToolRegistry {
     pub fn new() -> Self {
-        Self { tools: Vec::new() }
+        Self {
+            tools: Vec::new(),
+            mcp_clients: Vec::new(),
+        }
     }
 
     pub fn register(&mut self, tool: RegisteredTool) {
         self.tools.push(tool);
+    }
+
+    pub fn register_mcp_tool(&mut self, definition: ToolDefinition, _server_name: String) {
+        self.tools.push(RegisteredTool {
+            definition,
+            executor: Box::new(|_| Err("MCP tool: routed via client".to_string())),
+        });
+    }
+
+    pub fn add_mcp_client(&mut self, client: crate::agent::mcp::StdioMcpClient) {
+        self.mcp_clients.push(RefCell::new(client));
     }
 
     pub fn definitions(&self) -> Vec<ToolDefinition> {
@@ -34,6 +50,15 @@ impl ToolRegistry {
     }
 
     pub fn execute(&self, name: &str, args: serde_json::Value) -> Result<String, String> {
+        for client_cell in &self.mcp_clients {
+            let client = client_cell.borrow();
+            if name.starts_with(&format!("{}_", client.server_name())) {
+                drop(client);
+                let mut client = client_cell.borrow_mut();
+                return client.call_tool(name, args);
+            }
+        }
+
         self.tools
             .iter()
             .find(|tool| tool.definition.name == name)

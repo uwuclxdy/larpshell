@@ -18,6 +18,7 @@ mod update;
 use std::io::IsTerminal;
 use tokio_util::sync::CancellationToken;
 
+use agent::tools::ToolRegistry;
 use cli::get_home_dir;
 use cli::{
     PromptAction, PromptKind, execute_shell_command, parse_cli_args, print_error, print_warning,
@@ -308,6 +309,35 @@ async fn inner_main() -> Result<(), Box<dyn std::error::Error>> {
 
     let update_task = tokio::task::spawn(update::is_update_available());
 
+    let mut tool_registry = if config.agent {
+        let mut registry = ToolRegistry::with_builtins();
+        for mcp_config in agent::mcp::load_mcp_configs() {
+            match agent::mcp::StdioMcpClient::spawn(&mcp_config) {
+                Ok(mut client) => {
+                    if let Err(error) = client.initialize() {
+                        print_warning(&format!("MCP server '{}': {error}", mcp_config.name));
+                        continue;
+                    }
+                    match client.list_tools() {
+                        Ok(tools) => {
+                            for tool in tools {
+                                registry.register_mcp_tool(tool, mcp_config.name.clone());
+                            }
+                        }
+                        Err(error) => {
+                            print_warning(&format!("MCP server '{}': {error}", mcp_config.name));
+                        }
+                    }
+                    registry.add_mcp_client(client);
+                }
+                Err(error) => print_warning(&error),
+            }
+        }
+        Some(registry)
+    } else {
+        None
+    };
+
     // handle standalone explain subcommand
     if let Some(cmd_parts) = explain_parts {
         let result = handle_explain_subcommand(cmd_parts, provider.as_ref()).await;
@@ -406,7 +436,12 @@ async fn inner_main() -> Result<(), Box<dyn std::error::Error>> {
                     slash_commands::SlashCmd::Agent { enable } => {
                         match handle_agent_subcommand(enable) {
                             Ok(()) => match load_config() {
-                                Ok(new_config) => config = new_config,
+                                Ok(new_config) => {
+                                    config = new_config;
+                                    if !enable {
+                                        tool_registry = None;
+                                    }
+                                }
                                 Err(e) => print_error(&format!("failed to reload config: {e}")),
                             },
                             Err(e) => print_error(&e.to_string()),
@@ -444,14 +479,42 @@ async fn inner_main() -> Result<(), Box<dyn std::error::Error>> {
                 continue;
             }
 
-            match process_command(
-                &user_input,
-                provider.as_ref(),
-                &config,
-                CommandMode::Interactive,
-            )
-            .await
-            {
+            let result = if config.agent {
+                let registry = tool_registry.get_or_insert_with(|| {
+                    let mut registry = ToolRegistry::with_builtins();
+                    for mcp_config in agent::mcp::load_mcp_configs() {
+                        if let Ok(mut client) = agent::mcp::StdioMcpClient::spawn(&mcp_config) {
+                            if client.initialize().is_ok() {
+                                if let Ok(tools) = client.list_tools() {
+                                    for tool in tools {
+                                        registry.register_mcp_tool(tool, mcp_config.name.clone());
+                                    }
+                                }
+                                registry.add_mcp_client(client);
+                            }
+                        }
+                    }
+                    registry
+                });
+                process_command_agent(
+                    &user_input,
+                    provider.as_ref(),
+                    &config,
+                    CommandMode::Interactive,
+                    registry,
+                )
+                .await
+            } else {
+                process_command(
+                    &user_input,
+                    provider.as_ref(),
+                    &config,
+                    CommandMode::Interactive,
+                )
+                .await
+            };
+
+            match result {
                 Ok(Some(p)) => {
                     // move up past the old rustyline prompt line so the new prompt overwrites it
                     eprint_flush("\x1b[1A\x1b[K");
@@ -476,7 +539,19 @@ async fn inner_main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         // single-command mode: execute once and exit
         let user_input = cli.command.join(" ");
-        process_command(&user_input, provider.as_ref(), &config, CommandMode::Single).await?;
+        if config.agent {
+            let registry = tool_registry.get_or_insert_with(ToolRegistry::with_builtins);
+            process_command_agent(
+                &user_input,
+                provider.as_ref(),
+                &config,
+                CommandMode::Single,
+                registry,
+            )
+            .await?;
+        } else {
+            process_command(&user_input, provider.as_ref(), &config, CommandMode::Single).await?;
+        }
     }
 
     update::print_if_available(update_task).await;
@@ -565,6 +640,73 @@ async fn process_command(
 
     let mut command = clean_response(&response);
 
+    if command.trim().is_empty() {
+        return Err(Box::new(LarpshellError::EmptyResponse(provider.name())));
+    }
+
+    let cancelled = 'outer: loop {
+        let cmd_lines = display_command(&command);
+        match confirm_with_explain(cmd_lines)? {
+            ConfirmResult::Yes => {
+                execute_or_print(&command)?;
+                break 'outer false;
+            }
+            ConfirmResult::No => break 'outer false,
+            ConfirmResult::Cancel => match &mode {
+                CommandMode::Interactive => break 'outer true,
+                CommandMode::Single => {
+                    show_cursor();
+                    update::print_if_resolved();
+                    exit_with_code(EXIT_SIGINT);
+                }
+            },
+            ConfirmResult::Edit => match edit_command(&command) {
+                Some(new_cmd) => command = new_cmd,
+                None => continue 'outer,
+            },
+            ConfirmResult::Explain => {
+                let explanation = get_explanation(&command, provider).await?;
+                let expl_lines = display_explanation(&explanation);
+                match confirm_execution(cmd_lines, expl_lines)? {
+                    ConfirmResult::Yes => {
+                        execute_or_print(&command)?;
+                        break 'outer false;
+                    }
+                    ConfirmResult::No => break 'outer false,
+                    ConfirmResult::Cancel => match &mode {
+                        CommandMode::Interactive => break 'outer true,
+                        CommandMode::Single => {
+                            show_cursor();
+                            exit_with_code(EXIT_SIGINT);
+                        }
+                    },
+                    ConfirmResult::Edit => match edit_command(&command) {
+                        Some(new_cmd) => command = new_cmd,
+                        None => continue 'outer,
+                    },
+                    ConfirmResult::Explain => break 'outer false,
+                }
+            }
+        }
+    };
+
+    if cancelled {
+        Ok(Some(user_input.to_string()))
+    } else {
+        Ok(None)
+    }
+}
+
+async fn process_command_agent(
+    user_input: &str,
+    provider: &dyn providers::AIProvider,
+    config: &Config,
+    mode: CommandMode,
+    tool_registry: &ToolRegistry,
+) -> Result<Option<String>, Box<dyn std::error::Error>> {
+    let response = agent::run_agent_loop(user_input, provider, config, tool_registry).await?;
+
+    let mut command = clean_response(&response);
     if command.trim().is_empty() {
         return Err(Box::new(LarpshellError::EmptyResponse(provider.name())));
     }
