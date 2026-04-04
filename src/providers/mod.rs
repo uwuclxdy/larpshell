@@ -276,7 +276,7 @@ mod tests {
 
     #[test]
     fn default_generate_with_tools_extracts_user_messages() {
-        let messages = vec![
+        let messages = [
             ChatMessage::system("you are helpful"),
             ChatMessage::user("list files"),
             ChatMessage::tool_result("tc_1", "file1.txt"),

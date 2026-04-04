@@ -71,7 +71,9 @@ fn remove_config_optional() -> Result<(), LarpshellError> {
 
     if remove_config {
         let config_dir = dirs::config_dir()
-            .ok_or_else(|| LarpshellError::ConfigError("failed to get config directory".to_string()))?
+            .ok_or_else(|| {
+                LarpshellError::ConfigError("failed to get config directory".to_string())
+            })?
             .join("larpshell");
 
         if config_dir.exists() {
@@ -101,9 +103,9 @@ fn remove_repo_optional() -> Result<(), LarpshellError> {
 
             if remove_repo {
                 eprintln!("{}", "  removing directory...".dimmed());
-                let parent = current_dir
-                    .parent()
-                    .ok_or_else(|| LarpshellError::ConfigError("cannot remove root directory".to_string()))?;
+                let parent = current_dir.parent().ok_or_else(|| {
+                    LarpshellError::ConfigError("cannot remove root directory".to_string())
+                })?;
                 std::env::set_current_dir(parent)?;
                 fs::remove_dir_all(&current_dir)?;
                 print_ok("removed larpshell repository");

@@ -1,7 +1,5 @@
 use crate::common::{current_directory, os_name, shell_name, username};
-use crate::config::{
-    explain_prompt_path, sys_prompt_path, save_explain_prompt, save_sys_prompt,
-};
+use crate::config::{explain_prompt_path, save_explain_prompt, save_sys_prompt, sys_prompt_path};
 use crate::error::LarpshellError;
 
 pub const DEFAULT_PROMPT_TEMPLATE: &str =

@@ -237,10 +237,7 @@ pub fn prompt_input(prompt: &str) -> Result<String, LarpshellError> {
         .map_err(LarpshellError::InquireError)
 }
 
-pub fn prompt_input_with_default(
-    prompt: &str,
-    default: &str,
-) -> Result<String, LarpshellError> {
+pub fn prompt_input_with_default(prompt: &str, default: &str) -> Result<String, LarpshellError> {
     Text::new(prompt)
         .with_default(default)
         .prompt()

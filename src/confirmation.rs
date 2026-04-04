@@ -3,7 +3,7 @@ use colored::*;
 use crate::cli::is_interactive_terminal;
 use crate::common::{
     ANSI_CLEAR_LINE, CTP_BLUE, CTP_PRIMARY, CTP_TEXT, CTP_YELLOW, EXIT_SIGINT, clear_n_lines,
-    count_visual_lines, exit_with_code, flush_stderr, terminal_width, show_cursor,
+    count_visual_lines, exit_with_code, flush_stderr, show_cursor, terminal_width,
 };
 use crate::error::LarpshellError;
 
@@ -179,9 +179,7 @@ fn style_html_tags(text: &str) -> String {
 }
 
 /// Prompt for confirmation with explain option
-pub fn confirm_with_explain(
-    cmd_line_count: usize,
-) -> Result<ConfirmResult, LarpshellError> {
+pub fn confirm_with_explain(cmd_line_count: usize) -> Result<ConfirmResult, LarpshellError> {
     if !is_interactive_terminal() {
         return Ok(ConfirmResult::Yes);
     }

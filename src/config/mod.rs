@@ -193,9 +193,7 @@ pub fn history_path() -> Result<PathBuf, LarpshellError> {
 }
 
 pub fn history_enabled() -> bool {
-    history_disabled_path()
-        .map(|p| !p.exists())
-        .unwrap_or(true)
+    history_disabled_path().map(|p| !p.exists()).unwrap_or(true)
 }
 
 pub fn set_history_enabled(enabled: bool) -> Result<(), LarpshellError> {
@@ -331,10 +329,7 @@ pub fn interactive_setup() -> Result<(), LarpshellError> {
     Ok(())
 }
 
-fn display_config_summary(
-    config: &Config,
-    provider_name: &str,
-) -> Result<(), LarpshellError> {
+fn display_config_summary(config: &Config, provider_name: &str) -> Result<(), LarpshellError> {
     print_ok_bold("Configuration saved!");
     eprintln!();
     eprintln!("Provider: {}", provider_name);
@@ -361,9 +356,7 @@ fn display_config_summary(
     Ok(())
 }
 
-fn configure_gemini(
-    existing: Option<&GeminiConfig>,
-) -> Result<ProviderConfig, LarpshellError> {
+fn configure_gemini(existing: Option<&GeminiConfig>) -> Result<ProviderConfig, LarpshellError> {
     let api_key = if let Some(e) = existing {
         prompt_input_with_default("Gemini API key", &e.api_key)?
     } else {
@@ -383,9 +376,7 @@ fn configure_gemini(
     })
 }
 
-fn configure_ollama(
-    existing: Option<&OllamaConfig>,
-) -> Result<ProviderConfig, LarpshellError> {
+fn configure_ollama(existing: Option<&OllamaConfig>) -> Result<ProviderConfig, LarpshellError> {
     let url_default = existing
         .map(|e| e.base_url.as_str())
         .unwrap_or("http://localhost:11434");
@@ -436,9 +427,7 @@ fn configure_openrouter(
     })
 }
 
-fn configure_openai(
-    existing: Option<&OpenAIConfig>,
-) -> Result<ProviderConfig, LarpshellError> {
+fn configure_openai(existing: Option<&OpenAIConfig>) -> Result<ProviderConfig, LarpshellError> {
     let url_default = existing
         .map(|e| e.base_url.as_str())
         .unwrap_or("https://api.openai.com/v1");

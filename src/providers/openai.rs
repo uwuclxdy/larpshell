@@ -354,7 +354,7 @@ mod tests {
 
     #[test]
     fn chat_request_with_tools_serializes_correctly() {
-        let tools = vec![ToolDefinition {
+        let tools = [ToolDefinition {
             name: "read_file".to_string(),
             description: "Read a file".to_string(),
             parameters: serde_json::json!({

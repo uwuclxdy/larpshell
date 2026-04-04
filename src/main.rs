@@ -278,11 +278,17 @@ async fn inner_main() -> Result<(), LarpshellError> {
                 return Ok(());
             }
             cli::Subcommands::History { enable } => {
-                handle_history_subcommand(if *enable { Switch::Enable } else { Switch::Disable })?;
+                handle_history_subcommand(if *enable {
+                    Switch::Enable
+                } else {
+                    Switch::Disable
+                })?;
                 return Ok(());
             }
             cli::Subcommands::Agent { enable } => {
-                handle_agent_subcommand(enable.map(|e| if e { Switch::Enable } else { Switch::Disable }))?;
+                handle_agent_subcommand(
+                    enable.map(|e| if e { Switch::Enable } else { Switch::Disable }),
+                )?;
                 return Ok(());
             }
             cli::Subcommands::Prompt { kind, action } => {
@@ -380,13 +386,19 @@ async fn inner_main() -> Result<(), LarpshellError> {
                         interactive_setup()?;
                     }
                     slash_commands::SlashCmd::Agent { enable } => {
-                        handle_agent_subcommand(enable.map(|e| if e { Switch::Enable } else { Switch::Disable }))?;
+                        handle_agent_subcommand(
+                            enable.map(|e| if e { Switch::Enable } else { Switch::Disable }),
+                        )?;
                     }
                     slash_commands::SlashCmd::Uninstall => {
                         uninstall_larpshell()?;
                     }
                     slash_commands::SlashCmd::History { enable } => {
-                        handle_history_subcommand(if enable { Switch::Enable } else { Switch::Disable })?;
+                        handle_history_subcommand(if enable {
+                            Switch::Enable
+                        } else {
+                            Switch::Disable
+                        })?;
                     }
                     slash_commands::SlashCmd::Prompt { kind, action } => {
                         handle_prompt_subcommand(&kind, &action)?;
@@ -457,7 +469,9 @@ async fn inner_main() -> Result<(), LarpshellError> {
                         },
                     },
                     slash_commands::SlashCmd::Agent { enable } => {
-                        match handle_agent_subcommand(enable.map(|e| if e { Switch::Enable } else { Switch::Disable })) {
+                        match handle_agent_subcommand(
+                            enable.map(|e| if e { Switch::Enable } else { Switch::Disable }),
+                        ) {
                             Ok(()) => match load_config() {
                                 Ok(new_config) => {
                                     config = new_config;
@@ -476,7 +490,11 @@ async fn inner_main() -> Result<(), LarpshellError> {
                         }
                     }
                     slash_commands::SlashCmd::History { enable } => {
-                        if let Err(e) = handle_history_subcommand(if enable { Switch::Enable } else { Switch::Disable }) {
+                        if let Err(e) = handle_history_subcommand(if enable {
+                            Switch::Enable
+                        } else {
+                            Switch::Disable
+                        }) {
                             print_error(&e.to_string());
                         }
                     }

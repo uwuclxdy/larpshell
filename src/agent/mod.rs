@@ -6,8 +6,8 @@ use colored::*;
 use crate::cli::print_warning;
 use crate::common::{
     CTP_BLUE, CTP_GREEN, CTP_OVERLAY0, CTP_PRIMARY, CTP_RED, CTP_TEXT, CTP_YELLOW, clear_line,
-    count_visual_lines, eprint_flush, current_directory, os_name, shell_name, terminal_width,
-    username, hide_cursor, show_cursor,
+    count_visual_lines, current_directory, eprint_flush, hide_cursor, os_name, shell_name,
+    show_cursor, terminal_width, username,
 };
 use crate::config::Config;
 use crate::error::LarpshellError;

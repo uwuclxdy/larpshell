@@ -551,10 +551,7 @@ fn remove_zsh_completion_file() -> Result<bool, LarpshellError> {
     }
 }
 
-fn remove_zsh_fpath_block(
-    zshrc: &std::path::Path,
-    marker: &str,
-) -> Result<bool, LarpshellError> {
+fn remove_zsh_fpath_block(zshrc: &std::path::Path, marker: &str) -> Result<bool, LarpshellError> {
     if !zshrc.exists() {
         return Ok(false);
     }
