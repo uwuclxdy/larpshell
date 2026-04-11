@@ -2,7 +2,7 @@
 name = "larpshell"
 version = "0.1.5"
 edition = "2024"
-license = "MIT"
+license = "GPL-3.0-or-later"
 description = "Ctrl+C then Ctrl+V is simply too much work. Just let an LLM rule your terminal directly!!"
 homepage = "https://github.com/uwuclxdy/larpshell"
 repository = "https://github.com/uwuclxdy/larpshell"

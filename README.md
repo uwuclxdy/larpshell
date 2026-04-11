@@ -4,7 +4,7 @@ Use terminal with natural language.
 
 [![Crates.io](https://img.shields.io/crates/v/larpshell)](https://crates.io/crates/larpshell)
 [![Release](https://github.com/uwuclxdy/larpshell/actions/workflows/release.yml/badge.svg)](https://github.com/uwuclxdy/larpshell/actions/workflows/release.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 
 ---
 
@@ -156,4 +156,4 @@ MCP servers go in `~/.config/larpshell/mcp.json` using the standard `mcpServers`
 
 ## License
 
-[MIT](LICENSE)
+[GPL-3.0](LICENSE)
