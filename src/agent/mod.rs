@@ -177,16 +177,12 @@ fn read_key() -> Key {
 }
 
 fn display_tool_result(result: &str) {
-    let truncated = if result.len() > 500 {
-        let head: String = result.chars().take(500).collect();
-        format!("{head}...\n  [truncated for display]")
-    } else {
-        result.to_string()
-    };
+    let line_count = result.lines().count();
+    let line_word = if line_count == 1 { "line" } else { "lines" };
     eprintln!(
         "  {} {}",
         "result".custom_color(CTP_OVERLAY0),
-        truncated.custom_color(CTP_GREEN)
+        format!("({} {})", line_count, line_word).custom_color(CTP_GREEN)
     );
 }
 
