@@ -15,7 +15,7 @@ Use terminal with natural language.
 [![asciicast](https://asciinema.org/a/z2Q3GNeVJubnNx0M.svg)](https://asciinema.org/a/z2Q3GNeVJubnNx0M)
 
 >[!IMPORTANT]
-> ALWAYS review the generated commands and know what they do before running them!
+> **Always review generated commands before running them!** larpshell makes this easy with editing and explanation features, but you own what executes on your machine.
 
 ## Requirements
 
@@ -23,7 +23,7 @@ Use terminal with natural language.
 
 ## Installation
 
-From crates.io:
+From crates.io (**recommended**):
 ```bash
 cargo install larpshell
 ```
@@ -35,15 +35,11 @@ curl -sSL https://raw.githubusercontent.com/uwuclxdy/larpshell/mommy/install.sh 
 
 ### Packaged
 
-From [AUR](https://aur.archlinux.org/packages/larpshell) (bin, latest release, no Rust needed):
-```
-yay -S larpshell
-```
+#### Arch Linux
 
-From [AUR](https://aur.archlinux.org/packages/larpshell-git) (git, latest commit):
-```
-yay -S larpshell-git
-```
+From [AUR](https://aur.archlinux.org/packages/larpshell) (bin; latest release, no Rust needed): `yay -S larpshell`
+
+From [AUR](https://aur.archlinux.org/packages/larpshell-git) (git; latest commit): `yay -S larpshell-git`
 
 ## Setup
 
@@ -104,11 +100,48 @@ Press Arrow Up at the confirmation prompt. Full cursor control with left/right, 
 [Enter] to confirm, [Ctrl+C] to quit
 ```
 
+### Agent mode
+
+Let the LLM gather context before producing a command. It can call built-in tools (`read_file`, `list_files`, `search_files`, `run_command`) and any [MCP](https://modelcontextprotocol.io) servers you configure. Every tool call asks for confirmation before it runs.
+
+Toggle it on:
+
+```bash
+larpshell agent on    # or `/agent` in the REPL
+```
+
+Then ask as usual:
+
+```
+$ larpshell what's the largest file in this repo
+  tool Allow listing files in .?
+  result (14 lines)
+  tool Allow running du -ah --max-depth=2?
+  result (28 lines)
+> du -ah . | sort -rh | head -n 1
+Run this?
+[Y/Enter] to execute, [E] to explain, [Arrow Up] to edit, [N] to cancel
+```
+
+MCP servers go in `~/.config/larpshell/mcp.json` using the standard `mcpServers` format:
+
+```json
+{
+  "mcpServers": {
+    "git": {
+      "command": "mcp-server-git",
+      "args": ["--repository", "."]
+    }
+  }
+}
+```
+
 ### Subcommands
 
 | Command | Description |
 |---------|-------------|
 | `larpshell api` | Configure AI provider |
+| `larpshell agent [on\|off]` | Toggle agent mode (tools + MCP) |
 | `larpshell explain <cmd>` | Explain a command with safety rating |
 | `larpshell prompt [system\|explain] [show\|edit]` | View or edit prompt templates |
 | `larpshell uninstall` | Remove larpshell |
@@ -120,10 +153,6 @@ Press Arrow Up at the confirmation prompt. Full cursor control with left/right, 
 2. An AI provider translates your request into a shell command
 3. You review the command, edit it if needed, or ask for an explanation
 4. Press Enter to run it in your shell
-
-Commands run via `sh -c` and preserve your working directory between invocations.
-
-> **Review generated commands before running them.** larpshell makes this easy with editing and explanation features, but you own what executes on your machine.
 
 ## License
 
