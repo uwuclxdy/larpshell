@@ -1,6 +1,7 @@
 use crate::providers::ToolDefinition;
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 use std::sync::Mutex;
 
 pub struct RegisteredTool {
@@ -75,6 +76,7 @@ impl ToolRegistry {
         registry.register(read_file_tool());
         registry.register(list_files_tool());
         registry.register(search_files_tool());
+        registry.register(run_command_tool());
         registry
     }
 }
@@ -281,6 +283,107 @@ fn search_file(path: &Path, pattern: &str, matches: &mut Vec<String>) {
     }
 }
 
+fn run_command_tool() -> RegisteredTool {
+    RegisteredTool {
+        definition: ToolDefinition {
+            name: "run_command".to_string(),
+            description: "Run a safe read-only command to gather context. Only informational commands are allowed (no file modifications, deletions, or destructive operations).".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "The command to execute (must be safe and read-only)"
+                    },
+                    "args": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Optional arguments for the command"
+                    }
+                },
+                "required": ["command"]
+            }),
+        },
+        executor: Box::new(|args| {
+            let command = args["command"]
+                .as_str()
+                .ok_or("command must be a string")?;
+            let command_args = args
+                .get("args")
+                .and_then(|value| value.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str())
+                        .map(|s| s.to_string())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            execute_run_command(command, &command_args)
+        }),
+    }
+}
+
+fn execute_run_command(command: &str, args: &[String]) -> Result<String, String> {
+    // List of safe commands that are allowed
+    let safe_commands = [
+        "ls", "cat", "echo", "grep", "find", "ps", "whoami", "uname", "date",
+        "pwd", "env", "printenv", "which", "whereis", "file", "stat", "id",
+        "groups", "hostname", "uptime", "free", "df", "du", "top", "htop",
+        "vmstat", "iostat", "mpstat", "sar", "netstat", "ss", "ip", "ifconfig",
+        "route", "ping", "traceroute", "mtr", "dig", "nslookup", "host",
+        "curl", "wget", "git", "svn", "hg", "docker", "podman", "kubectl",
+        "aws", "gcloud", "az", "terraform", "ansible", "vault", "consul",
+    ];
+
+    // Check if the command is in the safe list
+    let command_base = Path::new(command)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(command);
+
+    if !safe_commands.contains(&command_base) {
+        return Err(format!("command not allowed: {}", command));
+    }
+
+    // Additional safety checks for potentially dangerous arguments
+    for arg in args {
+        // Block common dangerous patterns
+        if arg.contains("--delete")
+            || arg.contains("--remove")
+            || arg.contains("--force")
+            || arg.contains(">")
+            || arg.contains("|")
+            || arg.contains(";")
+            || arg.contains("&")
+            || arg.contains("`")
+            || arg.contains("$")
+            || arg.contains("rm")
+            || arg.contains("mv")
+            || arg.contains("cp")
+            || arg.contains("chmod")
+            || arg.contains("chown")
+        {
+            return Err(format!("dangerous argument detected: {}", arg));
+        }
+    }
+
+    // Execute the command
+    let output = Command::new(command)
+        .args(args)
+        .output()
+        .map_err(|error| format!("failed to execute command: {}", error))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("command failed: {}", stderr.trim()));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(stdout.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -296,9 +399,9 @@ mod tests {
     }
 
     #[test]
-    fn registry_with_builtins_has_three_tools() {
+    fn registry_with_builtins_has_four_tools() {
         let registry = ToolRegistry::with_builtins();
-        assert_eq!(registry.definitions().len(), 3);
+        assert_eq!(registry.definitions().len(), 4);
         let names: Vec<_> = registry
             .definitions()
             .iter()
@@ -307,6 +410,7 @@ mod tests {
         assert!(names.contains(&"read_file".to_string()));
         assert!(names.contains(&"list_files".to_string()));
         assert!(names.contains(&"search_files".to_string()));
+        assert!(names.contains(&"run_command".to_string()));
     }
 
     #[test]
@@ -407,5 +511,26 @@ mod tests {
         let result = registry.execute("nonexistent", serde_json::json!({}));
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("unknown tool"));
+    }
+
+    #[test]
+    fn run_command_executes_safe_commands() {
+        let result = execute_run_command("echo", &["hello world".to_string()]);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().trim(), "hello world");
+    }
+
+    #[test]
+    fn run_command_rejects_unsafe_commands() {
+        let result = execute_run_command("rm", &["-rf".to_string(), "/".to_string()]);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("command not allowed"));
+    }
+
+    #[test]
+    fn run_command_rejects_dangerous_args() {
+        let result = execute_run_command("ls", &["--force".to_string()]);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("dangerous argument"));
     }
 }
