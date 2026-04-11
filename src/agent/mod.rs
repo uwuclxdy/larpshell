@@ -5,7 +5,7 @@ use colored::*;
 
 use crate::cli::print_warning;
 use crate::common::{
-    CTP_BLUE, CTP_GREEN, CTP_OVERLAY0, CTP_PRIMARY, CTP_RED, CTP_TEXT, CTP_YELLOW, clear_line,
+    CTP_BLUE, CTP_GREEN, CTP_OVERLAY0, CTP_PRIMARY, CTP_RED, CTP_YELLOW, clear_line,
     count_visual_lines, current_directory, eprint_flush, hide_cursor, os_name, shell_name,
     show_cursor, terminal_width, username,
 };
@@ -64,33 +64,121 @@ enum Key {
     Other,
 }
 
+fn format_tool_preview(
+    tool_name: &str,
+    arguments: &serde_json::Map<String, serde_json::Value>,
+) -> String {
+    match tool_name {
+        "run_command" => {
+            let command = arguments
+                .get("command")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let args = arguments.get("args").and_then(|v| v.as_array());
+            let full_command = if let Some(args_list) = args {
+                let args_str = args_list
+                    .iter()
+                    .filter_map(|v| v.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                if args_str.is_empty() {
+                    command.to_string()
+                } else {
+                    format!("{} {}", command, args_str)
+                }
+            } else {
+                command.to_string()
+            };
+            format!(
+                "Allow {} {}?",
+                "running".custom_color(CTP_BLUE),
+                full_command.bold()
+            )
+        }
+        "read_file" => {
+            let file_path = arguments
+                .get("file_path")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            format!(
+                "Allow {} {}?",
+                "reading file".custom_color(CTP_BLUE),
+                file_path.bold()
+            )
+        }
+        "list_files" => {
+            let directory_path = arguments
+                .get("directory_path")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            format!(
+                "Allow {} in {}?",
+                "listing files".custom_color(CTP_BLUE),
+                directory_path.bold()
+            )
+        }
+        "search_files" => {
+            let pattern = arguments
+                .get("pattern")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let directory_path = arguments
+                .get("directory_path")
+                .and_then(|v| v.as_str())
+                .unwrap_or(".");
+            format!(
+                "Allow {} {} in {}?",
+                "searching for".custom_color(CTP_BLUE),
+                pattern.bold(),
+                directory_path.bold()
+            )
+        }
+        _ => {
+            let mut parts = Vec::new();
+            for (key, value) in arguments {
+                let value_str = match value {
+                    serde_json::Value::String(text) => text.clone(),
+                    other => other.to_string(),
+                };
+                parts.push(format!("{}: {}", key, value_str));
+            }
+            if parts.is_empty() {
+                format!(
+                    "Allow {} {}?",
+                    "calling tool".custom_color(CTP_BLUE),
+                    tool_name.bold()
+                )
+            } else {
+                format!(
+                    "Allow {} {} with {}?",
+                    "calling tool".custom_color(CTP_BLUE),
+                    tool_name.bold(),
+                    parts.join(", ")
+                )
+            }
+        }
+    }
+}
+
 fn display_tool_call(tool_call: &ToolCall) -> usize {
     let width = terminal_width();
     let mut lines = 0;
 
-    let tool_line = format!(
-        "  {}  {}",
-        "tool".custom_color(CTP_OVERLAY0),
-        tool_call.name.custom_color(CTP_BLUE).bold()
-    );
-    eprintln!("{tool_line}");
-    lines += count_visual_lines(&tool_line, width);
-
+    // Create user-friendly preview
     if let Some(arguments) = tool_call.arguments.as_object() {
-        for (key, value) in arguments {
-            let value_str = match value {
-                serde_json::Value::String(text) => text.clone(),
-                other => other.to_string(),
-            };
-            let argument_line = format!(
-                "  {}  {}: {}",
-                "args".custom_color(CTP_OVERLAY0),
-                key.custom_color(CTP_TEXT),
-                value_str.custom_color(CTP_TEXT).bold()
-            );
-            eprintln!("{argument_line}");
-            lines += count_visual_lines(&argument_line, width);
-        }
+        let preview = format_tool_preview(&tool_call.name, arguments);
+        let preview_line = format!("  {} {}", "tool".custom_color(CTP_OVERLAY0), preview);
+        eprintln!("{preview_line}");
+        lines += count_visual_lines(&preview_line, width);
+    } else {
+        // Fallback for tools with no arguments
+        let tool_line = format!(
+            "  {}  {}",
+            "tool".custom_color(CTP_OVERLAY0),
+            tool_call.name.custom_color(CTP_BLUE).bold()
+        );
+        eprintln!("{tool_line}");
+        lines += count_visual_lines(&tool_line, width);
     }
 
     lines
@@ -98,7 +186,7 @@ fn display_tool_call(tool_call: &ToolCall) -> usize {
 
 fn confirm_tool_call() -> ToolConfirmResult {
     let prompt = format!(
-        "\n  {} [{}] allow, [{}] deny, [{}] cancel",
+        "  {} [{}] allow, [{}] deny, [{}] cancel",
         "Allow?".custom_color(CTP_YELLOW),
         "Y/Enter".custom_color(CTP_PRIMARY).bold(),
         "N".custom_color(CTP_PRIMARY).bold(),
@@ -184,6 +272,7 @@ fn display_tool_result(result: &str) {
         "result".custom_color(CTP_OVERLAY0),
         format!("({} {})", line_count, line_word).custom_color(CTP_GREEN)
     );
+    eprintln!();
 }
 
 fn display_tool_error(error: &str) {
@@ -192,6 +281,7 @@ fn display_tool_error(error: &str) {
         "error".custom_color(CTP_OVERLAY0),
         error.custom_color(CTP_RED)
     );
+    eprintln!();
 }
 
 async fn run_agent_loop_with_confirm<F>(
@@ -481,5 +571,63 @@ mod tests {
             provider_config.config,
             ProviderSpecificConfig::Ollama { .. }
         ));
+    }
+
+    #[test]
+    fn format_tool_preview_creates_user_friendly_messages() {
+        use serde_json::json;
+
+        fn plain(tool: &str, args: &serde_json::Map<String, serde_json::Value>) -> String {
+            let preview = format_tool_preview(tool, args);
+            String::from_utf8_lossy(&strip_ansi_escapes::strip(&preview)).into_owned()
+        }
+
+        // Test run_command with simple command
+        let mut args = serde_json::Map::new();
+        args.insert("command".to_string(), json!("ls"));
+        let preview = plain("run_command", &args);
+        assert!(preview.contains("Allow running"));
+        assert!(preview.contains("ls"));
+
+        // Test run_command with command and args
+        let mut args = serde_json::Map::new();
+        args.insert("command".to_string(), json!("grep"));
+        args.insert("args".to_string(), json!(["pattern", "file.txt"]));
+        let preview = plain("run_command", &args);
+        assert!(preview.contains("Allow running"));
+        assert!(preview.contains("grep pattern file.txt"));
+
+        // Test read_file
+        let mut args = serde_json::Map::new();
+        args.insert("file_path".to_string(), json!("/home/user/file.txt"));
+        let preview = plain("read_file", &args);
+        assert!(preview.contains("Allow reading file"));
+        assert!(preview.contains("/home/user/file.txt"));
+
+        // Test list_files
+        let mut args = serde_json::Map::new();
+        args.insert("directory_path".to_string(), json!("/home/user"));
+        let preview = plain("list_files", &args);
+        assert!(preview.contains("Allow listing files in"));
+        assert!(preview.contains("/home/user"));
+
+        // Test search_files
+        let mut args = serde_json::Map::new();
+        args.insert("pattern".to_string(), json!("main"));
+        args.insert("directory_path".to_string(), json!("/src"));
+        let preview = plain("search_files", &args);
+        assert!(preview.contains("Allow searching for"));
+        assert!(preview.contains("main"));
+        assert!(preview.contains("/src"));
+
+        // Test unknown tool
+        let mut args = serde_json::Map::new();
+        args.insert("param1".to_string(), json!("value1"));
+        args.insert("param2".to_string(), json!("value2"));
+        let preview = plain("unknown_tool", &args);
+        assert!(preview.contains("Allow calling tool"));
+        assert!(preview.contains("unknown_tool"));
+        assert!(preview.contains("param1: value1"));
+        assert!(preview.contains("param2: value2"));
     }
 }
