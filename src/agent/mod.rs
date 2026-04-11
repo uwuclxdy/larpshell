@@ -116,15 +116,15 @@ fn confirm_tool_call() -> ToolConfirmResult {
     loop {
         match read_key() {
             Key::Enter | Key::Char('y') | Key::Char('Y') => {
-                eprintln!();
+                clear_line();
                 return ToolConfirmResult::Allow;
             }
             Key::Char('n') | Key::Char('N') => {
-                eprintln!();
+                clear_line();
                 return ToolConfirmResult::Deny;
             }
             Key::CtrlC => {
-                eprintln!();
+                clear_line();
                 return ToolConfirmResult::Cancel;
             }
             Key::Other | Key::Char(_) => {}
