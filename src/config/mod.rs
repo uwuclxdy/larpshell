@@ -1,6 +1,6 @@
 use colored::*;
 use inquire::{Confirm, Text};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
@@ -20,14 +20,51 @@ pub enum ActiveProvider {
     OpenAI,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum AgentMode {
+    #[default]
+    Off,
+    Safe,
+    On,
+}
+
+impl AgentMode {
+    pub fn is_enabled(self) -> bool {
+        !matches!(self, Self::Off)
+    }
+
+    pub fn is_safe(self) -> bool {
+        matches!(self, Self::Safe)
+    }
+}
+
+fn deserialize_agent_mode<'de, D>(deserializer: D) -> Result<AgentMode, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum AgentModeValue {
+        Bool(bool),
+        Mode(AgentMode),
+    }
+
+    Ok(match AgentModeValue::deserialize(deserializer)? {
+        AgentModeValue::Bool(false) => AgentMode::Off,
+        AgentModeValue::Bool(true) => AgentMode::On,
+        AgentModeValue::Mode(mode) => mode,
+    })
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Config {
     #[serde(rename = "provider")]
     pub active_provider: ActiveProvider,
     #[serde(default)]
     pub providers: MultiProviderConfig,
-    #[serde(default)]
-    pub agent: bool,
+    #[serde(default, deserialize_with = "deserialize_agent_mode")]
+    pub agent: AgentMode,
 }
 
 impl Config {
@@ -208,9 +245,9 @@ pub fn set_history_enabled(enabled: bool) -> Result<(), LarpshellError> {
     Ok(())
 }
 
-pub fn set_agent_enabled(enabled: bool) -> Result<(), LarpshellError> {
+pub fn set_agent_mode(mode: AgentMode) -> Result<(), LarpshellError> {
     let mut config = load_config()?;
-    config.agent = enabled;
+    config.agent = mode;
     save_config(&config)?;
     Ok(())
 }
@@ -320,7 +357,7 @@ pub fn interactive_setup() -> Result<(), LarpshellError> {
     let config = Config {
         active_provider,
         providers: multi_providers,
-        agent: false,
+        agent: AgentMode::Off,
     };
 
     save_config(&config)?;

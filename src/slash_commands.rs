@@ -1,4 +1,5 @@
 use crate::cli::{PromptAction, PromptKind};
+use crate::config::AgentMode;
 
 pub struct SlashCommand {
     pub name: &'static str,
@@ -46,12 +47,16 @@ static HISTORY_TOGGLES: &[ArgChoice] = &[
 
 static AGENT_TOGGLES: &[ArgChoice] = &[
     ArgChoice {
-        value: "on",
-        description: "enable agent mode with tools",
-    },
-    ArgChoice {
         value: "off",
         description: "disable agent mode",
+    },
+    ArgChoice {
+        value: "safe",
+        description: "enable restricted agent tool mode",
+    },
+    ArgChoice {
+        value: "on",
+        description: "enable unrestricted agent tool mode",
     },
 ];
 
@@ -155,7 +160,7 @@ pub fn filter(typed: &str) -> Vec<&'static SlashCommand> {
 #[derive(Debug)]
 pub enum SlashCmd {
     Agent {
-        enable: Option<bool>,
+        mode: Option<AgentMode>,
     },
     Api,
     Uninstall,
@@ -178,12 +183,13 @@ pub fn parse(input: &str) -> SlashCmd {
     let mut parts = input.split_whitespace();
     match parts.next() {
         Some("/agent") => {
-            let enable = match parts.next() {
-                Some("on") => Some(true),
-                Some("off") => Some(false),
+            let mode = match parts.next() {
+                Some("off") => Some(AgentMode::Off),
+                Some("safe") => Some(AgentMode::Safe),
+                Some("on") => Some(AgentMode::On),
                 _ => None,
             };
-            SlashCmd::Agent { enable }
+            SlashCmd::Agent { mode }
         }
         Some("/api") => SlashCmd::Api,
         Some("/uninstall") => SlashCmd::Uninstall,
@@ -300,7 +306,15 @@ mod tests {
     #[test]
     fn parse_agent_on() {
         match parse("/agent on") {
-            SlashCmd::Agent { enable } => assert_eq!(enable, Some(true)),
+            SlashCmd::Agent { mode } => assert_eq!(mode, Some(AgentMode::On)),
+            _ => panic!("expected Agent"),
+        }
+    }
+
+    #[test]
+    fn parse_agent_safe() {
+        match parse("/agent safe") {
+            SlashCmd::Agent { mode } => assert_eq!(mode, Some(AgentMode::Safe)),
             _ => panic!("expected Agent"),
         }
     }
@@ -308,7 +322,7 @@ mod tests {
     #[test]
     fn parse_agent_off() {
         match parse("/agent off") {
-            SlashCmd::Agent { enable } => assert_eq!(enable, Some(false)),
+            SlashCmd::Agent { mode } => assert_eq!(mode, Some(AgentMode::Off)),
             _ => panic!("expected Agent"),
         }
     }
@@ -316,7 +330,7 @@ mod tests {
     #[test]
     fn parse_agent_no_arg_shows_status() {
         match parse("/agent") {
-            SlashCmd::Agent { enable } => assert_eq!(enable, None),
+            SlashCmd::Agent { mode } => assert_eq!(mode, None),
             _ => panic!("expected Agent"),
         }
     }
@@ -326,7 +340,7 @@ mod tests {
         let (start, candidates) = arg_completions("/agent ").unwrap();
         assert_eq!(start, 7);
         let values: Vec<_> = candidates.iter().map(|candidate| candidate.value).collect();
-        assert_eq!(values, ["on", "off"]);
+        assert_eq!(values, ["off", "safe", "on"]);
     }
 
     #[test]

@@ -9,18 +9,19 @@ use crate::common::{
     count_visual_lines, current_directory, eprint_flush, hide_cursor, os_name, shell_name,
     show_cursor, terminal_width, username,
 };
-use crate::config::Config;
+use crate::config::{AgentMode, Config};
 use crate::error::LarpshellError;
 use crate::providers::{AIProvider, ChatMessage, ChatResponse, ToolCall};
 use tools::ToolRegistry;
 
 const MAX_AGENT_ITERATIONS: usize = 10;
 
-const AGENT_SYSTEM_PROMPT: &str =
+const SAFE_AGENT_SYSTEM_PROMPT: &str =
     "You are a shell command translator with access to tools for gathering context.
 You may call tools to read files, list directories, or search for patterns
 before producing your final shell command.
 
+Use tools conservatively and prefer minimal-risk inspection steps.
 When you have enough context, respond with ONLY the shell command (no markdown,
 no explanations, no backticks) — the same rules as without tools.
 
@@ -33,7 +34,26 @@ Environment context:
 
 User request: {request}";
 
-fn build_agent_system_prompt(user_request: &str) -> String {
+const AGENT_SYSTEM_PROMPT: &str =
+    "You are a shell command translator with access to tools for gathering context.
+You may call tools to read files, list directories, search for patterns, and run commands
+before producing your final shell command.
+
+When multiple tries, iterative probing, or environment inspection may be needed,
+use the run_command tool to gather context before deciding on the final shell command.
+When you have enough context, respond with ONLY the shell command (no markdown,
+no explanations, no backticks) — the same rules as without tools.
+
+Environment context:
+- Current dir: {cwd}
+- Home dir: {home}
+- User: {user}
+- Shell: {shell}
+- OS: {os}
+
+User request: {request}";
+
+fn build_agent_system_prompt(agent_mode: AgentMode, user_request: &str) -> String {
     let cwd = current_directory();
     let os = os_name();
     let shell = shell_name();
@@ -42,7 +62,12 @@ fn build_agent_system_prompt(user_request: &str) -> String {
         .unwrap_or_else(|| "~".to_string());
     let user = username();
 
-    AGENT_SYSTEM_PROMPT
+    let template = match agent_mode {
+        AgentMode::On => AGENT_SYSTEM_PROMPT,
+        AgentMode::Safe | AgentMode::Off => SAFE_AGENT_SYSTEM_PROMPT,
+    };
+
+    template
         .replace("{cwd}", &cwd)
         .replace("{home}", &home)
         .replace("{user}", &user)
@@ -90,9 +115,9 @@ fn format_tool_preview(
                 command.to_string()
             };
             format!(
-                "Allow {} {}?",
-                "running".custom_color(CTP_BLUE),
-                full_command.bold()
+                "{} {}?",
+                "run".custom_color(CTP_BLUE),
+                full_command.italic()
             )
         }
         "read_file" => {
@@ -102,8 +127,8 @@ fn format_tool_preview(
                 .unwrap_or("");
             format!(
                 "Allow {} {}?",
-                "reading file".custom_color(CTP_BLUE),
-                file_path.bold()
+                "reading".custom_color(CTP_BLUE),
+                file_path.italic()
             )
         }
         "list_files" => {
@@ -112,9 +137,9 @@ fn format_tool_preview(
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
             format!(
-                "Allow {} in {}?",
-                "listing files".custom_color(CTP_BLUE),
-                directory_path.bold()
+                "{} in {}?",
+                "list files".custom_color(CTP_BLUE),
+                directory_path.italic()
             )
         }
         "search_files" => {
@@ -127,10 +152,10 @@ fn format_tool_preview(
                 .and_then(|v| v.as_str())
                 .unwrap_or(".");
             format!(
-                "Allow {} {} in {}?",
-                "searching for".custom_color(CTP_BLUE),
-                pattern.bold(),
-                directory_path.bold()
+                "Allow {} for {} in {}?",
+                "searching".custom_color(CTP_BLUE),
+                pattern.italic(),
+                directory_path.italic()
             )
         }
         _ => {
@@ -275,12 +300,22 @@ fn display_tool_result(result: &str) {
     eprintln!();
 }
 
+fn command_not_allowed_tip(error: &str) -> Option<ColoredString> {
+    let text = format!("run {} to enable all commands", "/agent on".bold());
+    error
+        .starts_with("command not allowed:")
+        .then(|| text.italic().custom_color(CTP_OVERLAY0))
+}
+
 fn display_tool_error(error: &str) {
     eprintln!(
         "  {} {}",
         "error".custom_color(CTP_OVERLAY0),
         error.custom_color(CTP_RED)
     );
+    if let Some(tip) = command_not_allowed_tip(error) {
+        eprintln!("  {} {}", "tip:".custom_color(CTP_OVERLAY0).italic(), tip);
+    }
     eprintln!();
 }
 
@@ -301,7 +336,7 @@ where
         format!("using {} (agent)...", model_name).custom_color(CTP_OVERLAY0)
     ));
 
-    let system_prompt = build_agent_system_prompt(user_input);
+    let system_prompt = build_agent_system_prompt(config.agent, user_input);
     let mut messages = vec![
         ChatMessage::system(system_prompt),
         ChatMessage::user(user_input),
@@ -447,7 +482,7 @@ mod tests {
                 }),
                 ..Default::default()
             },
-            agent: true,
+            agent: AgentMode::Safe,
         }
     }
 
@@ -465,17 +500,33 @@ mod tests {
 
     #[test]
     fn build_agent_system_prompt_includes_request() {
-        let prompt = build_agent_system_prompt("list the rust files");
+        let prompt = build_agent_system_prompt(AgentMode::Safe, "list the rust files");
 
         assert!(prompt.contains("User request: list the rust files"));
         assert!(prompt.contains("Current dir:"));
         assert!(prompt.contains("Shell:"));
     }
 
+    #[test]
+    fn build_agent_system_prompt_for_on_mentions_run_command() {
+        let prompt = build_agent_system_prompt(AgentMode::On, "inspect the environment");
+
+        assert!(prompt.contains("use the run_command tool"));
+        assert!(prompt.contains("iterative probing"));
+    }
+
+    #[test]
+    fn build_agent_system_prompt_for_safe_is_conservative() {
+        let prompt = build_agent_system_prompt(AgentMode::Safe, "inspect the environment");
+
+        assert!(prompt.contains("Use tools conservatively"));
+        assert!(!prompt.contains("use the run_command tool"));
+    }
+
     #[tokio::test]
     async fn run_agent_loop_returns_message_without_tool_calls() {
         let provider = MockProvider::new(vec![ChatResponse::Message("ls -la".to_string())]);
-        let tool_registry = ToolRegistry::with_builtins();
+        let tool_registry = ToolRegistry::with_builtins(AgentMode::Safe);
 
         let command = run_agent_loop_with_confirm(
             "list files",
@@ -505,7 +556,7 @@ mod tests {
             }]),
             ChatResponse::Message("cat hello.txt".to_string()),
         ]);
-        let tool_registry = ToolRegistry::with_builtins();
+        let tool_registry = ToolRegistry::with_builtins(AgentMode::Safe);
 
         let command = run_agent_loop_with_confirm(
             "show me the file",
@@ -546,7 +597,7 @@ mod tests {
         )
         .collect();
         let provider = MockProvider::new(responses);
-        let tool_registry = ToolRegistry::with_builtins();
+        let tool_registry = ToolRegistry::with_builtins(AgentMode::Safe);
 
         let error = run_agent_loop_with_confirm(
             "find main",
@@ -582,11 +633,16 @@ mod tests {
             String::from_utf8_lossy(&strip_ansi_escapes::strip(&preview)).into_owned()
         }
 
+        fn plain_tip(error: &str) -> Option<String> {
+            command_not_allowed_tip(error)
+                .map(|tip| String::from_utf8_lossy(&strip_ansi_escapes::strip(&*tip)).into_owned())
+        }
+
         // Test run_command with simple command
         let mut args = serde_json::Map::new();
         args.insert("command".to_string(), json!("ls"));
         let preview = plain("run_command", &args);
-        assert!(preview.contains("Allow running"));
+        assert!(preview.contains("run"));
         assert!(preview.contains("ls"));
 
         // Test run_command with command and args
@@ -594,21 +650,21 @@ mod tests {
         args.insert("command".to_string(), json!("grep"));
         args.insert("args".to_string(), json!(["pattern", "file.txt"]));
         let preview = plain("run_command", &args);
-        assert!(preview.contains("Allow running"));
+        assert!(preview.contains("run"));
         assert!(preview.contains("grep pattern file.txt"));
 
         // Test read_file
         let mut args = serde_json::Map::new();
         args.insert("file_path".to_string(), json!("/home/user/file.txt"));
         let preview = plain("read_file", &args);
-        assert!(preview.contains("Allow reading file"));
+        assert!(preview.contains("Allow reading"));
         assert!(preview.contains("/home/user/file.txt"));
 
         // Test list_files
         let mut args = serde_json::Map::new();
         args.insert("directory_path".to_string(), json!("/home/user"));
         let preview = plain("list_files", &args);
-        assert!(preview.contains("Allow listing files in"));
+        assert!(preview.contains("list files in"));
         assert!(preview.contains("/home/user"));
 
         // Test search_files
@@ -629,5 +685,10 @@ mod tests {
         assert!(preview.contains("unknown_tool"));
         assert!(preview.contains("param1: value1"));
         assert!(preview.contains("param2: value2"));
+
+        let tip = plain_tip("command not allowed: rm").unwrap();
+        assert!(tip.contains("run /agent on to enable all commands"));
+
+        assert!(plain_tip("dangerous argument detected: --force").is_none());
     }
 }

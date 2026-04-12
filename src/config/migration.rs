@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+
+use super::AgentMode;
 use std::fs;
 use std::path::Path;
 
@@ -53,7 +55,7 @@ impl Migrator for ConfigMigrator {
         let new_config = Config {
             active_provider,
             providers: old_config.providers,
-            agent: false,
+            agent: AgentMode::Safe,
         };
 
         let new_content = toml::to_string_pretty(&new_config)?;

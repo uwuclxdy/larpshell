@@ -1,3 +1,4 @@
+use crate::config::AgentMode;
 use crate::providers::ToolDefinition;
 use std::fs;
 use std::path::Path;
@@ -71,12 +72,12 @@ impl ToolRegistry {
             .and_then(|tool| tool.execute(args))
     }
 
-    pub fn with_builtins() -> Self {
+    pub fn with_builtins(agent_mode: AgentMode) -> Self {
         let mut registry = Self::new();
         registry.register(read_file_tool());
         registry.register(list_files_tool());
         registry.register(search_files_tool());
-        registry.register(run_command_tool());
+        registry.register(run_command_tool(agent_mode));
         registry
     }
 }
@@ -283,17 +284,27 @@ fn search_file(path: &Path, pattern: &str, matches: &mut Vec<String>) {
     }
 }
 
-fn run_command_tool() -> RegisteredTool {
+fn run_command_tool(agent_mode: AgentMode) -> RegisteredTool {
+    let description = match agent_mode {
+        AgentMode::Safe => {
+            "Run a restricted read-only command to gather context. Only informational commands are allowed and dangerous arguments are blocked."
+        }
+        AgentMode::On => {
+            "Run a shell command to gather context. Commands still require confirmation before execution."
+        }
+        AgentMode::Off => "Run a command.",
+    };
+
     RegisteredTool {
         definition: ToolDefinition {
             name: "run_command".to_string(),
-            description: "Run a safe read-only command to gather context. Only informational commands are allowed (no file modifications, deletions, or destructive operations).".to_string(),
+            description: description.to_string(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
                     "command": {
                         "type": "string",
-                        "description": "The command to execute (must be safe and read-only)"
+                        "description": "The command to execute"
                     },
                     "args": {
                         "type": "array",
@@ -306,10 +317,8 @@ fn run_command_tool() -> RegisteredTool {
                 "required": ["command"]
             }),
         },
-        executor: Box::new(|args| {
-            let command = args["command"]
-                .as_str()
-                .ok_or("command must be a string")?;
+        executor: Box::new(move |args| {
+            let command = args["command"].as_str().ok_or("command must be a string")?;
             let command_args = args
                 .get("args")
                 .and_then(|value| value.as_array())
@@ -320,106 +329,126 @@ fn run_command_tool() -> RegisteredTool {
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
-            execute_run_command(command, &command_args)
+            execute_run_command(agent_mode, command, &command_args)
         }),
     }
 }
 
-fn execute_run_command(command: &str, args: &[String]) -> Result<String, String> {
-    // List of safe commands that are allowed
-    let safe_commands = [
-        "ls",
-        "cat",
-        "echo",
-        "grep",
-        "find",
-        "ps",
-        "whoami",
-        "uname",
-        "date",
-        "pwd",
-        "env",
-        "printenv",
-        "which",
-        "whereis",
-        "file",
-        "stat",
-        "id",
-        "groups",
-        "hostname",
-        "uptime",
-        "free",
-        "df",
-        "du",
-        "top",
-        "htop",
-        "vmstat",
-        "iostat",
-        "mpstat",
-        "sar",
-        "netstat",
-        "ss",
-        "ip",
-        "ifconfig",
-        "route",
-        "ping",
-        "traceroute",
-        "mtr",
-        "dig",
-        "nslookup",
-        "host",
-        "curl",
-        "wget",
-        "git",
-        "svn",
-        "hg",
-        "docker",
-        "podman",
-        "kubectl",
-        "aws",
-        "gcloud",
-        "az",
-        "terraform",
-        "ansible",
-        "vault",
-        "consul",
-    ];
-
-    // Check if the command is in the safe list
-    let command_base = Path::new(command)
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or(command);
-
-    if !safe_commands.contains(&command_base) {
-        return Err(format!("command not allowed: {}", command));
+fn split_command_and_args(command: &str, args: &[String]) -> Result<(String, Vec<String>), String> {
+    if !args.is_empty() {
+        return Ok((command.to_string(), args.to_vec()));
     }
 
-    // Additional safety checks for potentially dangerous arguments
-    for arg in args {
-        // Block common dangerous patterns
-        if arg.contains("--delete")
-            || arg.contains("--remove")
-            || arg.contains("--force")
-            || arg.contains(">")
-            || arg.contains("|")
-            || arg.contains(";")
-            || arg.contains("&")
-            || arg.contains("`")
-            || arg.contains("$")
-            || arg.contains("rm")
-            || arg.contains("mv")
-            || arg.contains("cp")
-            || arg.contains("chmod")
-            || arg.contains("chown")
-        {
-            return Err(format!("dangerous argument detected: {}", arg));
+    let mut parts = command.split_whitespace();
+    let executable = parts
+        .next()
+        .ok_or_else(|| "command must not be empty".to_string())?;
+
+    Ok((
+        executable.to_string(),
+        parts.map(ToString::to_string).collect(),
+    ))
+}
+
+fn execute_run_command(
+    agent_mode: AgentMode,
+    command: &str,
+    args: &[String],
+) -> Result<String, String> {
+    let (command, args) = split_command_and_args(command, args)?;
+
+    if agent_mode.is_safe() {
+        // List of safe commands that are allowed
+        let safe_commands = [
+            "ls",
+            "cat",
+            "echo",
+            "grep",
+            "find",
+            "ps",
+            "whoami",
+            "uname",
+            "date",
+            "pwd",
+            "env",
+            "printenv",
+            "which",
+            "whereis",
+            "file",
+            "stat",
+            "id",
+            "groups",
+            "hostname",
+            "uptime",
+            "free",
+            "df",
+            "du",
+            "top",
+            "htop",
+            "vmstat",
+            "iostat",
+            "mpstat",
+            "sar",
+            "netstat",
+            "ss",
+            "ip",
+            "ifconfig",
+            "route",
+            "ping",
+            "traceroute",
+            "mtr",
+            "dig",
+            "nslookup",
+            "host",
+            "curl",
+            "wget",
+            "git",
+            "svn",
+            "hg",
+            "docker",
+            "podman",
+            "kubectl",
+            "aws",
+            "gcloud",
+            "az",
+            "terraform",
+            "ansible",
+            "vault",
+            "consul",
+        ];
+
+        let command_base = Path::new(&command)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(&command);
+
+        if !safe_commands.contains(&command_base) {
+            return Err(format!("command not allowed: {}", command));
+        }
+
+        for arg in &args {
+            if arg.contains("--delete")
+                || arg.contains("--remove")
+                || arg.contains("--force")
+                || arg.contains(">")
+                || arg.contains("|")
+                || arg.contains(";")
+                || arg.contains("&")
+                || arg.contains("`")
+                || arg.contains("$")
+                || arg.contains("rm")
+                || arg.contains("mv")
+                || arg.contains("cp")
+                || arg.contains("chmod")
+                || arg.contains("chown")
+            {
+                return Err(format!("dangerous argument detected: {}", arg));
+            }
         }
     }
 
-    // Execute the command
-    let output = Command::new(command)
-        .args(args)
+    let output = Command::new(&command)
+        .args(&args)
         .output()
         .map_err(|error| format!("failed to execute command: {}", error))?;
 
@@ -448,7 +477,7 @@ mod tests {
 
     #[test]
     fn registry_with_builtins_has_four_tools() {
-        let registry = ToolRegistry::with_builtins();
+        let registry = ToolRegistry::with_builtins(AgentMode::Safe);
         assert_eq!(registry.definitions().len(), 4);
         let names: Vec<_> = registry
             .definitions()
@@ -541,7 +570,7 @@ mod tests {
     fn registry_execute_calls_correct_tool() {
         let dir = test_dir("registry_exec");
         fs::write(dir.join("test.txt"), "hello").unwrap();
-        let registry = ToolRegistry::with_builtins();
+        let registry = ToolRegistry::with_builtins(AgentMode::Safe);
 
         let result = registry
             .execute(
@@ -555,7 +584,7 @@ mod tests {
 
     #[test]
     fn registry_execute_unknown_tool_returns_error() {
-        let registry = ToolRegistry::with_builtins();
+        let registry = ToolRegistry::with_builtins(AgentMode::Safe);
         let result = registry.execute("nonexistent", serde_json::json!({}));
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("unknown tool"));
@@ -563,22 +592,58 @@ mod tests {
 
     #[test]
     fn run_command_executes_safe_commands() {
-        let result = execute_run_command("echo", &["hello world".to_string()]);
+        let result = execute_run_command(AgentMode::Safe, "echo", &["hello world".to_string()]);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().trim(), "hello world");
+    }
+
+    #[test]
+    fn run_command_safe_accepts_combined_command_string() {
+        let result = execute_run_command(AgentMode::Safe, "echo hello world", &[]);
         assert!(result.is_ok());
         assert_eq!(result.unwrap().trim(), "hello world");
     }
 
     #[test]
     fn run_command_rejects_unsafe_commands() {
-        let result = execute_run_command("rm", &["-rf".to_string(), "/".to_string()]);
+        let result =
+            execute_run_command(AgentMode::Safe, "rm", &["-rf".to_string(), "/".to_string()]);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("command not allowed"));
     }
 
     #[test]
-    fn run_command_rejects_dangerous_args() {
-        let result = execute_run_command("ls", &["--force".to_string()]);
+    fn run_command_safe_rejects_dangerous_combined_command_string() {
+        let result = execute_run_command(AgentMode::Safe, "ls --force", &[]);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("dangerous argument"));
+    }
+
+    #[test]
+    fn run_command_rejects_dangerous_args() {
+        let result = execute_run_command(AgentMode::Safe, "ls", &["--force".to_string()]);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("dangerous argument"));
+    }
+
+    #[test]
+    fn run_command_on_allows_arbitrary_commands() {
+        let result = execute_run_command(AgentMode::On, "echo", &["hello world".to_string()]);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().trim(), "hello world");
+    }
+
+    #[test]
+    fn run_command_on_accepts_combined_command_string() {
+        let result = execute_run_command(AgentMode::On, "echo hello world", &[]);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().trim(), "hello world");
+    }
+
+    #[test]
+    fn run_command_on_allows_previously_blocked_args() {
+        let result = execute_run_command(AgentMode::On, "echo", &["--force".to_string()]);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().trim(), "--force");
     }
 }

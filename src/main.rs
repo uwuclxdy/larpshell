@@ -30,7 +30,7 @@ use common::{
     CTP_BLUE, CTP_OVERLAY0, CTP_YELLOW, EXIT_SIGINT, clear_line, eprint_flush, exit_with_code,
     hide_cursor, show_cursor,
 };
-use config::{Config, interactive_setup, load_config};
+use config::{AgentMode, Config, interactive_setup, load_config};
 use confirmation::{
     ConfirmResult, confirm_execution, confirm_with_explain, display_command, display_explanation,
     edit_command,
@@ -56,6 +56,53 @@ enum CommandMode {
 enum Switch {
     Enable,
     Disable,
+}
+
+fn build_tool_registry(agent_mode: AgentMode) -> ToolRegistry {
+    let mut registry = ToolRegistry::with_builtins(agent_mode);
+    for mcp_config in agent::mcp::load_mcp_configs() {
+        match agent::mcp::StdioMcpClient::spawn(&mcp_config) {
+            Ok(mut client) => {
+                if let Err(error) = client.initialize() {
+                    print_warning(&format!("MCP server '{}': {error}", mcp_config.name));
+                    continue;
+                }
+                match client.list_tools() {
+                    Ok(tools) => {
+                        for tool in tools {
+                            registry.register_mcp_tool(tool, mcp_config.name.clone());
+                        }
+                    }
+                    Err(error) => {
+                        print_warning(&format!("MCP server '{}': {error}", mcp_config.name));
+                    }
+                }
+                registry.add_mcp_client(client);
+            }
+            Err(error) => print_warning(&error),
+        }
+    }
+    registry
+}
+
+fn agent_mode_status_message(mode: AgentMode) -> &'static str {
+    match mode {
+        AgentMode::Off => "agent mode is currently off.",
+        AgentMode::Safe => "agent mode is currently safe.",
+        AgentMode::On => "agent mode is currently on.",
+    }
+}
+
+fn agent_mode_set_message(mode: AgentMode) -> &'static str {
+    match mode {
+        AgentMode::Off => "agent mode disabled.",
+        AgentMode::Safe => {
+            "agent mode set to safe — tools are enabled with restricted command execution."
+        }
+        AgentMode::On => {
+            "agent mode set to on — tools are enabled and commands are only gated by confirmation."
+        }
+    }
 }
 
 // ── cancellation wrapper ────────────────────────────────────────────────────
@@ -114,23 +161,15 @@ fn handle_history_subcommand(switch: Switch) -> Result<(), LarpshellError> {
     Ok(())
 }
 
-fn handle_agent_subcommand(switch: Option<Switch>) -> Result<(), LarpshellError> {
-    match switch {
-        Some(Switch::Enable) => {
-            config::set_agent_enabled(true)?;
-            cli::print_ok("agent mode enabled — tools will be available for context gathering.");
-        }
-        Some(Switch::Disable) => {
-            config::set_agent_enabled(false)?;
-            cli::print_ok("agent mode disabled.");
+fn handle_agent_subcommand(mode: Option<AgentMode>) -> Result<(), LarpshellError> {
+    match mode {
+        Some(mode) => {
+            config::set_agent_mode(mode)?;
+            cli::print_ok(agent_mode_set_message(mode));
         }
         None => {
-            let enabled = config::load_config()?.agent;
-            if enabled {
-                cli::print_ok("agent mode is currently enabled.");
-            } else {
-                cli::print_ok("agent mode is currently disabled.");
-            }
+            let mode = config::load_config()?.agent;
+            cli::print_ok(agent_mode_status_message(mode));
         }
     }
     Ok(())
@@ -285,10 +324,8 @@ async fn inner_main() -> Result<(), LarpshellError> {
                 })?;
                 return Ok(());
             }
-            cli::Subcommands::Agent { enable } => {
-                handle_agent_subcommand(
-                    enable.map(|e| if e { Switch::Enable } else { Switch::Disable }),
-                )?;
+            cli::Subcommands::Agent { mode } => {
+                handle_agent_subcommand(*mode)?;
                 return Ok(());
             }
             cli::Subcommands::Prompt { kind, action } => {
@@ -332,31 +369,8 @@ async fn inner_main() -> Result<(), LarpshellError> {
 
     let update_task = tokio::task::spawn(update::is_update_available());
 
-    let mut tool_registry = if config.agent {
-        let mut registry = ToolRegistry::with_builtins();
-        for mcp_config in agent::mcp::load_mcp_configs() {
-            match agent::mcp::StdioMcpClient::spawn(&mcp_config) {
-                Ok(mut client) => {
-                    if let Err(error) = client.initialize() {
-                        print_warning(&format!("MCP server '{}': {error}", mcp_config.name));
-                        continue;
-                    }
-                    match client.list_tools() {
-                        Ok(tools) => {
-                            for tool in tools {
-                                registry.register_mcp_tool(tool, mcp_config.name.clone());
-                            }
-                        }
-                        Err(error) => {
-                            print_warning(&format!("MCP server '{}': {error}", mcp_config.name));
-                        }
-                    }
-                    registry.add_mcp_client(client);
-                }
-                Err(error) => print_warning(&error),
-            }
-        }
-        Some(registry)
+    let mut tool_registry = if config.agent.is_enabled() {
+        Some(build_tool_registry(config.agent))
     } else {
         None
     };
@@ -385,10 +399,8 @@ async fn inner_main() -> Result<(), LarpshellError> {
                     slash_commands::SlashCmd::Api => {
                         interactive_setup()?;
                     }
-                    slash_commands::SlashCmd::Agent { enable } => {
-                        handle_agent_subcommand(
-                            enable.map(|e| if e { Switch::Enable } else { Switch::Disable }),
-                        )?;
+                    slash_commands::SlashCmd::Agent { mode } => {
+                        handle_agent_subcommand(mode)?;
                     }
                     slash_commands::SlashCmd::Uninstall => {
                         uninstall_larpshell()?;
@@ -464,26 +476,30 @@ async fn inner_main() -> Result<(), LarpshellError> {
                                 Ok(new_provider) => {
                                     config = new_config;
                                     provider = new_provider;
+                                    tool_registry = if config.agent.is_enabled() {
+                                        Some(build_tool_registry(config.agent))
+                                    } else {
+                                        None
+                                    };
                                 }
                             },
                         },
                     },
-                    slash_commands::SlashCmd::Agent { enable } => {
-                        match handle_agent_subcommand(
-                            enable.map(|e| if e { Switch::Enable } else { Switch::Disable }),
-                        ) {
-                            Ok(()) => match load_config() {
-                                Ok(new_config) => {
-                                    config = new_config;
-                                    if enable == Some(false) {
-                                        tool_registry = None;
-                                    }
-                                }
-                                Err(e) => print_error(&format!("failed to reload config: {e}")),
-                            },
-                            Err(e) => print_error(&e.to_string()),
-                        }
-                    }
+                    slash_commands::SlashCmd::Agent { mode } => match handle_agent_subcommand(mode)
+                    {
+                        Ok(()) => match load_config() {
+                            Ok(new_config) => {
+                                config = new_config;
+                                tool_registry = if config.agent.is_enabled() {
+                                    Some(build_tool_registry(config.agent))
+                                } else {
+                                    None
+                                };
+                            }
+                            Err(e) => print_error(&format!("failed to reload config: {e}")),
+                        },
+                        Err(e) => print_error(&e.to_string()),
+                    },
                     slash_commands::SlashCmd::Uninstall => {
                         if let Err(e) = uninstall_larpshell() {
                             print_error(&e.to_string());
@@ -522,23 +538,9 @@ async fn inner_main() -> Result<(), LarpshellError> {
                 continue;
             }
 
-            let result = if config.agent {
-                let registry = tool_registry.get_or_insert_with(|| {
-                    let mut registry = ToolRegistry::with_builtins();
-                    for mcp_config in agent::mcp::load_mcp_configs() {
-                        if let Ok(mut client) = agent::mcp::StdioMcpClient::spawn(&mcp_config)
-                            && client.initialize().is_ok()
-                        {
-                            if let Ok(tools) = client.list_tools() {
-                                for tool in tools {
-                                    registry.register_mcp_tool(tool, mcp_config.name.clone());
-                                }
-                            }
-                            registry.add_mcp_client(client);
-                        }
-                    }
-                    registry
-                });
+            let result = if config.agent.is_enabled() {
+                let registry =
+                    tool_registry.get_or_insert_with(|| build_tool_registry(config.agent));
                 process_command_agent(
                     &user_input,
                     provider.as_ref(),
@@ -579,8 +581,8 @@ async fn inner_main() -> Result<(), LarpshellError> {
     } else {
         // single-command mode: execute once and exit
         let user_input = cli.command.join(" ");
-        if config.agent {
-            let registry = tool_registry.get_or_insert_with(ToolRegistry::with_builtins);
+        if config.agent.is_enabled() {
+            let registry = tool_registry.get_or_insert_with(|| build_tool_registry(config.agent));
             process_command_agent(
                 &user_input,
                 provider.as_ref(),

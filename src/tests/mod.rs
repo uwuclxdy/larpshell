@@ -1,4 +1,4 @@
-use crate::config::{ActiveProvider, Config, ProviderSpecificConfig};
+use crate::config::{ActiveProvider, AgentMode, Config, ProviderSpecificConfig};
 use crate::error::LarpshellError;
 use crate::providers::create_provider;
 use std::fs;
@@ -314,7 +314,7 @@ fn connection_failure_prints_pretty_error() {
 // ── agent config tests ─────────────────────────────────────────────────────
 
 #[test]
-fn agent_field_defaults_to_false() {
+fn agent_field_defaults_to_off() {
     let config_toml = r#"
 provider = "ollama"
 
@@ -323,21 +323,33 @@ base_url = "http://localhost:11434"
 model = "test"
 "#;
     let config: Config = from_str(config_toml).expect("should parse without agent field");
-    assert!(!config.agent, "agent should default to false");
+    assert_eq!(config.agent, AgentMode::Off);
 }
 
 #[test]
-fn agent_field_parses_when_present() {
-    let config_toml = r#"
-provider = "ollama"
-agent = true
+fn agent_field_parses_mode_values() {
+    for (value, expected) in [
+        ("off", AgentMode::Off),
+        ("safe", AgentMode::Safe),
+        ("on", AgentMode::On),
+    ] {
+        let config_toml = format!(
+            "provider = \"ollama\"\nagent = \"{value}\"\n\n[providers.ollama]\nbase_url = \"http://localhost:11434\"\nmodel = \"test\"\n"
+        );
+        let config: Config = from_str(&config_toml).expect("should parse agent mode");
+        assert_eq!(config.agent, expected);
+    }
+}
 
-[providers.ollama]
-base_url = "http://localhost:11434"
-model = "test"
-"#;
-    let config: Config = from_str(config_toml).expect("should parse with agent field");
-    assert!(config.agent, "agent should be true");
+#[test]
+fn agent_field_parses_legacy_bool_values() {
+    for (value, expected) in [("false", AgentMode::Off), ("true", AgentMode::On)] {
+        let config_toml = format!(
+            "provider = \"ollama\"\nagent = {value}\n\n[providers.ollama]\nbase_url = \"http://localhost:11434\"\nmodel = \"test\"\n"
+        );
+        let config: Config = from_str(&config_toml).expect("should parse legacy bool agent");
+        assert_eq!(config.agent, expected);
+    }
 }
 
 #[test]
@@ -352,14 +364,37 @@ fn agent_subcommand_on_prints_confirmation() {
         "agent on should exit 0; stderr: {stderr}"
     );
     assert!(
-        stderr.contains("agent") && stderr.contains("enabled"),
+        stderr.contains("agent mode set to on"),
         "expected confirmation message; stderr: {stderr}"
     );
     let config_path = home.join("config").join("larpshell").join("config.toml");
     let contents = fs::read_to_string(config_path).unwrap();
     assert!(
-        contents.contains("agent = true"),
-        "config should have agent = true"
+        contents.contains("agent = \"on\""),
+        "config should have agent = \"on\""
+    );
+}
+
+#[test]
+fn agent_subcommand_safe_prints_confirmation() {
+    let home = temp_home("agent_safe");
+    let port = mock_ollama(&[]);
+    write_ollama_config(&home, port);
+    let out = run(&home, &["agent", "safe"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        out.status.success(),
+        "agent safe should exit 0; stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("agent mode set to safe"),
+        "expected confirmation message; stderr: {stderr}"
+    );
+    let config_path = home.join("config").join("larpshell").join("config.toml");
+    let contents = fs::read_to_string(config_path).unwrap();
+    assert!(
+        contents.contains("agent = \"safe\""),
+        "config should have agent = \"safe\""
     );
 }
 
@@ -376,13 +411,13 @@ fn agent_subcommand_off_prints_confirmation() {
         "agent off should exit 0; stderr: {stderr}"
     );
     assert!(
-        stderr.contains("agent") && stderr.contains("disabled"),
+        stderr.contains("agent mode disabled"),
         "expected confirmation message; stderr: {stderr}"
     );
     let config_path = home.join("config").join("larpshell").join("config.toml");
     let contents = fs::read_to_string(config_path).unwrap();
     assert!(
-        contents.contains("agent = false"),
-        "config should have agent = false"
+        contents.contains("agent = \"off\""),
+        "config should have agent = \"off\""
     );
 }

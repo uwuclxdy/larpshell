@@ -16,7 +16,7 @@ pub fn generate_bash_autocomplete() -> &'static str {
     elif [ $COMP_CWORD -eq 2 ]; then
         case "$prev" in
             agent|history)
-                COMPREPLY=( $(compgen -W "on off" -- "$cur") )
+                COMPREPLY=( $(compgen -W "off safe on" -- "$cur") )
                 ;;
             prompt)
                 COMPREPLY=( $(compgen -W "system explain" -- "$cur") )
@@ -41,7 +41,7 @@ _larpshell() {
     local -a commands
     commands=(
         'api:configure API provider (Gemini, Ollama, OpenRouter, LM Studio, OpenAI)'
-        'agent:enable or disable agent mode'
+        'agent:set agent mode (off, safe, on)'
         'explain:explain a shell command'
         'history:enable or disable prompt history'
         'prompt:view or edit system/explain prompts'
@@ -92,14 +92,14 @@ pub fn generate_fish_autocomplete() -> &'static str {
     r#"# larpshell autocomplete
 complete -c larpshell -f
 complete -c larpshell -n "__fish_use_subcommand" -a api -d 'configure API provider (Gemini, Ollama, OpenRouter, LM Studio, OpenAI)'
-complete -c larpshell -n "__fish_use_subcommand" -a agent -d 'enable or disable agent mode'
+complete -c larpshell -n "__fish_use_subcommand" -a agent -d 'set agent mode'
 complete -c larpshell -n "__fish_use_subcommand" -a explain -d 'explain a shell command'
 complete -c larpshell -n "__fish_use_subcommand" -a history -d 'enable or disable prompt history'
 complete -c larpshell -n "__fish_use_subcommand" -a prompt -d 'view or edit system/explain prompts'
 complete -c larpshell -n "__fish_use_subcommand" -a uninstall -d 'uninstall larpshell'
 complete -c larpshell -l help -d 'show help information'
 complete -c larpshell -l version -d 'show version information'
-complete -c larpshell -n "__fish_seen_subcommand_from agent" -a "on off" -d 'toggle agent mode'
+complete -c larpshell -n "__fish_seen_subcommand_from agent" -a "off safe on" -d 'set agent mode'
 complete -c larpshell -n "__fish_seen_subcommand_from history" -a "on off" -d 'toggle history'
 complete -c larpshell -n "__fish_seen_subcommand_from prompt" -a system -d 'system prompt'
 complete -c larpshell -n "__fish_seen_subcommand_from prompt" -a explain -d 'explain prompt'

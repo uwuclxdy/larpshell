@@ -8,6 +8,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::common::{CTP_GREEN, CTP_RED, CTP_YELLOW};
+use crate::config::AgentMode;
 use crate::error::LarpshellError;
 
 const SYMBOL_CHECK: &str = "\u{2713}";
@@ -55,7 +56,7 @@ pub enum Subcommands {
         command: Vec<String>,
     },
     Agent {
-        enable: Option<bool>,
+        mode: Option<AgentMode>,
     },
 }
 
@@ -129,8 +130,9 @@ pub fn parse_cli_args() -> Result<CliArgs, LarpshellError> {
 
     #[derive(clap::ValueEnum, Clone)]
     enum ClapAgentToggle {
-        On,
         Off,
+        Safe,
+        On,
     }
 
     let cli = Cli::parse();
@@ -153,7 +155,11 @@ pub fn parse_cli_args() -> Result<CliArgs, LarpshellError> {
         }),
         Some(Commands::Explain { command }) => Some(Subcommands::Explain { command }),
         Some(Commands::Agent { toggle }) => Some(Subcommands::Agent {
-            enable: toggle.map(|t| matches!(t, ClapAgentToggle::On)),
+            mode: toggle.map(|toggle| match toggle {
+                ClapAgentToggle::Off => AgentMode::Off,
+                ClapAgentToggle::Safe => AgentMode::Safe,
+                ClapAgentToggle::On => AgentMode::On,
+            }),
         }),
         None => None,
     };
