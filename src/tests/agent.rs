@@ -25,6 +25,22 @@ fn agent_on_safe_off_subcommand_updates_config() {
 }
 
 #[test]
+fn agent_safe_subcommand_bootstraps_missing_config() {
+    let home = temp_home("agent_safe_no_config");
+    let config_path = home.join("config").join("larpshell").join("config.toml");
+
+    let out = run(&home, &["agent", "safe"]);
+    assert!(
+        out.status.success(),
+        "expected success, stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let contents = fs::read_to_string(&config_path).unwrap();
+    assert!(contents.contains("agent = \"safe\""));
+}
+
+#[test]
 fn agent_slash_command_parsed_in_interactive() {
     let home = temp_home("agent_slash");
     let port = mock_ollama(&[]);

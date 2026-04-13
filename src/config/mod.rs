@@ -270,7 +270,17 @@ pub fn set_history_enabled(enabled: bool) -> Result<(), LarpshellError> {
 }
 
 pub fn set_agent_mode(mode: AgentMode) -> Result<(), LarpshellError> {
-    let mut config = load_config()?;
+    let mut config = match load_config() {
+        Ok(config) => config,
+        Err(LarpshellError::IoError(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+            Config {
+                active_provider: ActiveProvider::Ollama,
+                providers: MultiProviderConfig::default(),
+                agent: AgentMode::Off,
+            }
+        }
+        Err(error) => return Err(error),
+    };
     config.agent = mode;
     save_config(&config)?;
     Ok(())
@@ -294,7 +304,8 @@ pub fn load_config() -> Result<Config, LarpshellError> {
 }
 
 pub fn save_config(config: &Config) -> Result<(), LarpshellError> {
-    let config_path = config_path()?;
+    let config_dir = ensure_config_dir()?;
+    let config_path = config_dir.join("config.toml");
     let toml_string = toml::to_string_pretty(config)?;
     fs::write(&config_path, toml_string)?;
     Ok(())
