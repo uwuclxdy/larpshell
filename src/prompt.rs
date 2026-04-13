@@ -1,5 +1,8 @@
 use crate::common::{current_directory, os_name, shell_name, username};
-use crate::config::{explain_prompt_path, save_explain_prompt, save_sys_prompt, sys_prompt_path};
+use crate::config::{
+    agent_prompt_path, agent_safe_prompt_path, explain_prompt_path, save_agent_prompt,
+    save_agent_safe_prompt, save_explain_prompt, save_sys_prompt, sys_prompt_path,
+};
 use crate::error::LarpshellError;
 
 pub const DEFAULT_PROMPT_TEMPLATE: &str =
@@ -43,6 +46,43 @@ pub fn create_system_prompt(user_request: &str, template: Option<&str>) -> Strin
 
 pub const DEFAULT_EXPLAIN_PROMPT: &str = include_str!("prompts/explain.md");
 
+pub const DEFAULT_AGENT_SAFE_PROMPT: &str =
+    "You are a shell command translator with access to tools for gathering context.
+You may call tools to read files, list directories, or search for patterns
+before producing your final shell command.
+
+Use tools conservatively and prefer minimal-risk inspection steps.
+When you have enough context, respond with ONLY the shell command (no markdown,
+no explanations, no backticks) — the same rules as without tools.
+
+Environment context:
+- Current dir: {cwd}
+- Home dir: {home}
+- User: {user}
+- Shell: {shell}
+- OS: {os}
+
+User request: {request}";
+
+pub const DEFAULT_AGENT_PROMPT: &str =
+    "You are a shell command translator with access to tools for gathering context.
+You may call tools to read files, list directories, search for patterns, and run commands
+before producing your final shell command.
+
+When multiple tries, iterative probing, or environment inspection may be needed,
+use the run_command tool to gather context before deciding on the final shell command.
+When you have enough context, respond with ONLY the shell command (no markdown,
+no explanations, no backticks) — the same rules as without tools.
+
+Environment context:
+- Current dir: {cwd}
+- Home dir: {home}
+- User: {user}
+- Shell: {shell}
+- OS: {os}
+
+User request: {request}";
+
 pub fn create_explain_prompt(command: &str, template: Option<&str>) -> String {
     let tmpl = template.unwrap_or(DEFAULT_EXPLAIN_PROMPT);
     tmpl.replace("{command}", command)
@@ -54,6 +94,10 @@ pub fn validate_sys_prompt(template: &str) -> bool {
 
 pub fn validate_explain_prompt(template: &str) -> bool {
     template.contains("{command}")
+}
+
+pub fn validate_agent_prompt(template: &str) -> bool {
+    validate_sys_prompt(template)
 }
 
 pub fn clean_response(response: &str) -> String {
@@ -87,19 +131,31 @@ pub fn clean_explanation(response: &str, command: &str) -> String {
     }
 }
 
+fn init_prompt_file(
+    path_result: Result<std::path::PathBuf, LarpshellError>,
+    default: &str,
+    save: fn(&str) -> Result<(), LarpshellError>,
+) -> Result<(), LarpshellError> {
+    let path = path_result?;
+    if !path.exists() {
+        save(default)?;
+    }
+    Ok(())
+}
+
 pub fn create_prompts() -> Result<(), LarpshellError> {
-    let sys_path = sys_prompt_path()?;
-    if !sys_path.exists() {
-        save_sys_prompt(DEFAULT_PROMPT_TEMPLATE)
-            .map_err(|e| LarpshellError::ConfigError(e.to_string()))?;
-    }
-
-    let explain_path = explain_prompt_path()?;
-    if !explain_path.exists() {
-        save_explain_prompt(DEFAULT_EXPLAIN_PROMPT)
-            .map_err(|e| LarpshellError::ConfigError(e.to_string()))?;
-    }
-
+    init_prompt_file(sys_prompt_path(), DEFAULT_PROMPT_TEMPLATE, save_sys_prompt)?;
+    init_prompt_file(
+        explain_prompt_path(),
+        DEFAULT_EXPLAIN_PROMPT,
+        save_explain_prompt,
+    )?;
+    init_prompt_file(agent_prompt_path(), DEFAULT_AGENT_PROMPT, save_agent_prompt)?;
+    init_prompt_file(
+        agent_safe_prompt_path(),
+        DEFAULT_AGENT_SAFE_PROMPT,
+        save_agent_safe_prompt,
+    )?;
     Ok(())
 }
 
@@ -130,6 +186,26 @@ mod tests {
     #[test]
     fn validate_sys_prompt_rejects_missing_placeholder() {
         assert!(!validate_sys_prompt("do something"));
+    }
+
+    #[test]
+    fn validate_agent_prompt_accepts_valid_template() {
+        assert!(validate_agent_prompt("translate this: {request}"));
+    }
+
+    #[test]
+    fn validate_agent_prompt_rejects_missing_placeholder() {
+        assert!(!validate_agent_prompt("do something"));
+    }
+
+    #[test]
+    fn default_agent_prompt_has_request_placeholder() {
+        assert!(DEFAULT_AGENT_PROMPT.contains("{request}"));
+    }
+
+    #[test]
+    fn default_agent_safe_prompt_has_request_placeholder() {
+        assert!(DEFAULT_AGENT_SAFE_PROMPT.contains("{request}"));
     }
 
     #[test]

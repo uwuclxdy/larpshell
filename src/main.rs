@@ -38,8 +38,9 @@ use confirmation::{
 use error::LarpshellError;
 use interactive::{user_input, user_input_prefilled};
 use prompt::{
-    DEFAULT_EXPLAIN_PROMPT, DEFAULT_PROMPT_TEMPLATE, clean_response, create_explain_prompt,
-    create_prompts, create_system_prompt, validate_explain_prompt, validate_sys_prompt,
+    DEFAULT_AGENT_PROMPT, DEFAULT_AGENT_SAFE_PROMPT, DEFAULT_EXPLAIN_PROMPT,
+    DEFAULT_PROMPT_TEMPLATE, clean_response, create_explain_prompt, create_prompts,
+    create_system_prompt, validate_agent_prompt, validate_explain_prompt, validate_sys_prompt,
 };
 use providers::create_provider;
 use shell_integration::{auto_setup_shell_function, migrate_nlsh_rs_shell};
@@ -175,6 +176,12 @@ fn handle_agent_subcommand(mode: Option<AgentMode>) -> Result<(), LarpshellError
     Ok(())
 }
 
+fn open_in_editor(path: &std::path::Path) -> Result<(), LarpshellError> {
+    let editor = std::env::var("EDITOR").unwrap_or_else(|_| "nano".to_string());
+    std::process::Command::new(&editor).arg(path).status()?;
+    Ok(())
+}
+
 fn handle_prompt_subcommand(
     kind: &PromptKind,
     action: &PromptAction,
@@ -183,15 +190,14 @@ fn handle_prompt_subcommand(
         (PromptKind::System, PromptAction::Show) => {
             let content =
                 config::load_sys_prompt().unwrap_or_else(|| DEFAULT_PROMPT_TEMPLATE.to_string());
-            println!("{}", content);
+            println!("{content}");
         }
         (PromptKind::System, PromptAction::Edit) => {
             let path = config::sys_prompt_path()?;
             if !path.exists() {
                 config::save_sys_prompt(DEFAULT_PROMPT_TEMPLATE)?;
             }
-            let editor = std::env::var("EDITOR").unwrap_or_else(|_| "nano".to_string());
-            std::process::Command::new(&editor).arg(&path).status()?;
+            open_in_editor(&path)?;
             if let Some(saved) = config::load_sys_prompt()
                 && !validate_sys_prompt(&saved)
             {
@@ -201,19 +207,52 @@ fn handle_prompt_subcommand(
         (PromptKind::Explain, PromptAction::Show) => {
             let content =
                 config::load_explain_prompt().unwrap_or_else(|| DEFAULT_EXPLAIN_PROMPT.to_string());
-            println!("{}", content);
+            println!("{content}");
         }
         (PromptKind::Explain, PromptAction::Edit) => {
             let path = config::explain_prompt_path()?;
             if !path.exists() {
                 config::save_explain_prompt(DEFAULT_EXPLAIN_PROMPT)?;
             }
-            let editor = std::env::var("EDITOR").unwrap_or_else(|_| "nano".to_string());
-            std::process::Command::new(&editor).arg(&path).status()?;
+            open_in_editor(&path)?;
             if let Some(saved) = config::load_explain_prompt()
                 && !validate_explain_prompt(&saved)
             {
                 print_error("explain-prompt must contain the {command} placeholder.");
+            }
+        }
+        (PromptKind::Agent, PromptAction::Show) => {
+            let content =
+                config::load_agent_prompt().unwrap_or_else(|| DEFAULT_AGENT_PROMPT.to_string());
+            println!("{content}");
+        }
+        (PromptKind::Agent, PromptAction::Edit) => {
+            let path = config::agent_prompt_path()?;
+            if !path.exists() {
+                config::save_agent_prompt(DEFAULT_AGENT_PROMPT)?;
+            }
+            open_in_editor(&path)?;
+            if let Some(saved) = config::load_agent_prompt()
+                && !validate_agent_prompt(&saved)
+            {
+                print_warning("agent prompt must contain the {request} placeholder.");
+            }
+        }
+        (PromptKind::AgentSafe, PromptAction::Show) => {
+            let content = config::load_agent_safe_prompt()
+                .unwrap_or_else(|| DEFAULT_AGENT_SAFE_PROMPT.to_string());
+            println!("{content}");
+        }
+        (PromptKind::AgentSafe, PromptAction::Edit) => {
+            let path = config::agent_safe_prompt_path()?;
+            if !path.exists() {
+                config::save_agent_safe_prompt(DEFAULT_AGENT_SAFE_PROMPT)?;
+            }
+            open_in_editor(&path)?;
+            if let Some(saved) = config::load_agent_safe_prompt()
+                && !validate_agent_prompt(&saved)
+            {
+                print_warning("agent-safe prompt must contain the {request} placeholder.");
             }
         }
     }

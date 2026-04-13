@@ -21,6 +21,14 @@ static PROMPT_KINDS: &[ArgChoice] = &[
         value: "explain",
         description: "explain prompt",
     },
+    ArgChoice {
+        value: "agent",
+        description: "agent (unrestricted) prompt",
+    },
+    ArgChoice {
+        value: "agent-safe",
+        description: "agent (safe/restricted) prompt",
+    },
 ];
 
 static PROMPT_ACTIONS: &[ArgChoice] = &[
@@ -79,7 +87,7 @@ pub const COMMANDS: &[SlashCommand] = &[
     },
     SlashCommand {
         name: "prompt",
-        description: "manage system or explain prompts",
+        description: "manage system, explain, or agent prompts",
     },
     SlashCommand {
         name: "help",
@@ -205,6 +213,8 @@ pub fn parse(input: &str) -> SlashCmd {
         Some("/prompt") => {
             let kind = match parts.next() {
                 Some("explain") => PromptKind::Explain,
+                Some("agent-safe") => PromptKind::AgentSafe,
+                Some("agent") => PromptKind::Agent,
                 _ => PromptKind::System,
             };
             let action = match parts.next() {
@@ -378,7 +388,7 @@ mod tests {
         let (start, candidates) = arg_completions("/prompt ").unwrap();
         assert_eq!(start, 8);
         let values: Vec<_> = candidates.iter().map(|c| c.value).collect();
-        assert_eq!(values, ["system", "explain"]);
+        assert_eq!(values, ["system", "explain", "agent", "agent-safe"]);
     }
 
     #[test]
@@ -387,6 +397,36 @@ mod tests {
         assert_eq!(start, 8);
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].value, "system");
+    }
+
+    #[test]
+    fn arg_completions_prompt_agent_prefix_filters() {
+        let (start, candidates) = arg_completions("/prompt agent").unwrap();
+        assert_eq!(start, 8);
+        let values: Vec<_> = candidates.iter().map(|c| c.value).collect();
+        assert_eq!(values, ["agent", "agent-safe"]);
+    }
+
+    #[test]
+    fn parse_prompt_agent_edit() {
+        match parse("/prompt agent edit") {
+            SlashCmd::Prompt { kind, action } => {
+                assert!(matches!(kind, PromptKind::Agent));
+                assert!(matches!(action, PromptAction::Edit));
+            }
+            _ => panic!("expected Prompt"),
+        }
+    }
+
+    #[test]
+    fn parse_prompt_agent_safe_show() {
+        match parse("/prompt agent-safe") {
+            SlashCmd::Prompt { kind, action } => {
+                assert!(matches!(kind, PromptKind::AgentSafe));
+                assert!(matches!(action, PromptAction::Show));
+            }
+            _ => panic!("expected Prompt"),
+        }
     }
 
     #[test]

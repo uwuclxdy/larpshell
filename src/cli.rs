@@ -64,6 +64,8 @@ pub enum Subcommands {
 pub enum PromptKind {
     System,
     Explain,
+    Agent,
+    AgentSafe,
 }
 
 #[derive(Debug, Clone)]
@@ -120,6 +122,8 @@ pub fn parse_cli_args() -> Result<CliArgs, LarpshellError> {
     enum ClapPromptKind {
         System,
         Explain,
+        Agent,
+        AgentSafe,
     }
 
     #[derive(clap::ValueEnum, Clone)]
@@ -147,6 +151,8 @@ pub fn parse_cli_args() -> Result<CliArgs, LarpshellError> {
             kind: match kind {
                 ClapPromptKind::System => PromptKind::System,
                 ClapPromptKind::Explain => PromptKind::Explain,
+                ClapPromptKind::Agent => PromptKind::Agent,
+                ClapPromptKind::AgentSafe => PromptKind::AgentSafe,
             },
             action: match action {
                 ClapPromptAction::Show => PromptAction::Show,

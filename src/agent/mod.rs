@@ -9,51 +9,15 @@ use crate::common::{
     count_visual_lines, current_directory, eprint_flush, hide_cursor, os_name, shell_name,
     show_cursor, terminal_width, username,
 };
-use crate::config::{AgentMode, Config};
+use crate::config::{AgentMode, Config, load_agent_prompt, load_agent_safe_prompt};
 use crate::error::LarpshellError;
+use crate::prompt::{DEFAULT_AGENT_PROMPT, DEFAULT_AGENT_SAFE_PROMPT};
 use crate::providers::{AIProvider, ChatMessage, ChatResponse, ToolCall};
 use tools::ToolRegistry;
 
 const MAX_AGENT_ITERATIONS: usize = 10;
 
-const SAFE_AGENT_SYSTEM_PROMPT: &str =
-    "You are a shell command translator with access to tools for gathering context.
-You may call tools to read files, list directories, or search for patterns
-before producing your final shell command.
-
-Use tools conservatively and prefer minimal-risk inspection steps.
-When you have enough context, respond with ONLY the shell command (no markdown,
-no explanations, no backticks) — the same rules as without tools.
-
-Environment context:
-- Current dir: {cwd}
-- Home dir: {home}
-- User: {user}
-- Shell: {shell}
-- OS: {os}
-
-User request: {request}";
-
-const AGENT_SYSTEM_PROMPT: &str =
-    "You are a shell command translator with access to tools for gathering context.
-You may call tools to read files, list directories, search for patterns, and run commands
-before producing your final shell command.
-
-When multiple tries, iterative probing, or environment inspection may be needed,
-use the run_command tool to gather context before deciding on the final shell command.
-When you have enough context, respond with ONLY the shell command (no markdown,
-no explanations, no backticks) — the same rules as without tools.
-
-Environment context:
-- Current dir: {cwd}
-- Home dir: {home}
-- User: {user}
-- Shell: {shell}
-- OS: {os}
-
-User request: {request}";
-
-fn build_agent_system_prompt(agent_mode: AgentMode, user_request: &str) -> String {
+fn substitute_agent_prompt(template: &str, user_request: &str) -> String {
     let cwd = current_directory();
     let os = os_name();
     let shell = shell_name();
@@ -62,11 +26,6 @@ fn build_agent_system_prompt(agent_mode: AgentMode, user_request: &str) -> Strin
         .unwrap_or_else(|| "~".to_string());
     let user = username();
 
-    let template = match agent_mode {
-        AgentMode::On => AGENT_SYSTEM_PROMPT,
-        AgentMode::Safe | AgentMode::Off => SAFE_AGENT_SYSTEM_PROMPT,
-    };
-
     template
         .replace("{cwd}", &cwd)
         .replace("{home}", &home)
@@ -74,6 +33,16 @@ fn build_agent_system_prompt(agent_mode: AgentMode, user_request: &str) -> Strin
         .replace("{shell}", &shell)
         .replace("{os}", &os)
         .replace("{request}", user_request)
+}
+
+fn build_agent_system_prompt(agent_mode: AgentMode, user_request: &str) -> String {
+    let template = match agent_mode {
+        AgentMode::On => load_agent_prompt().unwrap_or_else(|| DEFAULT_AGENT_PROMPT.to_string()),
+        AgentMode::Safe | AgentMode::Off => {
+            load_agent_safe_prompt().unwrap_or_else(|| DEFAULT_AGENT_SAFE_PROMPT.to_string())
+        }
+    };
+    substitute_agent_prompt(&template, user_request)
 }
 
 pub enum ToolConfirmResult {
@@ -500,7 +469,7 @@ mod tests {
 
     #[test]
     fn build_agent_system_prompt_includes_request() {
-        let prompt = build_agent_system_prompt(AgentMode::Safe, "list the rust files");
+        let prompt = substitute_agent_prompt(DEFAULT_AGENT_SAFE_PROMPT, "list the rust files");
 
         assert!(prompt.contains("User request: list the rust files"));
         assert!(prompt.contains("Current dir:"));
@@ -509,7 +478,7 @@ mod tests {
 
     #[test]
     fn build_agent_system_prompt_for_on_mentions_run_command() {
-        let prompt = build_agent_system_prompt(AgentMode::On, "inspect the environment");
+        let prompt = substitute_agent_prompt(DEFAULT_AGENT_PROMPT, "inspect the environment");
 
         assert!(prompt.contains("use the run_command tool"));
         assert!(prompt.contains("iterative probing"));
@@ -517,7 +486,7 @@ mod tests {
 
     #[test]
     fn build_agent_system_prompt_for_safe_is_conservative() {
-        let prompt = build_agent_system_prompt(AgentMode::Safe, "inspect the environment");
+        let prompt = substitute_agent_prompt(DEFAULT_AGENT_SAFE_PROMPT, "inspect the environment");
 
         assert!(prompt.contains("Use tools conservatively"));
         assert!(!prompt.contains("use the run_command tool"));

@@ -221,6 +221,30 @@ pub fn save_explain_prompt(content: &str) -> Result<(), LarpshellError> {
     Ok(fs::write(explain_prompt_path()?, content)?)
 }
 
+pub fn agent_prompt_path() -> Result<PathBuf, LarpshellError> {
+    Ok(ensure_config_dir()?.join("agent-prompt.txt"))
+}
+
+pub fn load_agent_prompt() -> Option<String> {
+    fs::read_to_string(agent_prompt_path().ok()?).ok()
+}
+
+pub fn save_agent_prompt(content: &str) -> Result<(), LarpshellError> {
+    Ok(fs::write(agent_prompt_path()?, content)?)
+}
+
+pub fn agent_safe_prompt_path() -> Result<PathBuf, LarpshellError> {
+    Ok(ensure_config_dir()?.join("agent-safe-prompt.txt"))
+}
+
+pub fn load_agent_safe_prompt() -> Option<String> {
+    fs::read_to_string(agent_safe_prompt_path().ok()?).ok()
+}
+
+pub fn save_agent_safe_prompt(content: &str) -> Result<(), LarpshellError> {
+    Ok(fs::write(agent_safe_prompt_path()?, content)?)
+}
+
 fn history_disabled_path() -> Result<PathBuf, LarpshellError> {
     Ok(ensure_config_dir()?.join(".history-disabled"))
 }
