@@ -1,5 +1,104 @@
 use super::*;
 
+fn clean_home(suffix: &str) -> std::path::PathBuf {
+    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/tests")
+        .join(format!("larpshell_test_clean_{suffix}"));
+    if dir.exists() {
+        fs::remove_dir_all(&dir).unwrap();
+    }
+    fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+fn run_clean_home(home: &std::path::Path, args: &[&str]) -> std::process::Output {
+    ensure_binary_built();
+    let config_dir = home.join(".config");
+    std::process::Command::new(binary())
+        .args(args)
+        .env("HOME", home)
+        .env("XDG_CONFIG_HOME", &config_dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("failed to run larpshell")
+}
+
+fn clean_home_config_path(home: &std::path::Path) -> std::path::PathBuf {
+    home.join(".config").join("larpshell").join("config.toml")
+}
+
+fn stderr_text(out: &std::process::Output) -> String {
+    String::from_utf8_lossy(&out.stderr).into_owned()
+}
+
+fn stdout_text(out: &std::process::Output) -> String {
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+fn assert_no_shell_bootstrap(out: &std::process::Output) {
+    let stderr = stderr_text(out);
+    assert!(
+        !stderr.contains("restart shell or run 'source ~/.bashrc'"),
+        "subcommand should not trigger shell bootstrap; stderr: {stderr}"
+    );
+}
+
+fn assert_agent_mode_written(home: &std::path::Path, expected: &str) {
+    let contents = fs::read_to_string(clean_home_config_path(home)).unwrap();
+    assert!(
+        contents.contains(expected),
+        "config contents were: {contents}"
+    );
+}
+
+fn assert_success(out: &std::process::Output) {
+    assert!(
+        out.status.success(),
+        "expected success, stderr: {}",
+        stderr_text(out)
+    );
+}
+
+fn run_clean_home_with_editor(
+    home: &std::path::Path,
+    args: &[&str],
+    editor: &std::path::Path,
+) -> std::process::Output {
+    ensure_binary_built();
+    let config_dir = home.join(".config");
+    std::process::Command::new(binary())
+        .args(args)
+        .env("HOME", home)
+        .env("XDG_CONFIG_HOME", &config_dir)
+        .env("EDITOR", editor)
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("failed to run larpshell")
+}
+
+fn agent_safe_prompt_path(home: &std::path::Path) -> std::path::PathBuf {
+    home.join(".config")
+        .join("larpshell")
+        .join("agent-safe-prompt.txt")
+}
+
+fn make_noop_editor(home: &std::path::Path) -> std::path::PathBuf {
+    let editor_script = home.join("fake-editor.sh");
+    fs::write(&editor_script, "#!/bin/sh\nexit 0\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&editor_script).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&editor_script, perms).unwrap();
+    }
+    editor_script
+}
+
+const SAFE_BOOTSTRAPPED: &str = "agent = \"safe\"";
+const ON_BOOTSTRAPPED: &str = "agent = \"on\"";
+const OFF_BOOTSTRAPPED: &str = "agent = \"off\"";
+
 #[test]
 fn agent_on_safe_off_subcommand_updates_config() {
     let home = temp_home("agent_toggle");
@@ -38,6 +137,102 @@ fn agent_safe_subcommand_bootstraps_missing_config() {
 
     let contents = fs::read_to_string(&config_path).unwrap();
     assert!(contents.contains("agent = \"safe\""));
+}
+
+#[test]
+fn agent_safe_subcommand_bootstraps_missing_config_on_clean_home() {
+    let home = clean_home("agent_safe_clean_home");
+
+    let out = run_clean_home(&home, &["agent", "safe"]);
+    assert_success(&out);
+    assert_agent_mode_written(&home, SAFE_BOOTSTRAPPED);
+}
+
+#[test]
+fn agent_status_subcommand_does_not_require_shell_bootstrap() {
+    let home = clean_home("agent_status_clean_home");
+
+    let out = run_clean_home(&home, &["agent"]);
+    assert_success(&out);
+    assert_no_shell_bootstrap(&out);
+}
+
+#[test]
+fn prompt_agent_safe_show_uses_default_on_clean_home() {
+    let home = clean_home("prompt_agent_safe_clean_home");
+
+    let out = run_clean_home(&home, &["prompt", "agent-safe", "show"]);
+    assert_success(&out);
+    assert!(stdout_text(&out).contains("{request}"));
+    assert_no_shell_bootstrap(&out);
+}
+
+#[test]
+fn prompt_agent_safe_edit_creates_prompt_file_on_clean_home() {
+    let home = clean_home("prompt_agent_safe_edit_clean_home");
+    let editor_script = make_noop_editor(&home);
+
+    let out = run_clean_home_with_editor(&home, &["prompt", "agent-safe", "edit"], &editor_script);
+    assert_success(&out);
+
+    let contents = fs::read_to_string(agent_safe_prompt_path(&home)).unwrap();
+    assert!(contents.contains("{request}"));
+}
+
+#[test]
+fn agent_on_subcommand_bootstraps_missing_config_on_clean_home() {
+    let home = clean_home("agent_on_clean_home");
+
+    let out = run_clean_home(&home, &["agent", "on"]);
+    assert_success(&out);
+    assert_agent_mode_written(&home, ON_BOOTSTRAPPED);
+}
+
+#[test]
+fn agent_off_subcommand_bootstraps_missing_config_on_clean_home() {
+    let home = clean_home("agent_off_clean_home");
+
+    let out = run_clean_home(&home, &["agent", "off"]);
+    assert_success(&out);
+    assert_agent_mode_written(&home, OFF_BOOTSTRAPPED);
+}
+
+#[test]
+fn prompt_agent_show_uses_default_on_clean_home() {
+    let home = clean_home("prompt_agent_clean_home");
+
+    let out = run_clean_home(&home, &["prompt", "agent", "show"]);
+    assert_success(&out);
+    assert!(stdout_text(&out).contains("{request}"));
+}
+
+#[test]
+fn prompt_system_show_uses_default_on_clean_home() {
+    let home = clean_home("prompt_system_clean_home");
+
+    let out = run_clean_home(&home, &["prompt", "system", "show"]);
+    assert_success(&out);
+    assert!(stdout_text(&out).contains("{request}"));
+}
+
+#[test]
+fn prompt_explain_show_uses_default_on_clean_home() {
+    let home = clean_home("prompt_explain_clean_home");
+
+    let out = run_clean_home(&home, &["prompt", "explain", "show"]);
+    assert_success(&out);
+    assert!(stdout_text(&out).contains("{command}"));
+}
+
+#[test]
+fn history_status_commands_still_work_with_shell_bootstrap_home() {
+    let home = temp_home("history_control");
+
+    let out = run(&home, &["history", "on"]);
+    assert!(out.status.success());
+
+    let out = run(&home, &["history", "off"]);
+    assert!(out.status.success());
 }
 
 #[test]

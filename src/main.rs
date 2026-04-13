@@ -169,7 +169,15 @@ fn handle_agent_subcommand(mode: Option<AgentMode>) -> Result<(), LarpshellError
             cli::print_ok(agent_mode_set_message(mode));
         }
         None => {
-            let mode = config::load_config()?.agent;
+            let mode = match config::load_config() {
+                Ok(config) => config.agent,
+                Err(LarpshellError::IoError(error))
+                    if error.kind() == std::io::ErrorKind::NotFound =>
+                {
+                    AgentMode::Off
+                }
+                Err(error) => return Err(error),
+            };
             cli::print_ok(agent_mode_status_message(mode));
         }
     }
@@ -329,19 +337,21 @@ async fn inner_main() -> Result<(), LarpshellError> {
 
     do_nlsh_rs_migration();
 
-    match auto_setup_shell_function() {
-        Ok(true) => {
-            eprintln!(
-                "{}",
-                "restart shell or run 'source ~/.bashrc' ('source ~/.config/fish/config.fish' for fish).".custom_color(CTP_YELLOW)
-            );
-            exit_with_code(0);
-        }
-        Ok(false) => {}
-        Err(_) => {}
-    }
-
     let cli = parse_cli_args()?;
+
+    if cli.subcommand.is_none() {
+        match auto_setup_shell_function() {
+            Ok(true) => {
+                eprintln!(
+                    "{}",
+                    "restart shell or run 'source ~/.bashrc' ('source ~/.config/fish/config.fish' for fish).".custom_color(CTP_YELLOW)
+                );
+                exit_with_code(0);
+            }
+            Ok(false) => {}
+            Err(_) => {}
+        }
+    }
 
     // handle subcommands that do not need a provider
     let needs_provider = matches!(cli.subcommand, Some(cli::Subcommands::Explain { .. }));
