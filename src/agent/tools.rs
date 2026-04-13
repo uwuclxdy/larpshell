@@ -350,6 +350,129 @@ fn split_command_and_args(command: &str, args: &[String]) -> Result<(String, Vec
     ))
 }
 
+const SAFE_COMMANDS: &[&str] = &[
+    "ls",
+    "cat",
+    "echo",
+    "grep",
+    "find",
+    "ps",
+    "whoami",
+    "uname",
+    "date",
+    "pwd",
+    "env",
+    "printenv",
+    "which",
+    "whereis",
+    "file",
+    "stat",
+    "id",
+    "groups",
+    "hostname",
+    "uptime",
+    "free",
+    "df",
+    "du",
+    "top",
+    "htop",
+    "vmstat",
+    "iostat",
+    "mpstat",
+    "sar",
+    "netstat",
+    "ss",
+    "ip",
+    "ifconfig",
+    "route",
+    "ping",
+    "traceroute",
+    "mtr",
+    "dig",
+    "nslookup",
+    "host",
+    "curl",
+    "wget",
+    "git",
+    "svn",
+    "hg",
+    "docker",
+    "podman",
+    "kubectl",
+    "aws",
+    "gcloud",
+    "az",
+    "terraform",
+    "ansible",
+    "vault",
+    "consul",
+];
+
+const DANGEROUS_FLAG_PREFIXES: &[&str] = &["--delete", "--remove", "--force"];
+const DANGEROUS_ARGUMENT_TOKENS: &[&str] = &["rm", "mv", "cp", "chmod", "chown"];
+const GIT_READ_ONLY_SUBCOMMANDS: &[&str] = &[
+    "status",
+    "log",
+    "diff",
+    "show",
+    "rev-parse",
+    "ls-files",
+    "describe",
+    "help",
+];
+
+fn has_shell_metacharacters(arg: &str) -> bool {
+    [">", "|", ";", "&", "`", "$"]
+        .iter()
+        .any(|token| arg.contains(token))
+}
+
+fn has_dangerous_flag(arg: &str) -> bool {
+    DANGEROUS_FLAG_PREFIXES.iter().any(|flag| {
+        arg == *flag
+            || arg
+                .strip_prefix(flag)
+                .is_some_and(|suffix| suffix.starts_with('='))
+    })
+}
+
+fn is_dangerous_argument_token(arg: &str) -> bool {
+    DANGEROUS_ARGUMENT_TOKENS.contains(&arg)
+}
+
+fn git_command_is_read_only(args: &[String]) -> bool {
+    match args.first().map(String::as_str) {
+        None | Some("--version") | Some("version") | Some("help") => true,
+        Some(subcommand) => GIT_READ_ONLY_SUBCOMMANDS.contains(&subcommand),
+    }
+}
+
+fn validate_safe_run_command(command: &str, args: &[String]) -> Result<(), String> {
+    let command_base = Path::new(command)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(command);
+
+    if !SAFE_COMMANDS.contains(&command_base) {
+        return Err(format!("command not allowed: {command}"));
+    }
+
+    if command_base == "git" && !git_command_is_read_only(args) {
+        return Err("dangerous git subcommand detected".to_string());
+    }
+
+    for arg in args {
+        if has_shell_metacharacters(arg)
+            || has_dangerous_flag(arg)
+            || is_dangerous_argument_token(arg)
+        {
+            return Err(format!("dangerous argument detected: {arg}"));
+        }
+    }
+
+    Ok(())
+}
+
 fn execute_run_command(
     agent_mode: AgentMode,
     command: &str,
@@ -358,93 +481,7 @@ fn execute_run_command(
     let (command, args) = split_command_and_args(command, args)?;
 
     if agent_mode.is_safe() {
-        // List of safe commands that are allowed
-        let safe_commands = [
-            "ls",
-            "cat",
-            "echo",
-            "grep",
-            "find",
-            "ps",
-            "whoami",
-            "uname",
-            "date",
-            "pwd",
-            "env",
-            "printenv",
-            "which",
-            "whereis",
-            "file",
-            "stat",
-            "id",
-            "groups",
-            "hostname",
-            "uptime",
-            "free",
-            "df",
-            "du",
-            "top",
-            "htop",
-            "vmstat",
-            "iostat",
-            "mpstat",
-            "sar",
-            "netstat",
-            "ss",
-            "ip",
-            "ifconfig",
-            "route",
-            "ping",
-            "traceroute",
-            "mtr",
-            "dig",
-            "nslookup",
-            "host",
-            "curl",
-            "wget",
-            "git",
-            "svn",
-            "hg",
-            "docker",
-            "podman",
-            "kubectl",
-            "aws",
-            "gcloud",
-            "az",
-            "terraform",
-            "ansible",
-            "vault",
-            "consul",
-        ];
-
-        let command_base = Path::new(&command)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or(&command);
-
-        if !safe_commands.contains(&command_base) {
-            return Err(format!("command not allowed: {}", command));
-        }
-
-        for arg in &args {
-            if arg.contains("--delete")
-                || arg.contains("--remove")
-                || arg.contains("--force")
-                || arg.contains(">")
-                || arg.contains("|")
-                || arg.contains(";")
-                || arg.contains("&")
-                || arg.contains("`")
-                || arg.contains("$")
-                || arg.contains("rm")
-                || arg.contains("mv")
-                || arg.contains("cp")
-                || arg.contains("chmod")
-                || arg.contains("chown")
-            {
-                return Err(format!("dangerous argument detected: {}", arg));
-            }
-        }
+        validate_safe_run_command(&command, &args)?;
     }
 
     let output = Command::new(&command)
@@ -624,6 +661,27 @@ mod tests {
         let result = execute_run_command(AgentMode::Safe, "ls", &["--force".to_string()]);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("dangerous argument"));
+    }
+
+    #[test]
+    fn run_command_safe_allows_benign_args_with_blocked_substrings() {
+        let result = execute_run_command(AgentMode::Safe, "echo", &["tcp".to_string()]);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().trim(), "tcp");
+    }
+
+    #[test]
+    fn run_command_safe_rejects_mutating_git_subcommands() {
+        let result = execute_run_command(AgentMode::Safe, "git", &["init".to_string()]);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("dangerous git subcommand"));
+    }
+
+    #[test]
+    fn run_command_safe_allows_read_only_git_subcommands() {
+        let result = execute_run_command(AgentMode::Safe, "git", &["--version".to_string()]);
+        assert!(result.is_ok());
+        assert!(result.unwrap().contains("git version"));
     }
 
     #[test]
