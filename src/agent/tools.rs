@@ -422,7 +422,7 @@ const GIT_READ_ONLY_SUBCOMMANDS: &[&str] = &[
 ];
 
 fn has_shell_metacharacters(arg: &str) -> bool {
-    [">", "|", ";", "&", "`", "$"]
+    [">", "|", ";", "&", "`"]
         .iter()
         .any(|token| arg.contains(token))
 }
@@ -441,10 +441,29 @@ fn is_dangerous_argument_token(arg: &str) -> bool {
 }
 
 fn git_command_is_read_only(args: &[String]) -> bool {
-    match args.first().map(String::as_str) {
-        None | Some("--version") | Some("version") | Some("help") => true,
-        Some(subcommand) => GIT_READ_ONLY_SUBCOMMANDS.contains(&subcommand),
+    let mut i = 0;
+
+    while i < args.len() {
+        match args[i].as_str() {
+            "--version" | "version" | "help" => return true,
+            "-c" | "-C" | "--git-dir" | "--work-tree" | "--namespace" | "--config-env" => {
+                i += 2;
+            }
+            arg if arg.starts_with("--git-dir=")
+                || arg.starts_with("--work-tree=")
+                || arg.starts_with("--namespace=")
+                || arg.starts_with("--config-env=") =>
+            {
+                i += 1;
+            }
+            arg if arg.starts_with('-') => {
+                i += 1;
+            }
+            subcommand => return GIT_READ_ONLY_SUBCOMMANDS.contains(&subcommand),
+        }
     }
+
+    true
 }
 
 fn validate_safe_run_command(command: &str, args: &[String]) -> Result<(), String> {
@@ -682,6 +701,28 @@ mod tests {
         let result = execute_run_command(AgentMode::Safe, "git", &["--version".to_string()]);
         assert!(result.is_ok());
         assert!(result.unwrap().contains("git version"));
+    }
+
+    #[test]
+    fn run_command_safe_allows_git_global_option_before_read_only_subcommand() {
+        let result = execute_run_command(
+            AgentMode::Safe,
+            "git",
+            &[
+                "-c".to_string(),
+                "color.ui=always".to_string(),
+                "--version".to_string(),
+            ],
+        );
+        assert!(result.is_ok());
+        assert!(result.unwrap().contains("git version"));
+    }
+
+    #[test]
+    fn run_command_safe_allows_literal_dollar_argument() {
+        let result = execute_run_command(AgentMode::Safe, "echo", &["$HOME".to_string()]);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().trim(), "$HOME");
     }
 
     #[test]
