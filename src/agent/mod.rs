@@ -83,22 +83,14 @@ fn format_tool_preview(
             } else {
                 command.to_string()
             };
-            format!(
-                "{} {}?",
-                "run".custom_color(CTP_BLUE),
-                full_command.italic()
-            )
+            format!("{} {}", "run".custom_color(CTP_BLUE), full_command.italic())
         }
         "read_file" => {
             let file_path = arguments
                 .get("file_path")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            format!(
-                "Allow {} {}?",
-                "reading".custom_color(CTP_BLUE),
-                file_path.italic()
-            )
+            format!("{} {}", "read".custom_color(CTP_BLUE), file_path.italic())
         }
         "list_files" => {
             let directory_path = arguments
@@ -106,7 +98,7 @@ fn format_tool_preview(
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
             format!(
-                "{} in {}?",
+                "{} in {}",
                 "list files".custom_color(CTP_BLUE),
                 directory_path.italic()
             )
@@ -121,8 +113,8 @@ fn format_tool_preview(
                 .and_then(|v| v.as_str())
                 .unwrap_or(".");
             format!(
-                "Allow {} for {} in {}?",
-                "searching".custom_color(CTP_BLUE),
+                "{} for {} in {}",
+                "search".custom_color(CTP_BLUE),
                 pattern.italic(),
                 directory_path.italic()
             )
@@ -137,18 +129,9 @@ fn format_tool_preview(
                 parts.push(format!("{}: {}", key, value_str));
             }
             if parts.is_empty() {
-                format!(
-                    "Allow {} {}?",
-                    "calling tool".custom_color(CTP_BLUE),
-                    tool_name.bold()
-                )
+                format!("{}", tool_name.bold())
             } else {
-                format!(
-                    "Allow {} {} with {}?",
-                    "calling tool".custom_color(CTP_BLUE),
-                    tool_name.bold(),
-                    parts.join(", ")
-                )
+                format!("{} with {}", tool_name.bold(), parts.join(", "))
             }
         }
     }
@@ -626,34 +609,27 @@ mod tests {
         let mut args = serde_json::Map::new();
         args.insert("file_path".to_string(), json!("/home/user/file.txt"));
         let preview = plain("read_file", &args);
-        assert!(preview.contains("Allow reading"));
-        assert!(preview.contains("/home/user/file.txt"));
+        assert_eq!(preview, "read /home/user/file.txt");
 
         // Test list_files
         let mut args = serde_json::Map::new();
         args.insert("directory_path".to_string(), json!("/home/user"));
         let preview = plain("list_files", &args);
-        assert!(preview.contains("list files in"));
-        assert!(preview.contains("/home/user"));
+        assert_eq!(preview, "list files in /home/user");
 
         // Test search_files
         let mut args = serde_json::Map::new();
         args.insert("pattern".to_string(), json!("main"));
         args.insert("directory_path".to_string(), json!("/src"));
         let preview = plain("search_files", &args);
-        assert!(preview.contains("Allow searching for"));
-        assert!(preview.contains("main"));
-        assert!(preview.contains("/src"));
+        assert_eq!(preview, "search for main in /src");
 
         // Test unknown tool
         let mut args = serde_json::Map::new();
         args.insert("param1".to_string(), json!("value1"));
         args.insert("param2".to_string(), json!("value2"));
         let preview = plain("unknown_tool", &args);
-        assert!(preview.contains("Allow calling tool"));
-        assert!(preview.contains("unknown_tool"));
-        assert!(preview.contains("param1: value1"));
-        assert!(preview.contains("param2: value2"));
+        assert_eq!(preview, "unknown_tool with param1: value1, param2: value2");
 
         let tip = plain_tip("command not allowed: rm").unwrap();
         assert!(tip.contains("run /agent on to enable all commands"));
