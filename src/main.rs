@@ -190,79 +190,88 @@ fn open_in_editor(path: &std::path::Path) -> Result<(), LarpshellError> {
     Ok(())
 }
 
+struct PromptSpec {
+    path: fn() -> Result<std::path::PathBuf, LarpshellError>,
+    load: fn() -> Option<String>,
+    save: fn(&str) -> Result<(), LarpshellError>,
+    default: &'static str,
+    validate: fn(&str) -> bool,
+    invalid_message: &'static str,
+    warn_only: bool,
+}
+
+fn prompt_spec(kind: &PromptKind) -> PromptSpec {
+    match kind {
+        PromptKind::System => PromptSpec {
+            path: config::sys_prompt_path,
+            load: config::load_sys_prompt,
+            save: config::save_sys_prompt,
+            default: DEFAULT_PROMPT_TEMPLATE,
+            validate: validate_sys_prompt,
+            invalid_message: "system prompt must contain the {request} placeholder.",
+            warn_only: true,
+        },
+        PromptKind::Explain => PromptSpec {
+            path: config::explain_prompt_path,
+            load: config::load_explain_prompt,
+            save: config::save_explain_prompt,
+            default: DEFAULT_EXPLAIN_PROMPT,
+            validate: validate_explain_prompt,
+            invalid_message: "explain-prompt must contain the {command} placeholder.",
+            warn_only: false,
+        },
+        PromptKind::Agent => PromptSpec {
+            path: config::agent_prompt_path,
+            load: config::load_agent_prompt,
+            save: config::save_agent_prompt,
+            default: DEFAULT_AGENT_PROMPT,
+            validate: validate_agent_prompt,
+            invalid_message: "agent prompt must contain the {request} placeholder.",
+            warn_only: true,
+        },
+        PromptKind::AgentSafe => PromptSpec {
+            path: config::agent_safe_prompt_path,
+            load: config::load_agent_safe_prompt,
+            save: config::save_agent_safe_prompt,
+            default: DEFAULT_AGENT_SAFE_PROMPT,
+            validate: validate_agent_prompt,
+            invalid_message: "agent-safe prompt must contain the {request} placeholder.",
+            warn_only: true,
+        },
+    }
+}
+
+fn show_prompt(spec: &PromptSpec) {
+    let content = (spec.load)().unwrap_or_else(|| spec.default.to_string());
+    println!("{content}");
+}
+
+fn edit_prompt(spec: &PromptSpec) -> Result<(), LarpshellError> {
+    let path = (spec.path)()?;
+    if !path.exists() {
+        (spec.save)(spec.default)?;
+    }
+    open_in_editor(&path)?;
+    if let Some(saved) = (spec.load)()
+        && !(spec.validate)(&saved)
+    {
+        if spec.warn_only {
+            print_warning(spec.invalid_message);
+        } else {
+            print_error(spec.invalid_message);
+        }
+    }
+    Ok(())
+}
+
 fn handle_prompt_subcommand(
     kind: &PromptKind,
     action: &PromptAction,
 ) -> Result<(), LarpshellError> {
-    match (kind, action) {
-        (PromptKind::System, PromptAction::Show) => {
-            let content =
-                config::load_sys_prompt().unwrap_or_else(|| DEFAULT_PROMPT_TEMPLATE.to_string());
-            println!("{content}");
-        }
-        (PromptKind::System, PromptAction::Edit) => {
-            let path = config::sys_prompt_path()?;
-            if !path.exists() {
-                config::save_sys_prompt(DEFAULT_PROMPT_TEMPLATE)?;
-            }
-            open_in_editor(&path)?;
-            if let Some(saved) = config::load_sys_prompt()
-                && !validate_sys_prompt(&saved)
-            {
-                print_warning("system prompt must contain the {request} placeholder.");
-            }
-        }
-        (PromptKind::Explain, PromptAction::Show) => {
-            let content =
-                config::load_explain_prompt().unwrap_or_else(|| DEFAULT_EXPLAIN_PROMPT.to_string());
-            println!("{content}");
-        }
-        (PromptKind::Explain, PromptAction::Edit) => {
-            let path = config::explain_prompt_path()?;
-            if !path.exists() {
-                config::save_explain_prompt(DEFAULT_EXPLAIN_PROMPT)?;
-            }
-            open_in_editor(&path)?;
-            if let Some(saved) = config::load_explain_prompt()
-                && !validate_explain_prompt(&saved)
-            {
-                print_error("explain-prompt must contain the {command} placeholder.");
-            }
-        }
-        (PromptKind::Agent, PromptAction::Show) => {
-            let content =
-                config::load_agent_prompt().unwrap_or_else(|| DEFAULT_AGENT_PROMPT.to_string());
-            println!("{content}");
-        }
-        (PromptKind::Agent, PromptAction::Edit) => {
-            let path = config::agent_prompt_path()?;
-            if !path.exists() {
-                config::save_agent_prompt(DEFAULT_AGENT_PROMPT)?;
-            }
-            open_in_editor(&path)?;
-            if let Some(saved) = config::load_agent_prompt()
-                && !validate_agent_prompt(&saved)
-            {
-                print_warning("agent prompt must contain the {request} placeholder.");
-            }
-        }
-        (PromptKind::AgentSafe, PromptAction::Show) => {
-            let content = config::load_agent_safe_prompt()
-                .unwrap_or_else(|| DEFAULT_AGENT_SAFE_PROMPT.to_string());
-            println!("{content}");
-        }
-        (PromptKind::AgentSafe, PromptAction::Edit) => {
-            let path = config::agent_safe_prompt_path()?;
-            if !path.exists() {
-                config::save_agent_safe_prompt(DEFAULT_AGENT_SAFE_PROMPT)?;
-            }
-            open_in_editor(&path)?;
-            if let Some(saved) = config::load_agent_safe_prompt()
-                && !validate_agent_prompt(&saved)
-            {
-                print_warning("agent-safe prompt must contain the {request} placeholder.");
-            }
-        }
+    let spec = prompt_spec(kind);
+    match action {
+        PromptAction::Show => show_prompt(&spec),
+        PromptAction::Edit => edit_prompt(&spec)?,
     }
     Ok(())
 }

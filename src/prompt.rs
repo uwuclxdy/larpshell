@@ -144,18 +144,33 @@ fn init_prompt_file(
 }
 
 pub fn create_prompts() -> Result<(), LarpshellError> {
-    init_prompt_file(sys_prompt_path(), DEFAULT_PROMPT_TEMPLATE, save_sys_prompt)?;
-    init_prompt_file(
-        explain_prompt_path(),
-        DEFAULT_EXPLAIN_PROMPT,
-        save_explain_prompt,
-    )?;
-    init_prompt_file(agent_prompt_path(), DEFAULT_AGENT_PROMPT, save_agent_prompt)?;
-    init_prompt_file(
-        agent_safe_prompt_path(),
-        DEFAULT_AGENT_SAFE_PROMPT,
-        save_agent_safe_prompt,
-    )?;
+    let prompts = [
+        (
+            sys_prompt_path(),
+            DEFAULT_PROMPT_TEMPLATE,
+            save_sys_prompt as fn(&str) -> Result<(), LarpshellError>,
+        ),
+        (
+            explain_prompt_path(),
+            DEFAULT_EXPLAIN_PROMPT,
+            save_explain_prompt as fn(&str) -> Result<(), LarpshellError>,
+        ),
+        (
+            agent_prompt_path(),
+            DEFAULT_AGENT_PROMPT,
+            save_agent_prompt as fn(&str) -> Result<(), LarpshellError>,
+        ),
+        (
+            agent_safe_prompt_path(),
+            DEFAULT_AGENT_SAFE_PROMPT,
+            save_agent_safe_prompt as fn(&str) -> Result<(), LarpshellError>,
+        ),
+    ];
+
+    for (path, default, save) in prompts {
+        init_prompt_file(path, default, save)?;
+    }
+
     Ok(())
 }
 

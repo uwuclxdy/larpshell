@@ -269,18 +269,26 @@ pub fn set_history_enabled(enabled: bool) -> Result<(), LarpshellError> {
     Ok(())
 }
 
-pub fn set_agent_mode(mode: AgentMode) -> Result<(), LarpshellError> {
-    let mut config = match load_config() {
-        Ok(config) => config,
+fn default_config() -> Config {
+    Config {
+        active_provider: ActiveProvider::Ollama,
+        providers: MultiProviderConfig::default(),
+        agent: AgentMode::Off,
+    }
+}
+
+fn load_config_or_default() -> Result<Config, LarpshellError> {
+    match load_config() {
+        Ok(config) => Ok(config),
         Err(LarpshellError::IoError(error)) if error.kind() == std::io::ErrorKind::NotFound => {
-            Config {
-                active_provider: ActiveProvider::Ollama,
-                providers: MultiProviderConfig::default(),
-                agent: AgentMode::Off,
-            }
+            Ok(default_config())
         }
-        Err(error) => return Err(error),
-    };
+        Err(error) => Err(error),
+    }
+}
+
+pub fn set_agent_mode(mode: AgentMode) -> Result<(), LarpshellError> {
+    let mut config = load_config_or_default()?;
     config.agent = mode;
     save_config(&config)?;
     Ok(())
@@ -311,29 +319,21 @@ pub fn save_config(config: &Config) -> Result<(), LarpshellError> {
     Ok(())
 }
 
+const PROVIDER_OPTIONS: &[(&str, ActiveProvider)] = &[
+    ("Gemini API", ActiveProvider::Gemini),
+    ("Ollama", ActiveProvider::Ollama),
+    ("OpenRouter", ActiveProvider::OpenRouter),
+    ("OpenAI Compatible", ActiveProvider::OpenAI),
+];
+
 pub fn interactive_setup() -> Result<(), LarpshellError> {
     let existing_config = load_config().ok();
     let current_provider = existing_config.as_ref().map(|c| c.active_provider);
-
-    const PROVIDER_OPTIONS: &[(&str, ActiveProvider)] = &[
-        ("Gemini API", ActiveProvider::Gemini),
-        ("Ollama", ActiveProvider::Ollama),
-        ("OpenRouter", ActiveProvider::OpenRouter),
-        ("OpenAI Compatible", ActiveProvider::OpenAI),
-    ];
-
-    let colored_providers: Vec<String> = PROVIDER_OPTIONS
-        .iter()
-        .map(|(name, variant)| {
-            if Some(*variant) == current_provider {
-                format!("{}", name.custom_color(CTP_GREEN))
-            } else {
-                name.to_string()
-            }
-        })
-        .collect();
-
-    let selection = prompt_select("Select API Provider", &colored_providers, 0)?;
+    let selection = prompt_select(
+        "Select API Provider",
+        &colored_provider_options(current_provider),
+        0,
+    )?;
     let (provider_display_name, selected_variant) = PROVIDER_OPTIONS[selection];
 
     let mut multi_providers = existing_config
@@ -341,52 +341,15 @@ pub fn interactive_setup() -> Result<(), LarpshellError> {
         .map(|c| c.providers.clone())
         .unwrap_or_default();
 
-    let has_saved_creds = match selected_variant {
-        ActiveProvider::Gemini => multi_providers.gemini.is_some(),
-        ActiveProvider::Ollama => multi_providers.ollama.is_some(),
-        ActiveProvider::OpenRouter => multi_providers.openrouter.is_some(),
-        ActiveProvider::OpenAI => multi_providers.openai.is_some(),
-    };
+    let should_reuse_saved =
+        should_reuse_saved_credentials(&multi_providers, selected_variant, current_provider)?;
 
-    let has_saved = if has_saved_creds && Some(selected_variant) != current_provider {
-        let result = Confirm::new("Use saved credentials?")
-            .with_default(true)
-            .prompt()
-            .map_err(LarpshellError::InquireError)?;
-        clear_line();
-        result
+    let active_provider = if should_reuse_saved {
+        selected_variant
     } else {
-        false
-    };
-
-    let (active_provider, multi_providers) = if has_saved {
-        (selected_variant, multi_providers)
-    } else {
-        let new_config = match selected_variant {
-            ActiveProvider::Gemini => configure_gemini(multi_providers.gemini.as_ref())?,
-            ActiveProvider::Ollama => configure_ollama(multi_providers.ollama.as_ref())?,
-            ActiveProvider::OpenRouter => {
-                configure_openrouter(multi_providers.openrouter.as_ref())?
-            }
-            ActiveProvider::OpenAI => configure_openai(multi_providers.openai.as_ref())?,
-        };
-
-        match &new_config.config {
-            ProviderSpecificConfig::Gemini { gemini } => {
-                multi_providers.gemini = Some(gemini.clone());
-            }
-            ProviderSpecificConfig::Ollama { ollama } => {
-                multi_providers.ollama = Some(ollama.clone());
-            }
-            ProviderSpecificConfig::OpenRouter { openrouter } => {
-                multi_providers.openrouter = Some(openrouter.clone());
-            }
-            ProviderSpecificConfig::OpenAI { openai } => {
-                multi_providers.openai = Some(openai.clone());
-            }
-        }
-
-        (new_config.provider_type, multi_providers)
+        let new_config = configure_provider(selected_variant, &multi_providers)?;
+        apply_provider_config(&mut multi_providers, &new_config);
+        new_config.provider_type
     };
 
     let config = Config {
@@ -399,6 +362,79 @@ pub fn interactive_setup() -> Result<(), LarpshellError> {
     display_config_summary(&config, provider_display_name)?;
 
     Ok(())
+}
+
+fn colored_provider_options(current_provider: Option<ActiveProvider>) -> Vec<String> {
+    PROVIDER_OPTIONS
+        .iter()
+        .map(|(name, variant)| {
+            if Some(*variant) == current_provider {
+                format!("{}", name.custom_color(CTP_GREEN))
+            } else {
+                name.to_string()
+            }
+        })
+        .collect()
+}
+
+fn provider_has_saved_credentials(
+    providers: &MultiProviderConfig,
+    selected_variant: ActiveProvider,
+) -> bool {
+    match selected_variant {
+        ActiveProvider::Gemini => providers.gemini.is_some(),
+        ActiveProvider::Ollama => providers.ollama.is_some(),
+        ActiveProvider::OpenRouter => providers.openrouter.is_some(),
+        ActiveProvider::OpenAI => providers.openai.is_some(),
+    }
+}
+
+fn should_reuse_saved_credentials(
+    providers: &MultiProviderConfig,
+    selected_variant: ActiveProvider,
+    current_provider: Option<ActiveProvider>,
+) -> Result<bool, LarpshellError> {
+    if !provider_has_saved_credentials(providers, selected_variant)
+        || Some(selected_variant) == current_provider
+    {
+        return Ok(false);
+    }
+
+    let result = Confirm::new("Use saved credentials?")
+        .with_default(true)
+        .prompt()
+        .map_err(LarpshellError::InquireError)?;
+    clear_line();
+    Ok(result)
+}
+
+fn configure_provider(
+    selected_variant: ActiveProvider,
+    providers: &MultiProviderConfig,
+) -> Result<ProviderConfig, LarpshellError> {
+    match selected_variant {
+        ActiveProvider::Gemini => configure_gemini(providers.gemini.as_ref()),
+        ActiveProvider::Ollama => configure_ollama(providers.ollama.as_ref()),
+        ActiveProvider::OpenRouter => configure_openrouter(providers.openrouter.as_ref()),
+        ActiveProvider::OpenAI => configure_openai(providers.openai.as_ref()),
+    }
+}
+
+fn apply_provider_config(providers: &mut MultiProviderConfig, config: &ProviderConfig) {
+    match &config.config {
+        ProviderSpecificConfig::Gemini { gemini } => {
+            providers.gemini = Some(gemini.clone());
+        }
+        ProviderSpecificConfig::Ollama { ollama } => {
+            providers.ollama = Some(ollama.clone());
+        }
+        ProviderSpecificConfig::OpenRouter { openrouter } => {
+            providers.openrouter = Some(openrouter.clone());
+        }
+        ProviderSpecificConfig::OpenAI { openai } => {
+            providers.openai = Some(openai.clone());
+        }
+    }
 }
 
 fn display_config_summary(config: &Config, provider_name: &str) -> Result<(), LarpshellError> {

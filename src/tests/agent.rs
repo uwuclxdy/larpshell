@@ -59,6 +59,28 @@ fn assert_success(out: &std::process::Output) {
     );
 }
 
+fn assert_file_contains(path: &std::path::Path, expected: &str) {
+    let contents = fs::read_to_string(path).unwrap();
+    assert!(
+        contents.contains(expected),
+        "file contents were: {contents}"
+    );
+}
+
+fn assert_clean_home_agent_bootstrap(suffix: &str, args: &[&str], expected: &str) {
+    let home = clean_home(suffix);
+    let out = run_clean_home(&home, args);
+    assert_success(&out);
+    assert_agent_mode_written(&home, expected);
+}
+
+fn assert_prompt_show_uses_default(suffix: &str, args: &[&str], placeholder: &str) {
+    let home = clean_home(suffix);
+    let out = run_clean_home(&home, args);
+    assert_success(&out);
+    assert!(stdout_text(&out).contains(placeholder));
+}
+
 fn run_clean_home_with_editor(
     home: &std::path::Path,
     args: &[&str],
@@ -109,18 +131,15 @@ fn agent_on_safe_off_subcommand_updates_config() {
 
     let out = run(&home, &["agent", "on"]);
     assert!(out.status.success());
-    let contents = fs::read_to_string(&config_path).unwrap();
-    assert!(contents.contains("agent = \"on\""));
+    assert_file_contains(&config_path, "agent = \"on\"");
 
     let out = run(&home, &["agent", "safe"]);
     assert!(out.status.success());
-    let contents = fs::read_to_string(&config_path).unwrap();
-    assert!(contents.contains("agent = \"safe\""));
+    assert_file_contains(&config_path, "agent = \"safe\"");
 
     let out = run(&home, &["agent", "off"]);
     assert!(out.status.success());
-    let contents = fs::read_to_string(&config_path).unwrap();
-    assert!(contents.contains("agent = \"off\""));
+    assert_file_contains(&config_path, "agent = \"off\"");
 }
 
 #[test]
@@ -129,23 +148,17 @@ fn agent_safe_subcommand_bootstraps_missing_config() {
     let config_path = home.join("config").join("larpshell").join("config.toml");
 
     let out = run(&home, &["agent", "safe"]);
-    assert!(
-        out.status.success(),
-        "expected success, stderr: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-
-    let contents = fs::read_to_string(&config_path).unwrap();
-    assert!(contents.contains("agent = \"safe\""));
+    assert_success(&out);
+    assert_file_contains(&config_path, "agent = \"safe\"");
 }
 
 #[test]
 fn agent_safe_subcommand_bootstraps_missing_config_on_clean_home() {
-    let home = clean_home("agent_safe_clean_home");
-
-    let out = run_clean_home(&home, &["agent", "safe"]);
-    assert_success(&out);
-    assert_agent_mode_written(&home, SAFE_BOOTSTRAPPED);
+    assert_clean_home_agent_bootstrap(
+        "agent_safe_clean_home",
+        &["agent", "safe"],
+        SAFE_BOOTSTRAPPED,
+    );
 }
 
 #[test]
@@ -181,47 +194,39 @@ fn prompt_agent_safe_edit_creates_prompt_file_on_clean_home() {
 
 #[test]
 fn agent_on_subcommand_bootstraps_missing_config_on_clean_home() {
-    let home = clean_home("agent_on_clean_home");
-
-    let out = run_clean_home(&home, &["agent", "on"]);
-    assert_success(&out);
-    assert_agent_mode_written(&home, ON_BOOTSTRAPPED);
+    assert_clean_home_agent_bootstrap("agent_on_clean_home", &["agent", "on"], ON_BOOTSTRAPPED);
 }
 
 #[test]
 fn agent_off_subcommand_bootstraps_missing_config_on_clean_home() {
-    let home = clean_home("agent_off_clean_home");
-
-    let out = run_clean_home(&home, &["agent", "off"]);
-    assert_success(&out);
-    assert_agent_mode_written(&home, OFF_BOOTSTRAPPED);
+    assert_clean_home_agent_bootstrap("agent_off_clean_home", &["agent", "off"], OFF_BOOTSTRAPPED);
 }
 
 #[test]
 fn prompt_agent_show_uses_default_on_clean_home() {
-    let home = clean_home("prompt_agent_clean_home");
-
-    let out = run_clean_home(&home, &["prompt", "agent", "show"]);
-    assert_success(&out);
-    assert!(stdout_text(&out).contains("{request}"));
+    assert_prompt_show_uses_default(
+        "prompt_agent_clean_home",
+        &["prompt", "agent", "show"],
+        "{request}",
+    );
 }
 
 #[test]
 fn prompt_system_show_uses_default_on_clean_home() {
-    let home = clean_home("prompt_system_clean_home");
-
-    let out = run_clean_home(&home, &["prompt", "system", "show"]);
-    assert_success(&out);
-    assert!(stdout_text(&out).contains("{request}"));
+    assert_prompt_show_uses_default(
+        "prompt_system_clean_home",
+        &["prompt", "system", "show"],
+        "{request}",
+    );
 }
 
 #[test]
 fn prompt_explain_show_uses_default_on_clean_home() {
-    let home = clean_home("prompt_explain_clean_home");
-
-    let out = run_clean_home(&home, &["prompt", "explain", "show"]);
-    assert_success(&out);
-    assert!(stdout_text(&out).contains("{command}"));
+    assert_prompt_show_uses_default(
+        "prompt_explain_clean_home",
+        &["prompt", "explain", "show"],
+        "{command}",
+    );
 }
 
 #[test]
@@ -249,11 +254,7 @@ fn agent_slash_command_parsed_in_interactive() {
     );
 
     let config_path = home.join("config").join("larpshell").join("config.toml");
-    let contents = fs::read_to_string(&config_path).unwrap();
-    assert!(
-        contents.contains("agent = \"safe\""),
-        "config should have agent = \"safe\" after /agent safe"
-    );
+    assert_file_contains(&config_path, "agent = \"safe\"");
 }
 
 #[test]

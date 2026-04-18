@@ -58,83 +58,239 @@ enum Key {
     Other,
 }
 
+fn string_argument<'a>(
+    arguments: &'a serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    default: &'a str,
+) -> &'a str {
+    arguments
+        .get(key)
+        .and_then(|value| value.as_str())
+        .unwrap_or(default)
+}
+
+fn run_command_preview(arguments: &serde_json::Map<String, serde_json::Value>) -> String {
+    let command = string_argument(arguments, "command", "");
+    let args = arguments
+        .get("args")
+        .and_then(|value| value.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|value| value.as_str())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let full_command = if args.is_empty() {
+        command.to_string()
+    } else {
+        format!("{command} {args}")
+    };
+    format!("{} {}", "run".custom_color(CTP_BLUE), full_command.italic())
+}
+
+fn generic_tool_preview(
+    tool_name: &str,
+    arguments: &serde_json::Map<String, serde_json::Value>,
+) -> String {
+    let parts = arguments
+        .iter()
+        .map(|(key, value)| {
+            let value_str = match value {
+                serde_json::Value::String(text) => text.clone(),
+                other => other.to_string(),
+            };
+            format!("{key}: {value_str}")
+        })
+        .collect::<Vec<_>>();
+
+    if parts.is_empty() {
+        format!("{}", tool_name.bold())
+    } else {
+        format!("{} with {}", tool_name.bold(), parts.join(", "))
+    }
+}
+
 fn format_tool_preview(
     tool_name: &str,
     arguments: &serde_json::Map<String, serde_json::Value>,
 ) -> String {
     match tool_name {
-        "run_command" => {
-            let command = arguments
-                .get("command")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let args = arguments.get("args").and_then(|v| v.as_array());
-            let full_command = if let Some(args_list) = args {
-                let args_str = args_list
-                    .iter()
-                    .filter_map(|v| v.as_str())
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                if args_str.is_empty() {
-                    command.to_string()
-                } else {
-                    format!("{} {}", command, args_str)
-                }
-            } else {
-                command.to_string()
-            };
-            format!("{} {}", "run".custom_color(CTP_BLUE), full_command.italic())
-        }
-        "read_file" => {
-            let file_path = arguments
-                .get("file_path")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            format!("{} {}", "read".custom_color(CTP_BLUE), file_path.italic())
-        }
-        "list_files" => {
-            let directory_path = arguments
-                .get("directory_path")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            format!(
-                "{} in {}",
-                "list files".custom_color(CTP_BLUE),
-                directory_path.italic()
-            )
-        }
-        "search_files" => {
-            let pattern = arguments
-                .get("pattern")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let directory_path = arguments
-                .get("directory_path")
-                .and_then(|v| v.as_str())
-                .unwrap_or(".");
-            format!(
-                "{} for {} in {}",
-                "search".custom_color(CTP_BLUE),
-                pattern.italic(),
-                directory_path.italic()
-            )
-        }
-        _ => {
-            let mut parts = Vec::new();
-            for (key, value) in arguments {
-                let value_str = match value {
-                    serde_json::Value::String(text) => text.clone(),
-                    other => other.to_string(),
-                };
-                parts.push(format!("{}: {}", key, value_str));
+        "run_command" => run_command_preview(arguments),
+        "read_file" => format!(
+            "{} {}",
+            "read".custom_color(CTP_BLUE),
+            string_argument(arguments, "file_path", "").italic()
+        ),
+        "list_files" => format!(
+            "{} in {}",
+            "list files".custom_color(CTP_BLUE),
+            string_argument(arguments, "directory_path", "").italic()
+        ),
+        "search_files" => format!(
+            "{} for {} in {}",
+            "search".custom_color(CTP_BLUE),
+            string_argument(arguments, "pattern", "").italic(),
+            string_argument(arguments, "directory_path", ".").italic()
+        ),
+        _ => generic_tool_preview(tool_name, arguments),
+    }
+}
+
+fn execute_tool_call(tool_registry: &ToolRegistry, tool_call: &ToolCall) -> String {
+    let result = tool_registry.execute(&tool_call.name, tool_call.arguments.clone());
+    match &result {
+        Ok(output) => display_tool_result(output),
+        Err(error) => display_tool_error(error),
+    }
+
+    match result {
+        Ok(output) => output,
+        Err(error) => format!("Error: {error}"),
+    }
+}
+
+fn append_tool_messages(
+    messages: &mut Vec<ChatMessage>,
+    tool_call: &ToolCall,
+    result: impl Into<String>,
+) {
+    messages.push(ChatMessage::assistant_tool_calls(vec![tool_call.clone()]));
+    messages.push(ChatMessage::tool_result(&tool_call.id, result.into()));
+}
+
+fn denied_tool_result() -> &'static str {
+    "Tool call denied by user. Try a different approach or produce the final command."
+}
+
+fn initial_agent_messages(user_input: &str, config: &Config) -> Vec<ChatMessage> {
+    let system_prompt = build_agent_system_prompt(config.agent, user_input);
+    vec![
+        ChatMessage::system(system_prompt),
+        ChatMessage::user(user_input),
+    ]
+}
+
+fn show_agent_start(config: &Config) -> Result<(), LarpshellError> {
+    let model_name = config.provider_config()?.config.model().to_string();
+    hide_cursor();
+    eprint_flush(&format!(
+        "{}",
+        format!("using {} (agent)...", model_name).custom_color(CTP_OVERLAY0)
+    ));
+    Ok(())
+}
+
+fn clear_agent_status() {
+    clear_line();
+    show_cursor();
+}
+
+async fn next_agent_response(
+    provider: &dyn AIProvider,
+    messages: &[ChatMessage],
+    tool_definitions: &[crate::providers::ToolDefinition],
+) -> Result<ChatResponse, LarpshellError> {
+    let response = provider
+        .generate_with_tools(messages, tool_definitions)
+        .await;
+    clear_agent_status();
+    response
+}
+
+fn handle_tool_calls<F>(
+    tool_calls: &[ToolCall],
+    tool_registry: &ToolRegistry,
+    messages: &mut Vec<ChatMessage>,
+    confirm_tool: &mut F,
+) -> Result<(), LarpshellError>
+where
+    F: FnMut(&ToolCall) -> ToolConfirmResult,
+{
+    for tool_call in tool_calls {
+        display_tool_call(tool_call);
+
+        match confirm_tool(tool_call) {
+            ToolConfirmResult::Allow => {
+                let result_text = execute_tool_call(tool_registry, tool_call);
+                append_tool_messages(messages, tool_call, result_text);
             }
-            if parts.is_empty() {
-                format!("{}", tool_name.bold())
-            } else {
-                format!("{} with {}", tool_name.bold(), parts.join(", "))
+            ToolConfirmResult::Deny => {
+                print_warning("tool call denied.");
+                append_tool_messages(messages, tool_call, denied_tool_result());
             }
+            ToolConfirmResult::Cancel => return Err(LarpshellError::Cancelled),
         }
     }
+
+    Ok(())
+}
+
+fn show_next_iteration_prompt(iteration: usize) {
+    if iteration < MAX_AGENT_ITERATIONS - 1 {
+        hide_cursor();
+        eprint_flush(&format!("{}", "thinking...".custom_color(CTP_OVERLAY0)));
+    }
+}
+
+fn handle_agent_response<F>(
+    response: ChatResponse,
+    tool_registry: &ToolRegistry,
+    messages: &mut Vec<ChatMessage>,
+    confirm_tool: &mut F,
+) -> Result<Option<String>, LarpshellError>
+where
+    F: FnMut(&ToolCall) -> ToolConfirmResult,
+{
+    match response {
+        ChatResponse::Message(text) => Ok(Some(text)),
+        ChatResponse::ToolCalls(tool_calls) => {
+            handle_tool_calls(&tool_calls, tool_registry, messages, confirm_tool)?;
+            Ok(None)
+        }
+    }
+}
+
+fn max_iterations_error() -> LarpshellError {
+    LarpshellError::AgentMaxIterations(MAX_AGENT_ITERATIONS)
+}
+
+fn agent_context(
+    user_input: &str,
+    config: &Config,
+    tool_registry: &ToolRegistry,
+) -> Result<(Vec<ChatMessage>, Vec<crate::providers::ToolDefinition>), LarpshellError> {
+    show_agent_start(config)?;
+    Ok((
+        initial_agent_messages(user_input, config),
+        tool_registry.definitions(),
+    ))
+}
+
+fn continue_after_response(iteration: usize) {
+    show_next_iteration_prompt(iteration);
+}
+
+fn agent_iteration_error() -> LarpshellError {
+    max_iterations_error()
+}
+
+async fn provider_response(
+    provider: &dyn AIProvider,
+    messages: &[ChatMessage],
+    tool_definitions: &[crate::providers::ToolDefinition],
+) -> Result<ChatResponse, LarpshellError> {
+    next_agent_response(provider, messages, tool_definitions).await
+}
+
+fn tool_response<F>(
+    response: ChatResponse,
+    tool_registry: &ToolRegistry,
+    messages: &mut Vec<ChatMessage>,
+    confirm_tool: &mut F,
+) -> Result<Option<String>, LarpshellError>
+where
+    F: FnMut(&ToolCall) -> ToolConfirmResult,
+{
+    handle_agent_response(response, tool_registry, messages, confirm_tool)
 }
 
 fn display_tool_call(tool_call: &ToolCall) -> usize {
@@ -281,82 +437,24 @@ async fn run_agent_loop_with_confirm<F>(
 where
     F: FnMut(&ToolCall) -> ToolConfirmResult,
 {
-    let model_name = config.provider_config()?.config.model().to_string();
-    hide_cursor();
-    eprint_flush(&format!(
-        "{}",
-        format!("using {} (agent)...", model_name).custom_color(CTP_OVERLAY0)
-    ));
-
-    let system_prompt = build_agent_system_prompt(config.agent, user_input);
-    let mut messages = vec![
-        ChatMessage::system(system_prompt),
-        ChatMessage::user(user_input),
-    ];
-    let tool_definitions = tool_registry.definitions();
+    let (mut messages, tool_definitions) = agent_context(user_input, config, tool_registry)?;
 
     for iteration in 0..MAX_AGENT_ITERATIONS {
-        let response = match provider
-            .generate_with_tools(&messages, &tool_definitions)
-            .await
-        {
+        let response = match provider_response(provider, &messages, &tool_definitions).await {
             Ok(response) => response,
-            Err(error) => {
-                clear_line();
-                show_cursor();
-                return Err(error);
-            }
+            Err(error) => return Err(error),
         };
 
-        clear_line();
-        show_cursor();
-
-        match response {
-            ChatResponse::Message(text) => return Ok(text),
-            ChatResponse::ToolCalls(tool_calls) => {
-                for tool_call in &tool_calls {
-                    display_tool_call(tool_call);
-
-                    match confirm_tool(tool_call) {
-                        ToolConfirmResult::Allow => {
-                            let result =
-                                tool_registry.execute(&tool_call.name, tool_call.arguments.clone());
-                            match &result {
-                                Ok(output) => display_tool_result(output),
-                                Err(error) => display_tool_error(error),
-                            }
-                            let result_text = match result {
-                                Ok(output) => output,
-                                Err(error) => format!("Error: {error}"),
-                            };
-                            messages
-                                .push(ChatMessage::assistant_tool_calls(vec![tool_call.clone()]));
-                            messages.push(ChatMessage::tool_result(&tool_call.id, result_text));
-                        }
-                        ToolConfirmResult::Deny => {
-                            print_warning("tool call denied.");
-                            messages
-                                .push(ChatMessage::assistant_tool_calls(vec![tool_call.clone()]));
-                            messages.push(ChatMessage::tool_result(
-                                &tool_call.id,
-                                "Tool call denied by user. Try a different approach or produce the final command.",
-                            ));
-                        }
-                        ToolConfirmResult::Cancel => {
-                            return Err(LarpshellError::Cancelled);
-                        }
-                    }
-                }
-
-                if iteration < MAX_AGENT_ITERATIONS - 1 {
-                    hide_cursor();
-                    eprint_flush(&format!("{}", "thinking...".custom_color(CTP_OVERLAY0)));
-                }
-            }
+        if let Some(text) =
+            tool_response(response, tool_registry, &mut messages, &mut confirm_tool)?
+        {
+            return Ok(text);
         }
+
+        continue_after_response(iteration);
     }
 
-    Err(LarpshellError::AgentMaxIterations(MAX_AGENT_ITERATIONS))
+    Err(agent_iteration_error())
 }
 
 pub async fn run_agent_loop(

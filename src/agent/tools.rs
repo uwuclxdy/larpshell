@@ -5,351 +5,12 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::Mutex;
 
-pub struct RegisteredTool {
-    pub definition: ToolDefinition,
-    executor: Box<dyn Fn(serde_json::Value) -> Result<String, String> + Send + Sync>,
-}
-
-impl RegisteredTool {
-    pub fn execute(&self, args: serde_json::Value) -> Result<String, String> {
-        (self.executor)(args)
-    }
-}
-
-pub struct ToolRegistry {
-    tools: Vec<RegisteredTool>,
-    mcp_clients: Vec<Mutex<crate::agent::mcp::StdioMcpClient>>,
-}
-
-impl ToolRegistry {
-    pub fn new() -> Self {
-        Self {
-            tools: Vec::new(),
-            mcp_clients: Vec::new(),
-        }
-    }
-
-    pub fn register(&mut self, tool: RegisteredTool) {
-        self.tools.push(tool);
-    }
-
-    pub fn register_mcp_tool(&mut self, definition: ToolDefinition, _server_name: String) {
-        // Register the definition so it appears in definitions() sent to the LLM.
-        // Execution is always routed through mcp_clients, never through this executor.
-        self.tools.push(RegisteredTool {
-            definition,
-            executor: Box::new(|_| unreachable!("MCP tools are executed via mcp_clients")),
-        });
-    }
-
-    pub fn add_mcp_client(&mut self, client: crate::agent::mcp::StdioMcpClient) {
-        self.mcp_clients.push(Mutex::new(client));
-    }
-
-    pub fn definitions(&self) -> Vec<ToolDefinition> {
-        self.tools
-            .iter()
-            .map(|tool| tool.definition.clone())
-            .collect()
-    }
-
-    pub fn execute(&self, name: &str, args: serde_json::Value) -> Result<String, String> {
-        for client_mutex in &self.mcp_clients {
-            let prefix = {
-                let client = client_mutex.lock().unwrap();
-                format!("{}_", client.server_name())
-            };
-            if name.starts_with(&prefix) {
-                let mut client = client_mutex.lock().unwrap();
-                return client.call_tool(name, args);
-            }
-        }
-
-        self.tools
-            .iter()
-            .find(|tool| tool.definition.name == name)
-            .ok_or_else(|| format!("unknown tool: {name}"))
-            .and_then(|tool| tool.execute(args))
-    }
-
-    pub fn with_builtins(agent_mode: AgentMode) -> Self {
-        let mut registry = Self::new();
-        registry.register(read_file_tool());
-        registry.register(list_files_tool());
-        registry.register(search_files_tool());
-        registry.register(run_command_tool(agent_mode));
-        registry
-    }
-}
-
 const MAX_FILE_SIZE: usize = 100 * 1024;
 const MAX_SEARCH_MATCHES: usize = 50;
-
-fn read_file_tool() -> RegisteredTool {
-    RegisteredTool {
-        definition: ToolDefinition {
-            name: "read_file".to_string(),
-            description: "Read the contents of a file at the given path.".to_string(),
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "file_path": {
-                        "type": "string",
-                        "description": "Absolute or relative path to the file to read"
-                    }
-                },
-                "required": ["file_path"]
-            }),
-        },
-        executor: Box::new(|args| {
-            let file_path = args["file_path"]
-                .as_str()
-                .ok_or("file_path must be a string")?;
-            execute_read_file(file_path)
-        }),
-    }
-}
-
-fn execute_read_file(file_path: &str) -> Result<String, String> {
-    let path = Path::new(file_path);
-    if !path.exists() {
-        return Err(format!("file not found: {file_path}"));
-    }
-
-    let metadata = fs::metadata(path).map_err(|error| format!("cannot read file: {error}"))?;
-    if metadata.len() as usize > MAX_FILE_SIZE {
-        let content =
-            fs::read_to_string(path).map_err(|error| format!("cannot read file: {error}"))?;
-        let truncated = content.get(..MAX_FILE_SIZE).unwrap_or(&content);
-        Ok(format!(
-            "{truncated}\n\n[truncated — file is {} bytes, showing first {MAX_FILE_SIZE}]",
-            metadata.len()
-        ))
-    } else {
-        fs::read_to_string(path).map_err(|error| format!("cannot read file: {error}"))
-    }
-}
-
-fn list_files_tool() -> RegisteredTool {
-    RegisteredTool {
-        definition: ToolDefinition {
-            name: "list_files".to_string(),
-            description: "List files and directories in the given directory path.".to_string(),
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "directory_path": {
-                        "type": "string",
-                        "description": "Path to the directory to list"
-                    }
-                },
-                "required": ["directory_path"]
-            }),
-        },
-        executor: Box::new(|args| {
-            let directory_path = args["directory_path"]
-                .as_str()
-                .ok_or("directory_path must be a string")?;
-            execute_list_files(directory_path)
-        }),
-    }
-}
-
-fn execute_list_files(directory_path: &str) -> Result<String, String> {
-    let path = Path::new(directory_path);
-    if !path.is_dir() {
-        return Err(format!("not a directory: {directory_path}"));
-    }
-
-    let read_dir = fs::read_dir(path).map_err(|error| format!("cannot read directory: {error}"))?;
-    let mut entries = Vec::new();
-    for entry in read_dir {
-        let entry = entry.map_err(|error| format!("error reading entry: {error}"))?;
-        let name = entry.file_name().to_string_lossy().to_string();
-        if entry
-            .file_type()
-            .map(|file_type| file_type.is_dir())
-            .unwrap_or(false)
-        {
-            entries.push(format!("{name}/"));
-        } else {
-            entries.push(name);
-        }
-    }
-    entries.sort();
-    Ok(entries.join("\n"))
-}
-
-fn search_files_tool() -> RegisteredTool {
-    RegisteredTool {
-        definition: ToolDefinition {
-            name: "search_files".to_string(),
-            description: "Search for a text pattern across files in a directory. Returns matching lines with file paths and line numbers.".to_string(),
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "pattern": {
-                        "type": "string",
-                        "description": "Text pattern to search for (literal string match)"
-                    },
-                    "directory_path": {
-                        "type": "string",
-                        "description": "Directory to search in (defaults to current directory)"
-                    }
-                },
-                "required": ["pattern"]
-            }),
-        },
-        executor: Box::new(|args| {
-            let pattern = args["pattern"].as_str().ok_or("pattern must be a string")?;
-            let directory_path = args
-                .get("directory_path")
-                .and_then(|value| value.as_str())
-                .unwrap_or(".");
-            execute_search_files(pattern, directory_path)
-        }),
-    }
-}
-
-fn execute_search_files(pattern: &str, directory_path: &str) -> Result<String, String> {
-    let path = Path::new(directory_path);
-    if !path.is_dir() {
-        return Err(format!("not a directory: {directory_path}"));
-    }
-
-    let mut matches = Vec::new();
-    search_recursive(path, pattern, &mut matches);
-
-    if matches.is_empty() {
-        return Ok(format!("no matches found for '{pattern}'"));
-    }
-
-    let total = matches.len();
-    if total > MAX_SEARCH_MATCHES {
-        matches.truncate(MAX_SEARCH_MATCHES);
-        matches.push(format!(
-            "\n[showing {MAX_SEARCH_MATCHES} of {total} matches]"
-        ));
-    }
-
-    Ok(matches.join("\n"))
-}
-
-fn search_recursive(dir: &Path, pattern: &str, matches: &mut Vec<String>) {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return;
-    };
-
-    for entry in entries.flatten() {
-        if matches.len() >= MAX_SEARCH_MATCHES {
-            return;
-        }
-        let path = entry.path();
-        if path.is_dir() {
-            let name = entry.file_name();
-            let name_str = name.to_string_lossy();
-            if name_str.starts_with('.') || name_str == "node_modules" || name_str == "target" {
-                continue;
-            }
-            search_recursive(&path, pattern, matches);
-        } else if path.is_file() {
-            let extension = path.extension().and_then(|ext| ext.to_str()).unwrap_or("");
-            let text_extensions = [
-                "rs", "toml", "json", "yaml", "yml", "md", "txt", "sh", "py", "js", "ts", "html",
-                "css", "c", "h", "cpp", "go", "java", "rb", "conf", "cfg", "ini", "xml", "csv",
-                "sql", "lua", "zig", "nix",
-            ];
-            if !extension.is_empty() && !text_extensions.contains(&extension) {
-                continue;
-            }
-
-            search_file(&path, pattern, matches);
-        }
-    }
-}
-
-fn search_file(path: &Path, pattern: &str, matches: &mut Vec<String>) {
-    let Ok(content) = fs::read_to_string(path) else {
-        return;
-    };
-
-    let display_path = path.display();
-    for (index, line) in content.lines().enumerate() {
-        if matches.len() >= MAX_SEARCH_MATCHES {
-            return;
-        }
-        if line.contains(pattern) {
-            matches.push(format!("{}:{}:{}", display_path, index + 1, line));
-        }
-    }
-}
-
-fn run_command_tool(agent_mode: AgentMode) -> RegisteredTool {
-    let description = match agent_mode {
-        AgentMode::Safe => {
-            "Run a restricted read-only command to gather context. Only informational commands are allowed and dangerous arguments are blocked."
-        }
-        AgentMode::On => {
-            "Run a shell command to gather context. Commands still require confirmation before execution."
-        }
-        AgentMode::Off => "Run a command.",
-    };
-
-    RegisteredTool {
-        definition: ToolDefinition {
-            name: "run_command".to_string(),
-            description: description.to_string(),
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "command": {
-                        "type": "string",
-                        "description": "The command to execute"
-                    },
-                    "args": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        },
-                        "description": "Optional arguments for the command"
-                    }
-                },
-                "required": ["command"]
-            }),
-        },
-        executor: Box::new(move |args| {
-            let command = args["command"].as_str().ok_or("command must be a string")?;
-            let command_args = args
-                .get("args")
-                .and_then(|value| value.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|v| v.as_str())
-                        .map(|s| s.to_string())
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-            execute_run_command(agent_mode, command, &command_args)
-        }),
-    }
-}
-
-fn split_command_and_args(command: &str, args: &[String]) -> Result<(String, Vec<String>), String> {
-    if !args.is_empty() {
-        return Ok((command.to_string(), args.to_vec()));
-    }
-
-    let mut parts = command.split_whitespace();
-    let executable = parts
-        .next()
-        .ok_or_else(|| "command must not be empty".to_string())?;
-
-    Ok((
-        executable.to_string(),
-        parts.map(ToString::to_string).collect(),
-    ))
-}
-
+const TEXT_EXTENSIONS: &[&str] = &[
+    "rs", "toml", "json", "yaml", "yml", "md", "txt", "sh", "py", "js", "ts", "html", "css", "c",
+    "h", "cpp", "go", "java", "rb", "conf", "cfg", "ini", "xml", "csv", "sql", "lua", "zig", "nix",
+];
 const SAFE_COMMANDS: &[&str] = &[
     "ls",
     "cat",
@@ -407,7 +68,6 @@ const SAFE_COMMANDS: &[&str] = &[
     "vault",
     "consul",
 ];
-
 const DANGEROUS_FLAG_PREFIXES: &[&str] = &["--delete", "--remove", "--force"];
 const DANGEROUS_ARGUMENT_TOKENS: &[&str] = &["rm", "mv", "cp", "chmod", "chown"];
 const GIT_READ_ONLY_SUBCOMMANDS: &[&str] = &[
@@ -420,6 +80,384 @@ const GIT_READ_ONLY_SUBCOMMANDS: &[&str] = &[
     "describe",
     "help",
 ];
+
+pub struct RegisteredTool {
+    pub definition: ToolDefinition,
+    executor: Box<dyn Fn(serde_json::Value) -> Result<String, String> + Send + Sync>,
+}
+
+impl RegisteredTool {
+    pub fn execute(&self, args: serde_json::Value) -> Result<String, String> {
+        (self.executor)(args)
+    }
+}
+
+pub struct ToolRegistry {
+    tools: Vec<RegisteredTool>,
+    mcp_clients: Vec<Mutex<crate::agent::mcp::StdioMcpClient>>,
+}
+
+impl ToolRegistry {
+    pub fn new() -> Self {
+        Self {
+            tools: Vec::new(),
+            mcp_clients: Vec::new(),
+        }
+    }
+
+    pub fn register(&mut self, tool: RegisteredTool) {
+        self.tools.push(tool);
+    }
+
+    pub fn register_mcp_tool(&mut self, definition: ToolDefinition, _server_name: String) {
+        // Register the definition so it appears in definitions() sent to the LLM.
+        // Execution is always routed through mcp_clients, never through this executor.
+        self.tools.push(RegisteredTool {
+            definition,
+            executor: Box::new(|_| unreachable!("MCP tools are executed via mcp_clients")),
+        });
+    }
+
+    pub fn add_mcp_client(&mut self, client: crate::agent::mcp::StdioMcpClient) {
+        self.mcp_clients.push(Mutex::new(client));
+    }
+
+    pub fn definitions(&self) -> Vec<ToolDefinition> {
+        self.tools
+            .iter()
+            .map(|tool| tool.definition.clone())
+            .collect()
+    }
+
+    pub fn execute(&self, name: &str, args: serde_json::Value) -> Result<String, String> {
+        if let Some(result) = self.try_execute_mcp_tool(name, &args) {
+            return result;
+        }
+
+        self.execute_builtin_tool(name, args)
+    }
+
+    fn try_execute_mcp_tool(
+        &self,
+        name: &str,
+        args: &serde_json::Value,
+    ) -> Option<Result<String, String>> {
+        for client_mutex in &self.mcp_clients {
+            let mut client = client_mutex.lock().unwrap();
+            let prefix = format!("{}_", client.server_name());
+            if name.starts_with(&prefix) {
+                return Some(client.call_tool(name, args.clone()));
+            }
+        }
+
+        None
+    }
+
+    fn execute_builtin_tool(&self, name: &str, args: serde_json::Value) -> Result<String, String> {
+        self.tools
+            .iter()
+            .find(|tool| tool.definition.name == name)
+            .ok_or_else(|| format!("unknown tool: {name}"))
+            .and_then(|tool| tool.execute(args))
+    }
+
+    pub fn with_builtins(agent_mode: AgentMode) -> Self {
+        let mut registry = Self::new();
+        registry.register(read_file_tool());
+        registry.register(list_files_tool());
+        registry.register(search_files_tool());
+        registry.register(run_command_tool(agent_mode));
+        registry
+    }
+}
+
+fn read_file_tool() -> RegisteredTool {
+    RegisteredTool {
+        definition: ToolDefinition {
+            name: "read_file".to_string(),
+            description: "Read the contents of a file at the given path.".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Absolute or relative path to the file to read"
+                    }
+                },
+                "required": ["file_path"]
+            }),
+        },
+        executor: Box::new(|args| {
+            let file_path = args["file_path"]
+                .as_str()
+                .ok_or("file_path must be a string")?;
+            execute_read_file(file_path)
+        }),
+    }
+}
+
+fn execute_read_file(file_path: &str) -> Result<String, String> {
+    let path = Path::new(file_path);
+    if !path.exists() {
+        return Err(format!("file not found: {file_path}"));
+    }
+
+    let metadata = fs::metadata(path).map_err(|error| format!("cannot read file: {error}"))?;
+    let content = fs::read_to_string(path).map_err(|error| format!("cannot read file: {error}"))?;
+
+    if metadata.len() as usize > MAX_FILE_SIZE {
+        Ok(truncate_content(&content, metadata.len()))
+    } else {
+        Ok(content)
+    }
+}
+
+fn truncate_content(content: &str, file_size: u64) -> String {
+    let truncated = content.get(..MAX_FILE_SIZE).unwrap_or(content);
+    format!("{truncated}\n\n[truncated — file is {file_size} bytes, showing first {MAX_FILE_SIZE}]")
+}
+
+fn list_files_tool() -> RegisteredTool {
+    RegisteredTool {
+        definition: ToolDefinition {
+            name: "list_files".to_string(),
+            description: "List files and directories in the given directory path.".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "directory_path": {
+                        "type": "string",
+                        "description": "Path to the directory to list"
+                    }
+                },
+                "required": ["directory_path"]
+            }),
+        },
+        executor: Box::new(|args| {
+            let directory_path = args["directory_path"]
+                .as_str()
+                .ok_or("directory_path must be a string")?;
+            execute_list_files(directory_path)
+        }),
+    }
+}
+
+fn execute_list_files(directory_path: &str) -> Result<String, String> {
+    let path = Path::new(directory_path);
+    if !path.is_dir() {
+        return Err(format!("not a directory: {directory_path}"));
+    }
+
+    let mut entries = Vec::new();
+    for entry in fs::read_dir(path).map_err(|error| format!("cannot read directory: {error}"))? {
+        let entry = entry.map_err(|error| format!("error reading entry: {error}"))?;
+        entries.push(entry_name(&entry)?);
+    }
+    entries.sort();
+
+    Ok(entries.join("\n"))
+}
+
+fn entry_name(entry: &fs::DirEntry) -> Result<String, String> {
+    let name = entry.file_name().to_string_lossy().to_string();
+    let suffix = if entry
+        .file_type()
+        .map_err(|error| format!("error reading entry: {error}"))?
+        .is_dir()
+    {
+        "/"
+    } else {
+        ""
+    };
+
+    Ok(format!("{name}{suffix}"))
+}
+
+fn search_files_tool() -> RegisteredTool {
+    RegisteredTool {
+        definition: ToolDefinition {
+            name: "search_files".to_string(),
+            description: "Search for a text pattern across files in a directory. Returns matching lines with file paths and line numbers.".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "pattern": {
+                        "type": "string",
+                        "description": "Text pattern to search for (literal string match)"
+                    },
+                    "directory_path": {
+                        "type": "string",
+                        "description": "Directory to search in (defaults to current directory)"
+                    }
+                },
+                "required": ["pattern"]
+            }),
+        },
+        executor: Box::new(|args| {
+            let pattern = args["pattern"].as_str().ok_or("pattern must be a string")?;
+            let directory_path = args
+                .get("directory_path")
+                .and_then(|value| value.as_str())
+                .unwrap_or(".");
+            execute_search_files(pattern, directory_path)
+        }),
+    }
+}
+
+fn execute_search_files(pattern: &str, directory_path: &str) -> Result<String, String> {
+    let path = Path::new(directory_path);
+    if !path.is_dir() {
+        return Err(format!("not a directory: {directory_path}"));
+    }
+
+    let mut matches = Vec::new();
+    search_recursive(path, pattern, &mut matches);
+
+    if matches.is_empty() {
+        return Ok(format!("no matches found for '{pattern}'"));
+    }
+
+    append_search_summary(&mut matches);
+    Ok(matches.join("\n"))
+}
+
+fn append_search_summary(matches: &mut Vec<String>) {
+    let total = matches.len();
+    if total > MAX_SEARCH_MATCHES {
+        matches.truncate(MAX_SEARCH_MATCHES);
+        matches.push(format!(
+            "\n[showing {MAX_SEARCH_MATCHES} of {total} matches]"
+        ));
+    }
+}
+
+fn search_recursive(dir: &Path, pattern: &str, matches: &mut Vec<String>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+
+    for entry in entries.flatten() {
+        if reached_search_limit(matches) {
+            return;
+        }
+
+        let path = entry.path();
+        if path.is_dir() {
+            if should_skip_directory(&entry) {
+                continue;
+            }
+            search_recursive(&path, pattern, matches);
+        } else if path.is_file() && is_text_file(&path) {
+            search_file(&path, pattern, matches);
+        }
+    }
+}
+
+fn reached_search_limit(matches: &[String]) -> bool {
+    matches.len() >= MAX_SEARCH_MATCHES
+}
+
+fn should_skip_directory(entry: &fs::DirEntry) -> bool {
+    let name = entry.file_name();
+    let name = name.to_string_lossy();
+    name.starts_with('.') || name == "node_modules" || name == "target"
+}
+
+fn is_text_file(path: &Path) -> bool {
+    let extension = path.extension().and_then(|ext| ext.to_str()).unwrap_or("");
+    extension.is_empty() || TEXT_EXTENSIONS.contains(&extension)
+}
+
+fn search_file(path: &Path, pattern: &str, matches: &mut Vec<String>) {
+    let Ok(content) = fs::read_to_string(path) else {
+        return;
+    };
+
+    for (index, line) in content.lines().enumerate() {
+        if reached_search_limit(matches) {
+            return;
+        }
+        if line.contains(pattern) {
+            matches.push(format_match(path, index + 1, line));
+        }
+    }
+}
+
+fn format_match(path: &Path, line_number: usize, line: &str) -> String {
+    format!("{}:{line_number}:{line}", path.display())
+}
+
+fn run_command_tool(agent_mode: AgentMode) -> RegisteredTool {
+    RegisteredTool {
+        definition: ToolDefinition {
+            name: "run_command".to_string(),
+            description: run_command_description(agent_mode).to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "The command to execute"
+                    },
+                    "args": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Optional arguments for the command"
+                    }
+                },
+                "required": ["command"]
+            }),
+        },
+        executor: Box::new(move |args| {
+            let command = args["command"].as_str().ok_or("command must be a string")?;
+            let command_args = command_args_from_json(&args);
+            execute_run_command(agent_mode, command, &command_args)
+        }),
+    }
+}
+
+fn run_command_description(agent_mode: AgentMode) -> &'static str {
+    match agent_mode {
+        AgentMode::Safe => {
+            "Run a restricted read-only command to gather context."
+        }
+        AgentMode::On => {
+            "Run a shell command to gather context or for multi-step requests such as installing or setting up programs."
+        }
+        AgentMode::Off => "Run a command.",
+    }
+}
+
+fn command_args_from_json(args: &serde_json::Value) -> Vec<String> {
+    args.get("args")
+        .and_then(|value| value.as_array())
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|value| value.as_str())
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+}
+
+fn split_command_and_args(command: &str, args: &[String]) -> Result<(String, Vec<String>), String> {
+    if !args.is_empty() {
+        return Ok((command.to_string(), args.to_vec()));
+    }
+
+    let mut parts = command.split_whitespace();
+    let executable = parts
+        .next()
+        .ok_or_else(|| "command must not be empty".to_string())?;
+
+    Ok((
+        executable.to_string(),
+        parts.map(ToString::to_string).collect(),
+    ))
+}
 
 fn has_shell_metacharacters(arg: &str) -> bool {
     [">", "|", ";", "&", "`"]
@@ -438,6 +476,10 @@ fn has_dangerous_flag(arg: &str) -> bool {
 
 fn is_dangerous_argument_token(arg: &str) -> bool {
     DANGEROUS_ARGUMENT_TOKENS.contains(&arg)
+}
+
+fn is_dangerous_argument(arg: &str) -> bool {
+    has_shell_metacharacters(arg) || has_dangerous_flag(arg) || is_dangerous_argument_token(arg)
 }
 
 fn git_command_is_read_only(args: &[String]) -> bool {
@@ -469,7 +511,7 @@ fn git_command_is_read_only(args: &[String]) -> bool {
 fn validate_safe_run_command(command: &str, args: &[String]) -> Result<(), String> {
     let command_base = Path::new(command)
         .file_stem()
-        .and_then(|s| s.to_str())
+        .and_then(|segment| segment.to_str())
         .unwrap_or(command);
 
     if !SAFE_COMMANDS.contains(&command_base) {
@@ -481,10 +523,7 @@ fn validate_safe_run_command(command: &str, args: &[String]) -> Result<(), Strin
     }
 
     for arg in args {
-        if has_shell_metacharacters(arg)
-            || has_dangerous_flag(arg)
-            || is_dangerous_argument_token(arg)
-        {
+        if is_dangerous_argument(arg) {
             return Err(format!("dangerous argument detected: {arg}"));
         }
     }
@@ -513,8 +552,7 @@ fn execute_run_command(
         return Err(format!("command failed: {}", stderr.trim()));
     }
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    Ok(stdout.to_string())
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
 #[cfg(test)]
@@ -531,19 +569,34 @@ mod tests {
         dir
     }
 
-    #[test]
-    fn registry_with_builtins_has_four_tools() {
-        let registry = ToolRegistry::with_builtins(AgentMode::Safe);
-        assert_eq!(registry.definitions().len(), 4);
+    fn assert_ok_trimmed(result: Result<String, String>, expected: &str) {
+        assert_eq!(result.unwrap().trim(), expected);
+    }
+
+    fn assert_err_contains(result: Result<String, String>, expected: &str) {
+        assert!(result.unwrap_err().contains(expected));
+    }
+
+    fn assert_has_tool_names(registry: &ToolRegistry, expected_names: &[&str]) {
         let names: Vec<_> = registry
             .definitions()
             .iter()
             .map(|definition| definition.name.clone())
             .collect();
-        assert!(names.contains(&"read_file".to_string()));
-        assert!(names.contains(&"list_files".to_string()));
-        assert!(names.contains(&"search_files".to_string()));
-        assert!(names.contains(&"run_command".to_string()));
+
+        for name in expected_names {
+            assert!(names.contains(&name.to_string()));
+        }
+    }
+
+    #[test]
+    fn registry_with_builtins_has_four_tools() {
+        let registry = ToolRegistry::with_builtins(AgentMode::Safe);
+        assert_eq!(registry.definitions().len(), 4);
+        assert_has_tool_names(
+            &registry,
+            &["read_file", "list_files", "search_files", "run_command"],
+        );
     }
 
     #[test]
@@ -559,9 +612,7 @@ mod tests {
 
     #[test]
     fn read_file_missing_returns_error() {
-        let result = execute_read_file("/nonexistent/file.txt");
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("file not found"));
+        assert_err_contains(execute_read_file("/nonexistent/file.txt"), "file not found");
     }
 
     #[test]
@@ -591,9 +642,7 @@ mod tests {
 
     #[test]
     fn list_files_not_a_dir_returns_error() {
-        let result = execute_list_files("/nonexistent/dir");
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("not a directory"));
+        assert_err_contains(execute_list_files("/nonexistent/dir"), "not a directory");
     }
 
     #[test]
@@ -641,59 +690,66 @@ mod tests {
     #[test]
     fn registry_execute_unknown_tool_returns_error() {
         let registry = ToolRegistry::with_builtins(AgentMode::Safe);
-        let result = registry.execute("nonexistent", serde_json::json!({}));
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("unknown tool"));
+        assert_err_contains(
+            registry.execute("nonexistent", serde_json::json!({})),
+            "unknown tool",
+        );
     }
 
     #[test]
     fn run_command_executes_safe_commands() {
-        let result = execute_run_command(AgentMode::Safe, "echo", &["hello world".to_string()]);
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap().trim(), "hello world");
+        assert_ok_trimmed(
+            execute_run_command(AgentMode::Safe, "echo", &["hello world".to_string()]),
+            "hello world",
+        );
     }
 
     #[test]
     fn run_command_safe_accepts_combined_command_string() {
-        let result = execute_run_command(AgentMode::Safe, "echo hello world", &[]);
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap().trim(), "hello world");
+        assert_ok_trimmed(
+            execute_run_command(AgentMode::Safe, "echo hello world", &[]),
+            "hello world",
+        );
     }
 
     #[test]
     fn run_command_rejects_unsafe_commands() {
-        let result =
-            execute_run_command(AgentMode::Safe, "rm", &["-rf".to_string(), "/".to_string()]);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("command not allowed"));
+        assert_err_contains(
+            execute_run_command(AgentMode::Safe, "rm", &["-rf".to_string(), "/".to_string()]),
+            "command not allowed",
+        );
     }
 
     #[test]
     fn run_command_safe_rejects_dangerous_combined_command_string() {
-        let result = execute_run_command(AgentMode::Safe, "ls --force", &[]);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("dangerous argument"));
+        assert_err_contains(
+            execute_run_command(AgentMode::Safe, "ls --force", &[]),
+            "dangerous argument",
+        );
     }
 
     #[test]
     fn run_command_rejects_dangerous_args() {
-        let result = execute_run_command(AgentMode::Safe, "ls", &["--force".to_string()]);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("dangerous argument"));
+        assert_err_contains(
+            execute_run_command(AgentMode::Safe, "ls", &["--force".to_string()]),
+            "dangerous argument",
+        );
     }
 
     #[test]
     fn run_command_safe_allows_benign_args_with_blocked_substrings() {
-        let result = execute_run_command(AgentMode::Safe, "echo", &["tcp".to_string()]);
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap().trim(), "tcp");
+        assert_ok_trimmed(
+            execute_run_command(AgentMode::Safe, "echo", &["tcp".to_string()]),
+            "tcp",
+        );
     }
 
     #[test]
     fn run_command_safe_rejects_mutating_git_subcommands() {
-        let result = execute_run_command(AgentMode::Safe, "git", &["init".to_string()]);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("dangerous git subcommand"));
+        assert_err_contains(
+            execute_run_command(AgentMode::Safe, "git", &["init".to_string()]),
+            "dangerous git subcommand",
+        );
     }
 
     #[test]
@@ -720,29 +776,33 @@ mod tests {
 
     #[test]
     fn run_command_safe_allows_literal_dollar_argument() {
-        let result = execute_run_command(AgentMode::Safe, "echo", &["$HOME".to_string()]);
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap().trim(), "$HOME");
+        assert_ok_trimmed(
+            execute_run_command(AgentMode::Safe, "echo", &["$HOME".to_string()]),
+            "$HOME",
+        );
     }
 
     #[test]
     fn run_command_on_allows_arbitrary_commands() {
-        let result = execute_run_command(AgentMode::On, "echo", &["hello world".to_string()]);
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap().trim(), "hello world");
+        assert_ok_trimmed(
+            execute_run_command(AgentMode::On, "echo", &["hello world".to_string()]),
+            "hello world",
+        );
     }
 
     #[test]
     fn run_command_on_accepts_combined_command_string() {
-        let result = execute_run_command(AgentMode::On, "echo hello world", &[]);
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap().trim(), "hello world");
+        assert_ok_trimmed(
+            execute_run_command(AgentMode::On, "echo hello world", &[]),
+            "hello world",
+        );
     }
 
     #[test]
     fn run_command_on_allows_previously_blocked_args() {
-        let result = execute_run_command(AgentMode::On, "echo", &["--force".to_string()]);
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap().trim(), "--force");
+        assert_ok_trimmed(
+            execute_run_command(AgentMode::On, "echo", &["--force".to_string()]),
+            "--force",
+        );
     }
 }

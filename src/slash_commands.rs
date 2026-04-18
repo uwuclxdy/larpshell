@@ -187,42 +187,51 @@ pub enum SlashCmd {
     Unknown(String),
 }
 
+fn parse_agent_mode(arg: Option<&str>) -> Option<AgentMode> {
+    match arg {
+        Some("off") => Some(AgentMode::Off),
+        Some("safe") => Some(AgentMode::Safe),
+        Some("on") => Some(AgentMode::On),
+        _ => None,
+    }
+}
+
+fn parse_prompt_kind(arg: Option<&str>) -> PromptKind {
+    match arg {
+        Some("explain") => PromptKind::Explain,
+        Some("agent-safe") => PromptKind::AgentSafe,
+        Some("agent") => PromptKind::Agent,
+        _ => PromptKind::System,
+    }
+}
+
+fn parse_prompt_action(arg: Option<&str>) -> PromptAction {
+    match arg {
+        Some("edit") => PromptAction::Edit,
+        _ => PromptAction::Show,
+    }
+}
+
 pub fn parse(input: &str) -> SlashCmd {
     let mut parts = input.split_whitespace();
     match parts.next() {
-        Some("/agent") => {
-            let mode = match parts.next() {
-                Some("off") => Some(AgentMode::Off),
-                Some("safe") => Some(AgentMode::Safe),
-                Some("on") => Some(AgentMode::On),
-                _ => None,
-            };
-            SlashCmd::Agent { mode }
-        }
+        Some("/agent") => SlashCmd::Agent {
+            mode: parse_agent_mode(parts.next()),
+        },
         Some("/api") => SlashCmd::Api,
         Some("/uninstall") => SlashCmd::Uninstall,
         Some("/help") => SlashCmd::Help,
         Some("/quit") => SlashCmd::Quit,
-        Some("/history") => {
-            let enable = matches!(parts.next(), Some("on"));
-            SlashCmd::History { enable }
-        }
+        Some("/history") => SlashCmd::History {
+            enable: matches!(parts.next(), Some("on")),
+        },
         Some("/explain") => SlashCmd::Explain {
             args: parts.map(|s| s.to_string()).collect(),
         },
-        Some("/prompt") => {
-            let kind = match parts.next() {
-                Some("explain") => PromptKind::Explain,
-                Some("agent-safe") => PromptKind::AgentSafe,
-                Some("agent") => PromptKind::Agent,
-                _ => PromptKind::System,
-            };
-            let action = match parts.next() {
-                Some("edit") => PromptAction::Edit,
-                _ => PromptAction::Show,
-            };
-            SlashCmd::Prompt { kind, action }
-        }
+        Some("/prompt") => SlashCmd::Prompt {
+            kind: parse_prompt_kind(parts.next()),
+            action: parse_prompt_action(parts.next()),
+        },
         _ => SlashCmd::Unknown(input.to_string()),
     }
 }
