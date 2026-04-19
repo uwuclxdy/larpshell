@@ -1,3 +1,4 @@
+pub mod builtins;
 pub mod mcp;
 pub mod tools;
 
