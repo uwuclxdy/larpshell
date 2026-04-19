@@ -115,10 +115,6 @@ mod tests {
         dir
     }
 
-    fn assert_ok_trimmed(result: Result<String, String>, expected: &str) {
-        assert_eq!(result.unwrap().trim(), expected);
-    }
-
     fn assert_err_contains(result: Result<String, String>, expected: &str) {
         assert!(result.unwrap_err().contains(expected));
     }

@@ -178,35 +178,41 @@ fn style_html_tags(text: &str) -> String {
     }
 }
 
-/// Prompt for confirmation with explain option
-pub fn confirm_with_explain(cmd_line_count: usize) -> Result<ConfirmResult, LarpshellError> {
-    if !is_interactive_terminal() {
-        return Ok(ConfirmResult::Yes);
-    }
-
-    let prompt_lines = confirmation_prompt(ConfirmPromptMode::WithExplain);
-    flush_stderr();
-    flush_stdin_input();
-
-    let lines_to_clear = cmd_line_count + prompt_lines;
+/// Shared confirmation loop for both WithExplain and Simple modes.
+/// Takes a callback to read keys, allowing tests to inject input.
+fn confirm_from_reader(
+    mut read_key: impl FnMut() -> KeyEvent,
+    mode: ConfirmPromptMode,
+    cmd_line_count: usize,
+    expl_line_count: usize,
+) -> ConfirmResult {
+    let prompt_lines = confirmation_prompt(mode);
+    let lines_to_clear = cmd_line_count + expl_line_count + prompt_lines;
 
     loop {
-        match read_key_event() {
+        match read_key() {
             KeyEvent::Enter | KeyEvent::Char('y' | 'Y') => {
-                clear_n_lines(prompt_lines);
-                return Ok(ConfirmResult::Yes);
+                // WithExplain clears only prompt (keeps command + explanation).
+                // Simple clears explanation + prompt (keeps command).
+                let clear_count = if matches!(mode, ConfirmPromptMode::WithExplain) {
+                    prompt_lines
+                } else {
+                    expl_line_count + prompt_lines
+                };
+                clear_n_lines(clear_count);
+                return ConfirmResult::Yes;
             }
-            KeyEvent::Char('e' | 'E') => {
+            KeyEvent::Char('e' | 'E') if matches!(mode, ConfirmPromptMode::WithExplain) => {
                 clear_n_lines(prompt_lines);
-                return Ok(ConfirmResult::Explain);
+                return ConfirmResult::Explain;
             }
             KeyEvent::ArrowUp => {
                 clear_n_lines(lines_to_clear);
-                return Ok(ConfirmResult::Edit);
+                return ConfirmResult::Edit;
             }
             KeyEvent::Char('n' | 'N') => {
                 clear_n_lines(lines_to_clear);
-                return Ok(ConfirmResult::Cancel);
+                return ConfirmResult::Cancel;
             }
             KeyEvent::CtrlC => {
                 clear_n_lines(lines_to_clear);
@@ -216,11 +222,29 @@ pub fn confirm_with_explain(cmd_line_count: usize) -> Result<ConfirmResult, Larp
             KeyEvent::Eof => {
                 clear_n_lines(lines_to_clear);
                 show_cursor();
-                return Ok(ConfirmResult::No);
+                return ConfirmResult::No;
             }
             _ => {}
         }
     }
+}
+
+/// Prompt for confirmation with explain option
+pub fn confirm_with_explain(cmd_line_count: usize) -> Result<ConfirmResult, LarpshellError> {
+    if !is_interactive_terminal() {
+        return Ok(ConfirmResult::Yes);
+    }
+
+    flush_stderr();
+    flush_stdin_input();
+
+    let result = confirm_from_reader(
+        read_key_event,
+        ConfirmPromptMode::WithExplain,
+        cmd_line_count,
+        0, // no ephemeral explanation lines in WithExplain mode
+    );
+    Ok(result)
 }
 
 /// Prompt without the explain option.
@@ -234,39 +258,16 @@ pub fn confirm_execution(
         return Ok(ConfirmResult::Yes);
     }
 
-    let prompt_lines = confirmation_prompt(ConfirmPromptMode::Simple);
     flush_stderr();
     flush_stdin_input();
 
-    let lines_to_clear = cmd_line_count + expl_line_count + prompt_lines;
-
-    loop {
-        match read_key_event() {
-            KeyEvent::Enter | KeyEvent::Char('y' | 'Y') => {
-                clear_n_lines(expl_line_count + prompt_lines);
-                return Ok(ConfirmResult::Yes);
-            }
-            KeyEvent::ArrowUp => {
-                clear_n_lines(lines_to_clear);
-                return Ok(ConfirmResult::Edit);
-            }
-            KeyEvent::Char('n' | 'N') => {
-                clear_n_lines(lines_to_clear);
-                return Ok(ConfirmResult::Cancel);
-            }
-            KeyEvent::CtrlC => {
-                clear_n_lines(lines_to_clear);
-                show_cursor();
-                exit_with_code(EXIT_SIGINT);
-            }
-            KeyEvent::Eof => {
-                clear_n_lines(lines_to_clear);
-                show_cursor();
-                return Ok(ConfirmResult::No);
-            }
-            _ => {}
-        }
-    }
+    let result = confirm_from_reader(
+        read_key_event,
+        ConfirmPromptMode::Simple,
+        cmd_line_count,
+        expl_line_count,
+    );
+    Ok(result)
 }
 
 fn confirmation_prompt(mode: ConfirmPromptMode) -> usize {
@@ -472,5 +473,174 @@ mod tests {
         let result = style_html_tags("<b>bold</b> and <i>italic</i>");
         assert_eq!(result, "bold and italic");
         colored::control::set_override(true);
+    }
+
+    // Characterization tests for key parsing and confirmation behavior
+    #[test]
+    fn parse_key_from_reader_maps_enter() {
+        let mut input = std::io::Cursor::new(b"\n");
+        assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::Enter));
+    }
+
+    #[test]
+    fn parse_key_from_reader_maps_carriage_return() {
+        let mut input = std::io::Cursor::new(b"\r");
+        assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::Enter));
+    }
+
+    #[test]
+    fn parse_key_from_reader_maps_char_y() {
+        let mut input = std::io::Cursor::new(b"y");
+        assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::Char('y')));
+    }
+
+    #[test]
+    fn parse_key_from_reader_maps_char_uppercase_y() {
+        let mut input = std::io::Cursor::new(b"Y");
+        assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::Char('Y')));
+    }
+
+    #[test]
+    fn parse_key_from_reader_maps_char_e() {
+        let mut input = std::io::Cursor::new(b"e");
+        assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::Char('e')));
+    }
+
+    #[test]
+    fn parse_key_from_reader_maps_char_n() {
+        let mut input = std::io::Cursor::new(b"n");
+        assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::Char('n')));
+    }
+
+    #[test]
+    fn parse_key_from_reader_maps_ctrl_c() {
+        let mut input = std::io::Cursor::new(b"\x03");
+        assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::CtrlC));
+    }
+
+    #[test]
+    fn parse_key_from_reader_maps_backspace() {
+        let mut input = std::io::Cursor::new(b"\x7f"); // DEL = backspace
+        assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::Backspace));
+    }
+
+    #[test]
+    fn parse_key_from_reader_maps_arrow_up_escape_sequence() {
+        let mut input = std::io::Cursor::new(b"\x1b[A");
+        assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::ArrowUp));
+    }
+
+    #[test]
+    fn parse_key_from_reader_maps_arrow_down_escape_sequence() {
+        let mut input = std::io::Cursor::new(b"\x1b[B");
+        assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::Other));
+    }
+
+    #[test]
+    fn parse_key_from_reader_maps_arrow_right_escape_sequence() {
+        let mut input = std::io::Cursor::new(b"\x1b[C");
+        assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::Right));
+    }
+
+    #[test]
+    fn parse_key_from_reader_maps_arrow_left_escape_sequence() {
+        let mut input = std::io::Cursor::new(b"\x1b[D");
+        assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::Left));
+    }
+
+    #[test]
+    fn parse_key_from_reader_maps_delete_key() {
+        let mut input = std::io::Cursor::new(b"\x1b[3~");
+        assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::Delete));
+    }
+
+    #[test]
+    fn parse_key_from_reader_maps_eof() {
+        let mut input = std::io::Cursor::new(b"");
+        assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::Eof));
+    }
+
+    #[test]
+    fn confirm_from_reader_with_explain_on_enter_returns_yes() {
+        let mut keys = vec![KeyEvent::Enter].into_iter();
+        let result = confirm_from_reader(
+            || keys.next().unwrap(),
+            ConfirmPromptMode::WithExplain,
+            1,
+            0,
+        );
+        assert!(matches!(result, ConfirmResult::Yes));
+    }
+
+    #[test]
+    fn confirm_from_reader_with_explain_on_y_returns_yes() {
+        let mut keys = vec![KeyEvent::Char('y')].into_iter();
+        let result = confirm_from_reader(
+            || keys.next().unwrap(),
+            ConfirmPromptMode::WithExplain,
+            1,
+            0,
+        );
+        assert!(matches!(result, ConfirmResult::Yes));
+    }
+
+    #[test]
+    fn confirm_from_reader_with_explain_on_e_returns_explain() {
+        let mut keys = vec![KeyEvent::Char('e')].into_iter();
+        let result = confirm_from_reader(
+            || keys.next().unwrap(),
+            ConfirmPromptMode::WithExplain,
+            1,
+            0,
+        );
+        assert!(matches!(result, ConfirmResult::Explain));
+    }
+
+    #[test]
+    fn confirm_from_reader_with_explain_on_n_returns_cancel() {
+        let mut keys = vec![KeyEvent::Char('n')].into_iter();
+        let result = confirm_from_reader(
+            || keys.next().unwrap(),
+            ConfirmPromptMode::WithExplain,
+            1,
+            0,
+        );
+        assert!(matches!(result, ConfirmResult::Cancel));
+    }
+
+    #[test]
+    fn confirm_from_reader_on_arrow_up_returns_edit() {
+        let mut keys = vec![KeyEvent::ArrowUp].into_iter();
+        let result = confirm_from_reader(
+            || keys.next().unwrap(),
+            ConfirmPromptMode::Simple,
+            1,
+            1,
+        );
+        assert!(matches!(result, ConfirmResult::Edit));
+    }
+
+    #[test]
+    fn confirm_from_reader_on_eof_returns_no() {
+        let mut keys = vec![KeyEvent::Eof].into_iter();
+        let result = confirm_from_reader(
+            || keys.next().unwrap(),
+            ConfirmPromptMode::Simple,
+            1,
+            0,
+        );
+        assert!(matches!(result, ConfirmResult::No));
+    }
+
+    #[test]
+    fn confirm_from_reader_ignores_e_in_simple_mode() {
+        let mut keys = vec![KeyEvent::Char('e'), KeyEvent::Enter].into_iter();
+        let result = confirm_from_reader(
+            || keys.next().unwrap(),
+            ConfirmPromptMode::Simple,
+            1,
+            0,
+        );
+        assert!(matches!(result, ConfirmResult::Yes));
     }
 }
