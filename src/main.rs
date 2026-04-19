@@ -309,6 +309,20 @@ fn reload_runtime_state(
     }
 }
 
+fn reload_agent_state(config: &mut Config, tool_registry: &mut Option<ToolRegistry>) {
+    match load_config() {
+        Ok(new_config) => {
+            *config = new_config;
+            *tool_registry = if config.agent.is_enabled() {
+                Some(build_tool_registry(config.agent))
+            } else {
+                None
+            };
+        }
+        Err(e) => print_error(&format!("failed to reload config: {e}")),
+    }
+}
+
 fn handle_api_slash_command(
     config: &mut Config,
     provider: &mut Box<dyn providers::AIProvider>,
@@ -324,13 +338,12 @@ fn handle_api_slash_command(
 fn handle_agent_slash_command(
     mode: Option<AgentMode>,
     config: &mut Config,
-    provider: &mut Box<dyn providers::AIProvider>,
     tool_registry: &mut Option<ToolRegistry>,
 ) {
     if let Err(e) = handle_agent_subcommand(mode) {
         print_error(&e.to_string());
     } else {
-        reload_runtime_state(config, provider, tool_registry);
+        reload_agent_state(config, tool_registry);
     }
 }
 
@@ -561,12 +574,7 @@ async fn inner_main() -> Result<(), LarpshellError> {
                         handle_api_slash_command(&mut config, &mut provider, &mut tool_registry);
                     }
                     slash_commands::SlashCmd::Agent { mode } => {
-                        handle_agent_slash_command(
-                            mode,
-                            &mut config,
-                            &mut provider,
-                            &mut tool_registry,
-                        );
+                        handle_agent_slash_command(mode, &mut config, &mut tool_registry);
                     }
                     slash_commands::SlashCmd::Uninstall => {
                         if let Err(e) = uninstall_larpshell() {
