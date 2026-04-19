@@ -52,13 +52,6 @@ enum CommandMode {
     Single,
 }
 
-/// Switch to enable or disable features.
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum Switch {
-    Enable,
-    Disable,
-}
-
 fn build_tool_registry(agent_mode: AgentMode) -> ToolRegistry {
     let mut registry = ToolRegistry::with_builtins(agent_mode);
     for mcp_config in agent::mcp::load_mcp_configs() {
@@ -152,9 +145,9 @@ fn execute_or_print(command: &str) -> Result<(), LarpshellError> {
 
 // ── subcommand handlers ─────────────────────────────────────────────────────
 
-fn handle_history_subcommand(switch: Switch) -> Result<(), LarpshellError> {
-    config::set_history_enabled(matches!(switch, Switch::Enable))?;
-    if matches!(switch, Switch::Enable) {
+fn handle_history_subcommand(enable: bool) -> Result<(), LarpshellError> {
+    config::set_history_enabled(enable)?;
+    if enable {
         cli::print_ok("history enabled — prompts will be saved across sessions.");
     } else {
         cli::print_ok("history disabled.");
@@ -375,11 +368,7 @@ async fn inner_main() -> Result<(), LarpshellError> {
                 return Ok(());
             }
             cli::Subcommands::History { enable } => {
-                handle_history_subcommand(if *enable {
-                    Switch::Enable
-                } else {
-                    Switch::Disable
-                })?;
+                handle_history_subcommand(*enable)?;
                 return Ok(());
             }
             cli::Subcommands::Agent { mode } => {
@@ -464,11 +453,7 @@ async fn inner_main() -> Result<(), LarpshellError> {
                         uninstall_larpshell()?;
                     }
                     slash_commands::SlashCmd::History { enable } => {
-                        handle_history_subcommand(if enable {
-                            Switch::Enable
-                        } else {
-                            Switch::Disable
-                        })?;
+                        handle_history_subcommand(enable)?;
                     }
                     slash_commands::SlashCmd::Prompt { kind, action } => {
                         handle_prompt_subcommand(&kind, &action)?;
@@ -564,11 +549,7 @@ async fn inner_main() -> Result<(), LarpshellError> {
                         }
                     }
                     slash_commands::SlashCmd::History { enable } => {
-                        if let Err(e) = handle_history_subcommand(if enable {
-                            Switch::Enable
-                        } else {
-                            Switch::Disable
-                        }) {
+                        if let Err(e) = handle_history_subcommand(enable) {
                             print_error(&e.to_string());
                         }
                     }
@@ -686,10 +667,7 @@ async fn process_command(
     let prompt = create_system_prompt(user_input, effective_sys.as_deref());
 
     let response = match &mode {
-        CommandMode::Interactive => match generate_with_cancellation(provider, &prompt).await {
-            Ok(res) => res,
-            Err(e) => return Err(e),
-        },
+        CommandMode::Interactive => generate_with_cancellation(provider, &prompt).await?,
         CommandMode::Single => {
             // In single mode, Ctrl+C exits immediately
             #[cfg(unix)]
@@ -734,63 +712,13 @@ async fn process_command(
         }
     };
 
-    let mut command = clean_response(&response);
+    let command = clean_response(&response);
 
     if command.trim().is_empty() {
         return Err(LarpshellError::EmptyResponse(provider.name()));
     }
 
-    let cancelled = 'outer: loop {
-        let cmd_lines = display_command(&command);
-        match confirm_with_explain(cmd_lines)? {
-            ConfirmResult::Yes => {
-                execute_or_print(&command)?;
-                break 'outer false;
-            }
-            ConfirmResult::No => break 'outer false,
-            ConfirmResult::Cancel => match &mode {
-                CommandMode::Interactive => break 'outer true,
-                CommandMode::Single => {
-                    show_cursor();
-                    update::print_if_resolved();
-                    exit_with_code(EXIT_SIGINT);
-                }
-            },
-            ConfirmResult::Edit => match edit_command(&command) {
-                Some(new_cmd) => command = new_cmd,
-                None => continue 'outer,
-            },
-            ConfirmResult::Explain => {
-                let explanation = get_explanation(&command, provider).await?;
-                let expl_lines = display_explanation(&explanation);
-                match confirm_execution(cmd_lines, expl_lines)? {
-                    ConfirmResult::Yes => {
-                        execute_or_print(&command)?;
-                        break 'outer false;
-                    }
-                    ConfirmResult::No => break 'outer false,
-                    ConfirmResult::Cancel => match &mode {
-                        CommandMode::Interactive => break 'outer true,
-                        CommandMode::Single => {
-                            show_cursor();
-                            exit_with_code(EXIT_SIGINT);
-                        }
-                    },
-                    ConfirmResult::Edit => match edit_command(&command) {
-                        Some(new_cmd) => command = new_cmd,
-                        None => continue 'outer,
-                    },
-                    ConfirmResult::Explain => break 'outer false,
-                }
-            }
-        }
-    };
-
-    if cancelled {
-        Ok(Some(user_input.to_string()))
-    } else {
-        Ok(None)
-    }
+    confirm_loop(command, user_input, provider, &mode).await
 }
 
 async fn process_command_agent(
@@ -802,11 +730,22 @@ async fn process_command_agent(
 ) -> Result<Option<String>, LarpshellError> {
     let response = agent::run_agent_loop(user_input, provider, config, tool_registry).await?;
 
-    let mut command = clean_response(&response);
+    let command = clean_response(&response);
     if command.trim().is_empty() {
         return Err(LarpshellError::EmptyResponse(provider.name()));
     }
 
+    confirm_loop(command, user_input, provider, &mode).await
+}
+
+// ── confirmation loop ──────────────────────────────────────────────────────
+
+async fn confirm_loop(
+    mut command: String,
+    user_input: &str,
+    provider: &dyn providers::AIProvider,
+    mode: &CommandMode,
+) -> Result<Option<String>, LarpshellError> {
     let cancelled = 'outer: loop {
         let cmd_lines = display_command(&command);
         match confirm_with_explain(cmd_lines)? {
@@ -815,7 +754,7 @@ async fn process_command_agent(
                 break 'outer false;
             }
             ConfirmResult::No => break 'outer false,
-            ConfirmResult::Cancel => match &mode {
+            ConfirmResult::Cancel => match mode {
                 CommandMode::Interactive => break 'outer true,
                 CommandMode::Single => {
                     show_cursor();
@@ -836,7 +775,7 @@ async fn process_command_agent(
                         break 'outer false;
                     }
                     ConfirmResult::No => break 'outer false,
-                    ConfirmResult::Cancel => match &mode {
+                    ConfirmResult::Cancel => match mode {
                         CommandMode::Interactive => break 'outer true,
                         CommandMode::Single => {
                             show_cursor();

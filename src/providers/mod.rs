@@ -194,7 +194,7 @@ mod tests {
 
         assert_eq!(message.role, Role::Assistant);
         assert_eq!(message.content, None);
-        assert_eq!(message.tool_calls, Some(tool_calls.clone()));
+        assert_eq!(message.tool_calls, Some(tool_calls));
         assert_eq!(message.tool_call_id, None);
         assert_eq!(
             serde_json::to_value(&message).unwrap(),
