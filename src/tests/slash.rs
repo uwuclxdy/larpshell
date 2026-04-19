@@ -25,3 +25,31 @@ fn unknown_slash_command_prints_error() {
         "stderr: {stderr}"
     );
 }
+
+#[test]
+fn agent_slash_command_updates_config_and_keeps_session_running() {
+    let home = temp_home("slash_agent_reload");
+    let port = mock_ollama(&[]);
+    write_ollama_config(&home, port);
+
+    let out = super::run_with_stdin_interactive(&home, &[], b"/agent safe\n/quit\n");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("agent mode set to safe"),
+        "stderr: {stderr}"
+    );
+}
+
+#[test]
+fn api_slash_command_reloads_provider_in_interactive_mode() {
+    let home = temp_home("slash_api_reload");
+    let port = mock_ollama(&[]);
+    write_ollama_config(&home, port);
+
+    let out = super::run_with_stdin_interactive(&home, &[], b"/api\ny\n/quit\n");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !stderr.contains("failed to reload config"),
+        "config reload should succeed. stderr: {stderr}"
+    );
+}

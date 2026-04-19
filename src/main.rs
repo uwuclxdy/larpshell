@@ -287,6 +287,53 @@ async fn handle_explain_subcommand(
     Ok(())
 }
 
+fn reload_runtime_state(
+    config: &mut Config,
+    provider: &mut Box<dyn providers::AIProvider>,
+    tool_registry: &mut Option<ToolRegistry>,
+) {
+    match load_config() {
+        Ok(new_config) => match create_provider(&new_config) {
+            Ok(new_provider) => {
+                *config = new_config;
+                *provider = new_provider;
+                *tool_registry = if config.agent.is_enabled() {
+                    Some(build_tool_registry(config.agent))
+                } else {
+                    None
+                };
+            }
+            Err(e) => print_error(&e.to_string()),
+        },
+        Err(e) => print_error(&format!("failed to reload config: {e}")),
+    }
+}
+
+fn handle_api_slash_command(
+    config: &mut Config,
+    provider: &mut Box<dyn providers::AIProvider>,
+    tool_registry: &mut Option<ToolRegistry>,
+) {
+    if let Err(e) = interactive_setup() {
+        print_error(&e.to_string());
+    } else {
+        reload_runtime_state(config, provider, tool_registry);
+    }
+}
+
+fn handle_agent_slash_command(
+    mode: Option<AgentMode>,
+    config: &mut Config,
+    provider: &mut Box<dyn providers::AIProvider>,
+    tool_registry: &mut Option<ToolRegistry>,
+) {
+    if let Err(e) = handle_agent_subcommand(mode) {
+        print_error(&e.to_string());
+    } else {
+        reload_runtime_state(config, provider, tool_registry);
+    }
+}
+
 // ── main ────────────────────────────────────────────────────────────────────
 
 fn do_nlsh_rs_migration() {
@@ -510,39 +557,17 @@ async fn inner_main() -> Result<(), LarpshellError> {
                         show_cursor();
                         break;
                     }
-                    slash_commands::SlashCmd::Api => match interactive_setup() {
-                        Err(e) => print_error(&e.to_string()),
-                        Ok(()) => match load_config() {
-                            Err(e) => print_error(&format!("failed to reload config: {e}")),
-                            Ok(new_config) => match create_provider(&new_config) {
-                                Err(e) => print_error(&e.to_string()),
-                                Ok(new_provider) => {
-                                    config = new_config;
-                                    provider = new_provider;
-                                    tool_registry = if config.agent.is_enabled() {
-                                        Some(build_tool_registry(config.agent))
-                                    } else {
-                                        None
-                                    };
-                                }
-                            },
-                        },
-                    },
-                    slash_commands::SlashCmd::Agent { mode } => match handle_agent_subcommand(mode)
-                    {
-                        Ok(()) => match load_config() {
-                            Ok(new_config) => {
-                                config = new_config;
-                                tool_registry = if config.agent.is_enabled() {
-                                    Some(build_tool_registry(config.agent))
-                                } else {
-                                    None
-                                };
-                            }
-                            Err(e) => print_error(&format!("failed to reload config: {e}")),
-                        },
-                        Err(e) => print_error(&e.to_string()),
-                    },
+                    slash_commands::SlashCmd::Api => {
+                        handle_api_slash_command(&mut config, &mut provider, &mut tool_registry);
+                    }
+                    slash_commands::SlashCmd::Agent { mode } => {
+                        handle_agent_slash_command(
+                            mode,
+                            &mut config,
+                            &mut provider,
+                            &mut tool_registry,
+                        );
+                    }
                     slash_commands::SlashCmd::Uninstall => {
                         if let Err(e) = uninstall_larpshell() {
                             print_error(&e.to_string());

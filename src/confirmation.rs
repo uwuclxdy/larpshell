@@ -491,25 +491,37 @@ mod tests {
     #[test]
     fn parse_key_from_reader_maps_char_y() {
         let mut input = std::io::Cursor::new(b"y");
-        assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::Char('y')));
+        assert!(matches!(
+            parse_key_from_reader(&mut input),
+            KeyEvent::Char('y')
+        ));
     }
 
     #[test]
     fn parse_key_from_reader_maps_char_uppercase_y() {
         let mut input = std::io::Cursor::new(b"Y");
-        assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::Char('Y')));
+        assert!(matches!(
+            parse_key_from_reader(&mut input),
+            KeyEvent::Char('Y')
+        ));
     }
 
     #[test]
     fn parse_key_from_reader_maps_char_e() {
         let mut input = std::io::Cursor::new(b"e");
-        assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::Char('e')));
+        assert!(matches!(
+            parse_key_from_reader(&mut input),
+            KeyEvent::Char('e')
+        ));
     }
 
     #[test]
     fn parse_key_from_reader_maps_char_n() {
         let mut input = std::io::Cursor::new(b"n");
-        assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::Char('n')));
+        assert!(matches!(
+            parse_key_from_reader(&mut input),
+            KeyEvent::Char('n')
+        ));
     }
 
     #[test]
@@ -521,13 +533,19 @@ mod tests {
     #[test]
     fn parse_key_from_reader_maps_backspace() {
         let mut input = std::io::Cursor::new(b"\x7f"); // DEL = backspace
-        assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::Backspace));
+        assert!(matches!(
+            parse_key_from_reader(&mut input),
+            KeyEvent::Backspace
+        ));
     }
 
     #[test]
     fn parse_key_from_reader_maps_arrow_up_escape_sequence() {
         let mut input = std::io::Cursor::new(b"\x1b[A");
-        assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::ArrowUp));
+        assert!(matches!(
+            parse_key_from_reader(&mut input),
+            KeyEvent::ArrowUp
+        ));
     }
 
     #[test]
@@ -551,7 +569,10 @@ mod tests {
     #[test]
     fn parse_key_from_reader_maps_delete_key() {
         let mut input = std::io::Cursor::new(b"\x1b[3~");
-        assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::Delete));
+        assert!(matches!(
+            parse_key_from_reader(&mut input),
+            KeyEvent::Delete
+        ));
     }
 
     #[test]
@@ -611,36 +632,21 @@ mod tests {
     #[test]
     fn confirm_from_reader_on_arrow_up_returns_edit() {
         let mut keys = vec![KeyEvent::ArrowUp].into_iter();
-        let result = confirm_from_reader(
-            || keys.next().unwrap(),
-            ConfirmPromptMode::Simple,
-            1,
-            1,
-        );
+        let result = confirm_from_reader(|| keys.next().unwrap(), ConfirmPromptMode::Simple, 1, 1);
         assert!(matches!(result, ConfirmResult::Edit));
     }
 
     #[test]
     fn confirm_from_reader_on_eof_returns_no() {
         let mut keys = vec![KeyEvent::Eof].into_iter();
-        let result = confirm_from_reader(
-            || keys.next().unwrap(),
-            ConfirmPromptMode::Simple,
-            1,
-            0,
-        );
+        let result = confirm_from_reader(|| keys.next().unwrap(), ConfirmPromptMode::Simple, 1, 0);
         assert!(matches!(result, ConfirmResult::No));
     }
 
     #[test]
     fn confirm_from_reader_ignores_e_in_simple_mode() {
         let mut keys = vec![KeyEvent::Char('e'), KeyEvent::Enter].into_iter();
-        let result = confirm_from_reader(
-            || keys.next().unwrap(),
-            ConfirmPromptMode::Simple,
-            1,
-            0,
-        );
+        let result = confirm_from_reader(|| keys.next().unwrap(), ConfirmPromptMode::Simple, 1, 0);
         assert!(matches!(result, ConfirmResult::Yes));
     }
 }
