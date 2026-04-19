@@ -145,12 +145,7 @@ impl OpenAICompatibleProvider {
             request = request.header("Authorization", format!("Bearer {}", api_key));
         }
 
-        let response = request
-            .send()
-            .await
-            .map_err(|e| LarpshellError::from_reqwest(e, self.provider_slug))?;
-
-        let response = BaseProvider::check_response(response, self.provider_slug).await?;
+        let response = BaseProvider::send_json(request, self.provider_slug).await?;
 
         let body: ChatResponseBody = response
             .json()
@@ -231,12 +226,7 @@ impl OpenAICompatibleProvider {
             request = request.header("Authorization", format!("Bearer {}", api_key));
         }
 
-        let response = request
-            .send()
-            .await
-            .map_err(|e| LarpshellError::from_reqwest(e, self.provider_slug))?;
-
-        let response = BaseProvider::check_response(response, self.provider_slug).await?;
+        let response = BaseProvider::send_json(request, self.provider_slug).await?;
 
         let body: ChatResponseBody = response
             .json()

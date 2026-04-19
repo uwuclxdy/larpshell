@@ -37,6 +37,21 @@ impl BaseProvider {
         })
     }
 
+    /// sends an HTTP request and checks the response status.
+    ///
+    /// combines the common pattern of sending a request, handling reqwest errors,
+    /// and validating the HTTP status code.
+    pub async fn send_json(
+        request: reqwest::RequestBuilder,
+        provider: &str,
+    ) -> Result<reqwest::Response, LarpshellError> {
+        let response = request
+            .send()
+            .await
+            .map_err(|e| LarpshellError::from_reqwest(e, provider))?;
+        Self::check_response(response, provider).await
+    }
+
     /// checks an HTTP response status and returns an appropriate error for non-success codes.
     pub async fn check_response(
         response: reqwest::Response,

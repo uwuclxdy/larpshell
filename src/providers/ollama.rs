@@ -97,16 +97,9 @@ impl AIProvider for OllamaProvider {
             stream: false,
         };
 
-        let response = self
-            .base
-            .client
-            .post(&url)
-            .json(&request_body)
-            .send()
-            .await
-            .map_err(|e| LarpshellError::from_reqwest(e, "ollama"))?;
+        let request = self.base.client.post(&url).json(&request_body);
 
-        let response = BaseProvider::check_response(response, "ollama").await?;
+        let response = BaseProvider::send_json(request, "ollama").await?;
 
         let ollama_response: OllamaResponse = response
             .json()
@@ -174,16 +167,9 @@ impl AIProvider for OllamaProvider {
             tools: ollama_tools,
         };
 
-        let response = self
-            .base
-            .client
-            .post(&url)
-            .json(&request_body)
-            .send()
-            .await
-            .map_err(|e| LarpshellError::from_reqwest(e, "ollama"))?;
+        let request = self.base.client.post(&url).json(&request_body);
 
-        let response = BaseProvider::check_response(response, "ollama").await?;
+        let response = BaseProvider::send_json(request, "ollama").await?;
 
         let chat_response: OllamaChatResponse = response
             .json()
