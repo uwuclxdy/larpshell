@@ -420,9 +420,7 @@ fn run_command_tool(agent_mode: AgentMode) -> RegisteredTool {
 
 fn run_command_description(agent_mode: AgentMode) -> &'static str {
     match agent_mode {
-        AgentMode::Safe => {
-            "Run a restricted read-only command to gather context."
-        }
+        AgentMode::Safe => "Run a restricted read-only command to gather context.",
         AgentMode::On => {
             "Run a shell command to gather context or for multi-step requests such as installing or setting up programs."
         }

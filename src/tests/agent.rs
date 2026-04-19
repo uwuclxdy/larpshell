@@ -176,7 +176,7 @@ fn prompt_agent_safe_show_uses_default_on_clean_home() {
 
     let out = run_clean_home(&home, &["prompt", "agent-safe", "show"]);
     assert_success(&out);
-    assert!(stdout_text(&out).contains("{request}"));
+    assert!(!stdout_text(&out).contains("{request}"));
     assert_no_shell_bootstrap(&out);
 }
 
@@ -189,7 +189,8 @@ fn prompt_agent_safe_edit_creates_prompt_file_on_clean_home() {
     assert_success(&out);
 
     let contents = fs::read_to_string(agent_safe_prompt_path(&home)).unwrap();
-    assert!(contents.contains("{request}"));
+    assert!(!contents.contains("{request}"));
+    assert!(contents.contains("Use tools conservatively"));
 }
 
 #[test]
@@ -207,7 +208,7 @@ fn prompt_agent_show_uses_default_on_clean_home() {
     assert_prompt_show_uses_default(
         "prompt_agent_clean_home",
         &["prompt", "agent", "show"],
-        "{request}",
+        "use the run_command tool",
     );
 }
 

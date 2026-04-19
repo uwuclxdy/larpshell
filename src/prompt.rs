@@ -47,41 +47,21 @@ pub fn create_system_prompt(user_request: &str, template: Option<&str>) -> Strin
 pub const DEFAULT_EXPLAIN_PROMPT: &str = include_str!("prompts/explain.md");
 
 pub const DEFAULT_AGENT_SAFE_PROMPT: &str =
-    "You are a shell command translator with access to tools for gathering context.
-You may call tools to read files, list directories, or search for patterns
-before producing your final shell command.
+    "You have access to tools for gathering context before producing the final shell command.
+You may call tools to read files, list directories, or search for patterns.
 
 Use tools conservatively and prefer minimal-risk inspection steps.
 When you have enough context, respond with ONLY the shell command (no markdown,
-no explanations, no backticks) — the same rules as without tools.
-
-Environment context:
-- Current dir: {cwd}
-- Home dir: {home}
-- User: {user}
-- Shell: {shell}
-- OS: {os}
-
-User request: {request}";
+no explanations, no backticks) — the same rules as the system prompt below.";
 
 pub const DEFAULT_AGENT_PROMPT: &str =
-    "You are a shell command translator with access to tools for gathering context.
-You may call tools to read files, list directories, search for patterns, and run commands
-before producing your final shell command.
+    "You have access to tools for gathering context before producing the final shell command.
+You may call tools to read files, list directories, search for patterns, and run commands.
 
 When multiple tries, iterative probing, or environment inspection may be needed,
 use the run_command tool to gather context before deciding on the final shell command.
 When you have enough context, respond with ONLY the shell command (no markdown,
-no explanations, no backticks) — the same rules as without tools.
-
-Environment context:
-- Current dir: {cwd}
-- Home dir: {home}
-- User: {user}
-- Shell: {shell}
-- OS: {os}
-
-User request: {request}";
+no explanations, no backticks) — the same rules as the system prompt below.";
 
 pub fn create_explain_prompt(command: &str, template: Option<&str>) -> String {
     let tmpl = template.unwrap_or(DEFAULT_EXPLAIN_PROMPT);
@@ -94,10 +74,6 @@ pub fn validate_sys_prompt(template: &str) -> bool {
 
 pub fn validate_explain_prompt(template: &str) -> bool {
     template.contains("{command}")
-}
-
-pub fn validate_agent_prompt(template: &str) -> bool {
-    validate_sys_prompt(template)
 }
 
 pub fn clean_response(response: &str) -> String {
@@ -204,23 +180,13 @@ mod tests {
     }
 
     #[test]
-    fn validate_agent_prompt_accepts_valid_template() {
-        assert!(validate_agent_prompt("translate this: {request}"));
+    fn default_agent_prompt_does_not_have_request_placeholder() {
+        assert!(!DEFAULT_AGENT_PROMPT.contains("{request}"));
     }
 
     #[test]
-    fn validate_agent_prompt_rejects_missing_placeholder() {
-        assert!(!validate_agent_prompt("do something"));
-    }
-
-    #[test]
-    fn default_agent_prompt_has_request_placeholder() {
-        assert!(DEFAULT_AGENT_PROMPT.contains("{request}"));
-    }
-
-    #[test]
-    fn default_agent_safe_prompt_has_request_placeholder() {
-        assert!(DEFAULT_AGENT_SAFE_PROMPT.contains("{request}"));
+    fn default_agent_safe_prompt_does_not_have_request_placeholder() {
+        assert!(!DEFAULT_AGENT_SAFE_PROMPT.contains("{request}"));
     }
 
     #[test]

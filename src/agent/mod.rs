@@ -6,43 +6,42 @@ use colored::*;
 use crate::cli::print_warning;
 use crate::common::{
     CTP_BLUE, CTP_GREEN, CTP_OVERLAY0, CTP_PRIMARY, CTP_RED, CTP_YELLOW, clear_line,
-    count_visual_lines, current_directory, eprint_flush, hide_cursor, os_name, shell_name,
-    show_cursor, terminal_width, username,
+    count_visual_lines, eprint_flush, hide_cursor, show_cursor, terminal_width,
 };
-use crate::config::{AgentMode, Config, load_agent_prompt, load_agent_safe_prompt};
+use crate::config::{
+    AgentMode, Config, load_agent_prompt, load_agent_safe_prompt, load_sys_prompt,
+};
 use crate::error::LarpshellError;
-use crate::prompt::{DEFAULT_AGENT_PROMPT, DEFAULT_AGENT_SAFE_PROMPT};
+use crate::prompt::{
+    DEFAULT_AGENT_PROMPT, DEFAULT_AGENT_SAFE_PROMPT, DEFAULT_PROMPT_TEMPLATE, create_system_prompt,
+    validate_sys_prompt,
+};
 use crate::providers::{AIProvider, ChatMessage, ChatResponse, ToolCall};
 use tools::ToolRegistry;
 
 const MAX_AGENT_ITERATIONS: usize = 10;
 
-fn substitute_agent_prompt(template: &str, user_request: &str) -> String {
-    let cwd = current_directory();
-    let os = os_name();
-    let shell = shell_name();
-    let home = dirs::home_dir()
-        .map(|path| path.display().to_string())
-        .unwrap_or_else(|| "~".to_string());
-    let user = username();
-
-    template
-        .replace("{cwd}", &cwd)
-        .replace("{home}", &home)
-        .replace("{user}", &user)
-        .replace("{shell}", &shell)
-        .replace("{os}", &os)
-        .replace("{request}", user_request)
+fn compose_agent_system_prompt(
+    agent_prompt: &str,
+    user_request: &str,
+    system_template: &str,
+) -> String {
+    let system_prompt = create_system_prompt(user_request, Some(system_template));
+    format!("{agent_prompt}\n\n{system_prompt}")
 }
 
 fn build_agent_system_prompt(agent_mode: AgentMode, user_request: &str) -> String {
-    let template = match agent_mode {
+    let agent_prompt = match agent_mode {
         AgentMode::On => load_agent_prompt().unwrap_or_else(|| DEFAULT_AGENT_PROMPT.to_string()),
         AgentMode::Safe | AgentMode::Off => {
             load_agent_safe_prompt().unwrap_or_else(|| DEFAULT_AGENT_SAFE_PROMPT.to_string())
         }
     };
-    substitute_agent_prompt(&template, user_request)
+    let system_template = load_sys_prompt()
+        .filter(|template| validate_sys_prompt(template))
+        .unwrap_or_else(|| DEFAULT_PROMPT_TEMPLATE.to_string());
+
+    compose_agent_system_prompt(&agent_prompt, user_request, &system_template)
 }
 
 pub enum ToolConfirmResult {
@@ -549,17 +548,31 @@ mod tests {
     }
 
     #[test]
-    fn build_agent_system_prompt_includes_request() {
-        let prompt = substitute_agent_prompt(DEFAULT_AGENT_SAFE_PROMPT, "list the rust files");
+    fn build_agent_system_prompt_prepends_agent_prompt_to_system_prompt() {
+        let prompt = compose_agent_system_prompt(
+            DEFAULT_AGENT_SAFE_PROMPT,
+            "list the rust files",
+            DEFAULT_PROMPT_TEMPLATE,
+        );
 
         assert!(prompt.contains("User request: list the rust files"));
         assert!(prompt.contains("Current dir:"));
         assert!(prompt.contains("Shell:"));
+        assert!(prompt.contains("Use tools conservatively"));
+        assert!(prompt.contains("You are a shell command translator."));
+
+        let agent_idx = prompt.find("Use tools conservatively").unwrap();
+        let system_idx = prompt.find("You are a shell command translator.").unwrap();
+        assert!(agent_idx < system_idx);
     }
 
     #[test]
     fn build_agent_system_prompt_for_on_mentions_run_command() {
-        let prompt = substitute_agent_prompt(DEFAULT_AGENT_PROMPT, "inspect the environment");
+        let prompt = compose_agent_system_prompt(
+            DEFAULT_AGENT_PROMPT,
+            "inspect the environment",
+            DEFAULT_PROMPT_TEMPLATE,
+        );
 
         assert!(prompt.contains("use the run_command tool"));
         assert!(prompt.contains("iterative probing"));
@@ -567,7 +580,11 @@ mod tests {
 
     #[test]
     fn build_agent_system_prompt_for_safe_is_conservative() {
-        let prompt = substitute_agent_prompt(DEFAULT_AGENT_SAFE_PROMPT, "inspect the environment");
+        let prompt = compose_agent_system_prompt(
+            DEFAULT_AGENT_SAFE_PROMPT,
+            "inspect the environment",
+            DEFAULT_PROMPT_TEMPLATE,
+        );
 
         assert!(prompt.contains("Use tools conservatively"));
         assert!(!prompt.contains("use the run_command tool"));

@@ -40,7 +40,7 @@ use interactive::{user_input, user_input_prefilled};
 use prompt::{
     DEFAULT_AGENT_PROMPT, DEFAULT_AGENT_SAFE_PROMPT, DEFAULT_EXPLAIN_PROMPT,
     DEFAULT_PROMPT_TEMPLATE, clean_response, create_explain_prompt, create_prompts,
-    create_system_prompt, validate_agent_prompt, validate_explain_prompt, validate_sys_prompt,
+    create_system_prompt, validate_explain_prompt, validate_sys_prompt,
 };
 use providers::create_provider;
 use shell_integration::{auto_setup_shell_function, migrate_nlsh_rs_shell};
@@ -225,7 +225,7 @@ fn prompt_spec(kind: &PromptKind) -> PromptSpec {
             load: config::load_agent_prompt,
             save: config::save_agent_prompt,
             default: DEFAULT_AGENT_PROMPT,
-            validate: validate_agent_prompt,
+            validate: validate_sys_prompt,
             invalid_message: "agent prompt must contain the {request} placeholder.",
             warn_only: true,
         },
@@ -234,7 +234,7 @@ fn prompt_spec(kind: &PromptKind) -> PromptSpec {
             load: config::load_agent_safe_prompt,
             save: config::save_agent_safe_prompt,
             default: DEFAULT_AGENT_SAFE_PROMPT,
-            validate: validate_agent_prompt,
+            validate: validate_sys_prompt,
             invalid_message: "agent-safe prompt must contain the {request} placeholder.",
             warn_only: true,
         },
