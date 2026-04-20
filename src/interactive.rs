@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::io;
 use std::io::Write;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use colored::*;
 use rustyline::completion::{Completer, Pair};
@@ -20,8 +20,8 @@ use crate::common::{CTP_BLUE, CTP_OVERLAY0, CTP_PRIMARY, current_directory_displ
 use crate::config;
 use crate::slash_commands;
 
-// Number of preview lines currently drawn below the prompt.
 static PREVIEW_LINE_COUNT: AtomicUsize = AtomicUsize::new(0);
+static SHELL_MODE: AtomicBool = AtomicBool::new(false);
 
 // Longest command name length (used for column alignment).
 // "uninstall" = 9 chars. Column = 2 (indent) + 1 (/) + 9 (name) + 4 (gap) = 16
@@ -196,19 +196,46 @@ impl Hinter for NlshHelper {
 impl Validator for NlshHelper {}
 
 impl Highlighter for NlshHelper {
+    fn highlight_prompt<'b, 's: 'b, 'p: 'b>(
+        &'s self,
+        prompt: &'p str,
+        _default: bool,
+    ) -> Cow<'b, str> {
+        if !SHELL_MODE.load(Ordering::Relaxed) {
+            return Cow::Borrowed(prompt);
+        }
+        let cwd = current_directory_display();
+        Cow::Owned(format!(
+            "{}:{}{} ",
+            "larpshell".custom_color(CTP_BLUE).bold(),
+            cwd.custom_color(CTP_OVERLAY0),
+            "$".custom_color(CTP_PRIMARY).bold()
+        ))
+    }
+
     fn highlight<'l>(&self, line: &'l str, _pos: usize) -> Cow<'l, str> {
+        if SHELL_MODE.load(Ordering::Relaxed) {
+            clear_slash_preview();
+            // "! " stays in buffer for history/execution; dim it so it reads as a
+            // prompt-side indicator, then color the command in orange.
+            if let Some(cmd) = line.strip_prefix("! ") {
+                return Cow::Owned(format!("{}{}", "! ".custom_color(CTP_OVERLAY0), cmd));
+            }
+            return Cow::Owned(line.custom_color(CTP_PRIMARY).to_string());
+        }
         if !line.starts_with('/') {
-            // Clear any stale preview when user switches away from /commands.
             clear_slash_preview();
             return Cow::Borrowed(line);
         }
-        // Draw preview after rustyline redraws the prompt line.
         draw_slash_preview(line);
         Cow::Owned(line.custom_color(CTP_BLUE).to_string())
     }
 
     fn highlight_char(&self, line: &str, _pos: usize, _kind: CmdKind) -> bool {
-        line.starts_with('/')
+        // Derive shell mode from buffer content so history restore works automatically.
+        let shell = line.starts_with("! ");
+        SHELL_MODE.store(shell, Ordering::Relaxed);
+        shell || line.starts_with('/')
     }
 }
 
@@ -224,6 +251,12 @@ impl ConditionalEventHandler for SlashPreviewHandler {
     ) -> Option<Cmd> {
         let line = ctx.line();
         let pos = ctx.pos();
+
+        // Suppress slash preview in shell mode.
+        if line.starts_with("! ") {
+            clear_slash_preview();
+            return None;
+        }
 
         // Compute what the line will look like after this keypress,
         // so we can clear preview early when switching away from /commands.
@@ -267,6 +300,7 @@ fn with_editor<F>(readline_fn: F) -> Result<Option<String>, io::Error>
 where
     F: FnOnce(&mut NlshEditor, &str) -> rustyline::Result<String>,
 {
+    SHELL_MODE.store(false, Ordering::Relaxed);
     let mut editor_lock = EDITOR.lock().unwrap_or_else(|e| e.into_inner());
     let editor = editor_lock.get_or_insert_with(|| {
         let mut ed = Editor::<NlshHelper, DefaultHistory>::with_config(

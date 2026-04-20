@@ -610,6 +610,15 @@ async fn inner_main() -> Result<(), LarpshellError> {
                 continue;
             }
 
+            if let Some(cmd) = user_input.strip_prefix("! ") {
+                execute_shell_command(cmd)?;
+                continue;
+            }
+            if user_input == "!" {
+                print_error("expected command after '!'");
+                continue;
+            }
+
             let result = if config.agent.is_enabled() {
                 let registry =
                     tool_registry.get_or_insert_with(|| build_tool_registry(config.agent));
