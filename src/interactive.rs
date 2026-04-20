@@ -228,7 +228,11 @@ impl Highlighter for NlshHelper {
             return Cow::Borrowed(line);
         }
         draw_slash_preview(line);
-        Cow::Owned(line.custom_color(CTP_BLUE).to_string())
+        if let Some((cmd, args)) = line.split_once(' ') {
+            Cow::Owned(format!("{} {}", cmd.custom_color(CTP_BLUE), args))
+        } else {
+            Cow::Owned(line.custom_color(CTP_BLUE).to_string())
+        }
     }
 
     fn highlight_char(&self, line: &str, _pos: usize, _kind: CmdKind) -> bool {
