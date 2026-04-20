@@ -46,22 +46,22 @@ pub fn create_system_prompt(user_request: &str, template: Option<&str>) -> Strin
 
 pub const DEFAULT_EXPLAIN_PROMPT: &str = include_str!("prompts/explain.md");
 
-pub const DEFAULT_AGENT_SAFE_PROMPT: &str =
-    "You have access to tools for gathering context before producing the final shell command.
+pub const DEFAULT_AGENT_SAFE_PROMPT: &str = "You are a shell command translator.
+You have access to tools for gathering context before producing the final shell command.
 You may call tools to read files, list directories, or search for patterns.
 
 Use tools conservatively and prefer minimal-risk inspection steps.
 When you have enough context, respond with ONLY the shell command (no markdown,
-no explanations, no backticks) — the same rules as the system prompt below.";
+no explanations, no backticks).";
 
 pub const DEFAULT_AGENT_PROMPT: &str =
-    "You have access to tools for gathering context before producing the final shell command.
+    "You are a shell command translator.
+You have access to tools for interacting with user's machine before producing the final shell command.
 You may call tools to read files, list directories, search for patterns, and run commands.
 
-When multiple tries, iterative probing, or environment inspection may be needed,
-use the run_command tool to gather context before deciding on the final shell command.
-When you have enough context, respond with ONLY the shell command (no markdown,
-no explanations, no backticks) — the same rules as the system prompt below.";
+When multiple tries, setting up programs, iterative probing, environment inspection or output from commands may be needed,
+use the run_command tool before deciding on the final shell command.
+When you have enough context, respond with ONLY the shell command.";
 
 pub fn create_explain_prompt(command: &str, template: Option<&str>) -> String {
     let tmpl = template.unwrap_or(DEFAULT_EXPLAIN_PROMPT);
