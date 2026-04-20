@@ -523,7 +523,7 @@ async fn inner_main() -> Result<(), LarpshellError> {
                     }
                     slash_commands::SlashCmd::Help => {
                         for cmd in slash_commands::COMMANDS {
-                            cli::print_ok(&format!("/{:<12} {}", cmd.name, cmd.description));
+                            println!("/{:<12} {}", cmd.name, cmd.description);
                         }
                     }
                     slash_commands::SlashCmd::Unknown(s) => {
@@ -600,7 +600,7 @@ async fn inner_main() -> Result<(), LarpshellError> {
                     }
                     slash_commands::SlashCmd::Help => {
                         for cmd in slash_commands::COMMANDS {
-                            print_warning(&format!("/{:<12} {}", cmd.name, cmd.description));
+                            println!("/{:<12} {}", cmd.name, cmd.description);
                         }
                     }
                     slash_commands::SlashCmd::Unknown(s) => {

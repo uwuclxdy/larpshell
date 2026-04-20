@@ -57,8 +57,8 @@ pub fn clear_slash_preview() {
         seq.push_str("\n\x1b[K");
     }
     seq.push_str(&format!("\x1b[{}A\r", n));
-    eprint!("{seq}");
-    let _ = io::stderr().flush();
+    print!("{seq}");
+    let _ = io::stdout().flush();
 }
 
 /// Draw a filtered command or argument preview below the current prompt line.
@@ -94,8 +94,8 @@ pub fn draw_slash_preview(line: &str) {
     seq.push_str(&format!("\x1b[{}A\r", max_lines));
 
     PREVIEW_LINE_COUNT.store(new_count, Ordering::Relaxed);
-    eprint!("{seq}");
-    let _ = io::stderr().flush();
+    print!("{seq}");
+    let _ = io::stdout().flush();
 }
 
 fn draw_arg_preview(line: &str) {
@@ -129,8 +129,8 @@ fn draw_arg_preview(line: &str) {
     seq.push_str(&format!("\x1b[{}A\r", max_lines));
 
     PREVIEW_LINE_COUNT.store(new_count, Ordering::Relaxed);
-    eprint!("{seq}");
-    let _ = io::stderr().flush();
+    print!("{seq}");
+    let _ = io::stdout().flush();
 }
 
 /// Print blank lines below the current cursor to guarantee preview space.
@@ -141,8 +141,8 @@ pub fn reserve_preview_space() {
         seq.push('\n');
     }
     seq.push_str(&format!("\x1b[{}A", n));
-    eprint!("{seq}");
-    let _ = io::stderr().flush();
+    print!("{seq}");
+    let _ = io::stdout().flush();
 }
 
 pub struct NlshHelper;
