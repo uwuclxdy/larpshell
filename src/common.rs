@@ -58,6 +58,17 @@ pub fn current_directory() -> String {
         .unwrap_or_else(|_| "/".to_string())
 }
 
+pub fn current_directory_display() -> String {
+    let cwd = current_directory();
+    if let Some(home) = dirs::home_dir() {
+        let home_str = home.display().to_string();
+        if let Some(rel) = cwd.strip_prefix(&home_str) {
+            return format!("~{rel}");
+        }
+    }
+    cwd
+}
+
 pub fn os_name() -> String {
     if cfg!(target_os = "linux") {
         linux_info()

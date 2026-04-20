@@ -16,7 +16,7 @@ use rustyline::{
     EventHandler, Helper, KeyCode, KeyEvent, Modifiers, RepeatCount,
 };
 
-use crate::common::{CTP_BLUE, CTP_OVERLAY0, CTP_PRIMARY, current_directory, show_cursor};
+use crate::common::{CTP_BLUE, CTP_OVERLAY0, CTP_PRIMARY, current_directory_display, show_cursor};
 use crate::config;
 use crate::slash_commands;
 
@@ -287,12 +287,12 @@ where
         }
         ed
     });
-    let cwd = current_directory();
+    let cwd = current_directory_display();
     let prompt = format!(
         "{}:{}{} ",
         "larpshell".custom_color(CTP_BLUE).bold(),
-        cwd.custom_color(CTP_OVERLAY0).bold(),
-        ">".bold()
+        cwd.custom_color(CTP_OVERLAY0),
+        "❯".custom_color(CTP_BLUE)
     );
     match readline_fn(editor, &prompt) {
         Ok(line) => {
