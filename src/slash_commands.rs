@@ -173,7 +173,7 @@ pub enum SlashCmd {
     Api,
     Uninstall,
     History {
-        enable: bool,
+        enable: Option<bool>,
     },
     Prompt {
         kind: PromptKind,
@@ -201,12 +201,12 @@ fn parse_agent_mode_strict(arg: Option<&str>) -> Result<Option<AgentMode>, (&'st
     }
 }
 
-fn parse_history_toggle_strict(arg: Option<&str>) -> Result<bool, (&'static str, &'static str)> {
+fn parse_history_toggle_strict(arg: Option<&str>) -> Result<Option<bool>, (&'static str, &'static str)> {
     match arg {
-        Some("on") => Ok(true),
-        Some("off") => Ok(false),
+        None => Ok(None),
+        Some("on") => Ok(Some(true)),
+        Some("off") => Ok(Some(false)),
         Some(_) => Err(("history", "on or off")),
-        None => Ok(false),
     }
 }
 

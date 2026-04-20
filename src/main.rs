@@ -145,12 +145,21 @@ fn execute_or_print(command: &str) -> Result<(), LarpshellError> {
 
 // ── subcommand handlers ─────────────────────────────────────────────────────
 
-fn handle_history_subcommand(enable: bool) -> Result<(), LarpshellError> {
-    config::set_history_enabled(enable)?;
-    if enable {
-        cli::print_ok("history enabled — prompts will be saved across sessions.");
-    } else {
-        cli::print_ok("history disabled.");
+fn handle_history_subcommand(enable: Option<bool>) -> Result<(), LarpshellError> {
+    match enable {
+        Some(enable) => {
+            config::set_history_enabled(enable)?;
+            if enable {
+                cli::print_ok("command history enabled.");
+            } else {
+                cli::print_ok("command history disabled.");
+            }
+        }
+        None => {
+            let enabled = config::history_enabled();
+            let status = if enabled { "enabled" } else { "disabled" };
+            println!("command history is {status}.");
+        }
     }
     Ok(())
 }
@@ -171,7 +180,7 @@ fn handle_agent_subcommand(mode: Option<AgentMode>) -> Result<(), LarpshellError
                 }
                 Err(error) => return Err(error),
             };
-            cli::print_ok(agent_mode_status_message(mode));
+            println!("{}", agent_mode_status_message(mode));
         }
     }
     Ok(())

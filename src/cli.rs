@@ -46,7 +46,7 @@ pub enum Subcommands {
     Api,
     Uninstall,
     History {
-        enable: bool,
+        enable: Option<bool>,
     },
     Prompt {
         kind: PromptKind,
@@ -95,7 +95,7 @@ pub fn parse_cli_args() -> Result<CliArgs, LarpshellError> {
         Uninstall,
         History {
             #[arg(value_enum)]
-            toggle: ClapHistoryToggle,
+            toggle: Option<ClapHistoryToggle>,
         },
         Prompt {
             #[arg(value_enum, default_value_t = ClapPromptKind::System)]
@@ -145,7 +145,7 @@ pub fn parse_cli_args() -> Result<CliArgs, LarpshellError> {
         Some(Commands::Api) => Some(Subcommands::Api),
         Some(Commands::Uninstall) => Some(Subcommands::Uninstall),
         Some(Commands::History { toggle }) => Some(Subcommands::History {
-            enable: matches!(toggle, ClapHistoryToggle::On),
+            enable: toggle.map(|t| matches!(t, ClapHistoryToggle::On)),
         }),
         Some(Commands::Prompt { kind, action }) => Some(Subcommands::Prompt {
             kind: match kind {
