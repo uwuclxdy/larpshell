@@ -529,6 +529,9 @@ async fn inner_main() -> Result<(), LarpshellError> {
                     slash_commands::SlashCmd::Unknown(s) => {
                         print_error(&format!("unknown command '{s}'"));
                     }
+                    slash_commands::SlashCmd::InvalidArgs { command, expected } => {
+                        print_error(&format!("invalid argument for /{command}: expected {expected}"));
+                    }
                 }
             } else {
                 process_command(&user_input, provider.as_ref(), &config, CommandMode::Single)
@@ -605,6 +608,9 @@ async fn inner_main() -> Result<(), LarpshellError> {
                     }
                     slash_commands::SlashCmd::Unknown(s) => {
                         print_error(&format!("unknown command '{s}'"));
+                    }
+                    slash_commands::SlashCmd::InvalidArgs { command, expected } => {
+                        print_error(&format!("invalid argument for /{command}: expected {expected}"));
                     }
                 }
                 continue;

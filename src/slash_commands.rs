@@ -185,14 +185,28 @@ pub enum SlashCmd {
     Help,
     Quit,
     Unknown(String),
+    InvalidArgs {
+        command: &'static str,
+        expected: &'static str,
+    },
 }
 
-fn parse_agent_mode(arg: Option<&str>) -> Option<AgentMode> {
+fn parse_agent_mode_strict(arg: Option<&str>) -> Result<Option<AgentMode>, (&'static str, &'static str)> {
     match arg {
-        Some("off") => Some(AgentMode::Off),
-        Some("safe") => Some(AgentMode::Safe),
-        Some("on") => Some(AgentMode::On),
-        _ => None,
+        None => Ok(None),
+        Some("off") => Ok(Some(AgentMode::Off)),
+        Some("safe") => Ok(Some(AgentMode::Safe)),
+        Some("on") => Ok(Some(AgentMode::On)),
+        Some(_) => Err(("agent", "off, safe, or on")),
+    }
+}
+
+fn parse_history_toggle_strict(arg: Option<&str>) -> Result<bool, (&'static str, &'static str)> {
+    match arg {
+        Some("on") => Ok(true),
+        Some("off") => Ok(false),
+        Some(_) => Err(("history", "on or off")),
+        None => Ok(false),
     }
 }
 
@@ -215,15 +229,23 @@ fn parse_prompt_action(arg: Option<&str>) -> PromptAction {
 pub fn parse(input: &str) -> SlashCmd {
     let mut parts = input.split_whitespace();
     match parts.next() {
-        Some("/agent") => SlashCmd::Agent {
-            mode: parse_agent_mode(parts.next()),
+        Some("/agent") => match parse_agent_mode_strict(parts.next()) {
+            Ok(mode) => SlashCmd::Agent { mode },
+            Err((cmd, expected)) => SlashCmd::InvalidArgs {
+                command: cmd,
+                expected,
+            },
         },
         Some("/api") => SlashCmd::Api,
         Some("/uninstall") => SlashCmd::Uninstall,
         Some("/help") => SlashCmd::Help,
         Some("/quit") => SlashCmd::Quit,
-        Some("/history") => SlashCmd::History {
-            enable: matches!(parts.next(), Some("on")),
+        Some("/history") => match parse_history_toggle_strict(parts.next()) {
+            Ok(enable) => SlashCmd::History { enable },
+            Err((cmd, expected)) => SlashCmd::InvalidArgs {
+                command: cmd,
+                expected,
+            },
         },
         Some("/explain") => SlashCmd::Explain {
             args: parts.map(|s| s.to_string()).collect(),
