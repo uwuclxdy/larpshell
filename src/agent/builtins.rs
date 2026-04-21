@@ -115,9 +115,10 @@ fn read_file_tool() -> RegisteredTool {
 }
 
 fn execute_read_file(file_path: &str) -> Result<String, String> {
-    let path = Path::new(file_path);
+    let expanded = expand_tilde(file_path);
+    let path = Path::new(&expanded);
     if !path.exists() {
-        return Err(format!("file not found: {file_path}"));
+        return Err(format!("file not found: {expanded}"));
     }
 
     let metadata = fs::metadata(path).map_err(|error| format!("cannot read file: {error}"))?;
@@ -161,9 +162,10 @@ fn list_files_tool() -> RegisteredTool {
 }
 
 fn execute_list_files(directory_path: &str) -> Result<String, String> {
-    let path = Path::new(directory_path);
+    let expanded = expand_tilde(directory_path);
+    let path = Path::new(&expanded);
     if !path.is_dir() {
-        return Err(format!("not a directory: {directory_path}"));
+        return Err(format!("not a directory: {expanded}"));
     }
 
     let mut entries = Vec::new();
@@ -223,9 +225,10 @@ fn search_files_tool() -> RegisteredTool {
 }
 
 fn execute_search_files(pattern: &str, directory_path: &str) -> Result<String, String> {
-    let path = Path::new(directory_path);
+    let expanded = expand_tilde(directory_path);
+    let path = Path::new(&expanded);
     if !path.is_dir() {
-        return Err(format!("not a directory: {directory_path}"));
+        return Err(format!("not a directory: {expanded}"));
     }
 
     let mut matches = Vec::new();
@@ -469,6 +472,17 @@ fn execute_run_command(
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+fn expand_tilde(path: &str) -> String {
+    if path.starts_with('~') {
+        if let Some(home) = dirs::home_dir() {
+            let remaining = path.strip_prefix('~').unwrap_or("");
+            let remaining = remaining.strip_prefix('/').unwrap_or(remaining);
+            return home.join(remaining).to_string_lossy().to_string();
+        }
+    }
+    path.to_string()
 }
 
 #[cfg(test)]
