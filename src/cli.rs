@@ -82,8 +82,9 @@ pub fn parse_cli_args() -> Result<CliArgs, LarpshellError> {
     #[command(name = "larpshell")]
     #[command(version)]
     #[command(disable_help_subcommand = true)]
+    #[command(override_usage = "larpshell [REQUEST]\n       larpshell <COMMAND>")]
     struct Cli {
-        #[arg(value_name = "COMMAND")]
+        #[arg(value_name = "REQUEST", help = "Natural language request to convert to a shell command")]
         command: Vec<String>,
 
         #[command(subcommand)]
@@ -92,21 +93,27 @@ pub fn parse_cli_args() -> Result<CliArgs, LarpshellError> {
 
     #[derive(Subcommand)]
     enum Commands {
+        /// Manage the API key for the active provider
         Api,
+        /// Remove larpshell and its shell integration
         Uninstall,
+        /// Enable or disable command history logging
         History {
             #[arg(value_enum)]
             toggle: Option<ClapHistoryToggle>,
         },
+        /// View or edit system prompts
         Prompt {
             #[arg(value_enum, default_value_t = ClapPromptKind::System)]
             kind: ClapPromptKind,
             #[arg(value_enum, default_value_t = ClapPromptAction::Show)]
             action: ClapPromptAction,
         },
+        /// Explain what a shell command does
         Explain {
             command: Vec<String>,
         },
+        /// Enable or disable agent mode
         Agent {
             #[arg(value_enum)]
             toggle: Option<ClapAgentToggle>,
