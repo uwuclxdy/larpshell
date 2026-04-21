@@ -40,6 +40,10 @@ static PROMPT_ACTIONS: &[ArgChoice] = &[
         value: "edit",
         description: "open in editor",
     },
+    ArgChoice {
+        value: "reset",
+        description: "restore default and back up current",
+    },
 ];
 
 static HISTORY_TOGGLES: &[ArgChoice] = &[
@@ -222,6 +226,7 @@ fn parse_prompt_kind(arg: Option<&str>) -> PromptKind {
 fn parse_prompt_action(arg: Option<&str>) -> PromptAction {
     match arg {
         Some("edit") => PromptAction::Edit,
+        Some("reset") => PromptAction::Reset,
         _ => PromptAction::Show,
     }
 }

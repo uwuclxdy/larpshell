@@ -72,6 +72,7 @@ pub enum PromptKind {
 pub enum PromptAction {
     Show,
     Edit,
+    Reset,
 }
 
 pub fn parse_cli_args() -> Result<CliArgs, LarpshellError> {
@@ -130,6 +131,7 @@ pub fn parse_cli_args() -> Result<CliArgs, LarpshellError> {
     enum ClapPromptAction {
         Show,
         Edit,
+        Reset,
     }
 
     #[derive(clap::ValueEnum, Clone)]
@@ -157,6 +159,7 @@ pub fn parse_cli_args() -> Result<CliArgs, LarpshellError> {
             action: match action {
                 ClapPromptAction::Show => PromptAction::Show,
                 ClapPromptAction::Edit => PromptAction::Edit,
+                ClapPromptAction::Reset => PromptAction::Reset,
             },
         }),
         Some(Commands::Explain { command }) => Some(Subcommands::Explain { command }),

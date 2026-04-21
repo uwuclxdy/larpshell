@@ -266,6 +266,27 @@ fn edit_prompt(spec: &PromptSpec) -> Result<(), LarpshellError> {
     Ok(())
 }
 
+fn reset_prompt(spec: &PromptSpec) -> Result<(), LarpshellError> {
+    let path = (spec.path)()?;
+    if path.exists() {
+        let bak = path.with_extension(
+            path.extension()
+                .map(|e| format!("{}.bak", e.to_string_lossy()))
+                .unwrap_or_else(|| "bak".to_string()),
+        );
+        std::fs::rename(&path, &bak).map_err(LarpshellError::IoError)?;
+        (spec.save)(spec.default)?;
+        cli::print_ok(&format!(
+            "Reset to default (backup saved as {})",
+            bak.file_name().unwrap_or_default().to_string_lossy()
+        ));
+    } else {
+        (spec.save)(spec.default)?;
+        cli::print_ok("Reset to default.");
+    }
+    Ok(())
+}
+
 fn handle_prompt_subcommand(
     kind: &PromptKind,
     action: &PromptAction,
@@ -274,6 +295,7 @@ fn handle_prompt_subcommand(
     match action {
         PromptAction::Show => show_prompt(&spec),
         PromptAction::Edit => edit_prompt(&spec)?,
+        PromptAction::Reset => reset_prompt(&spec)?,
     }
     Ok(())
 }
