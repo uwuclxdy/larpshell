@@ -50,7 +50,7 @@ pub const CTP_OVERLAY0: colored::CustomColor = colored::CustomColor {
 pub const ANSI_SHOW_CURSOR: &str = "\x1b[?25h";
 pub const ANSI_HIDE_CURSOR: &str = "\x1b[?25l";
 pub const ANSI_CLEAR_LINE: &str = "\r\x1b[K";
-pub const ANSI_CURSOR_UP_CLEAR: &str = "\x1b[1A\x1b[K";
+pub const ANSI_CURSOR_UP_CLEAR: &str = "\x1b[1A\r\x1b[K";
 
 pub fn current_directory() -> String {
     env::current_dir()
