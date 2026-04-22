@@ -4,10 +4,14 @@ pub mod tools;
 
 use colored::*;
 
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use crate::cli::print_warning;
 use crate::common::{
     CTP_BLUE, CTP_GREEN, CTP_OVERLAY0, CTP_PRIMARY, CTP_RED, CTP_YELLOW, clear_line,
-    count_visual_lines, eprint_flush, hide_cursor, show_cursor, terminal_width,
+    clear_n_lines, count_visual_lines, eprint_flush, hide_cursor, show_cursor, terminal_height,
+    terminal_width,
 };
 use crate::config::{
     AgentMode, Config, load_agent_prompt, load_agent_safe_prompt, load_sys_prompt,
@@ -21,6 +25,56 @@ use crate::providers::{AIProvider, ChatMessage, ChatResponse, ToolCall};
 use tools::ToolRegistry;
 
 const MAX_AGENT_ITERATIONS: usize = 10;
+
+static EXPANDED: AtomicBool = AtomicBool::new(false);
+static TOOL_BLOCKS: Mutex<Vec<ToolBlock>> = Mutex::new(Vec::new());
+
+#[derive(Clone)]
+enum ToolOutcome {
+    Success(String),
+    Error(String),
+    Denied,
+}
+
+struct ToolBlock {
+    tool_call: ToolCall,
+    outcome: Option<ToolOutcome>,
+}
+
+fn reset_tool_blocks() {
+    if let Ok(mut blocks) = TOOL_BLOCKS.lock() {
+        blocks.clear();
+    }
+    EXPANDED.store(false, Ordering::Relaxed);
+}
+
+fn push_tool_call(tool_call: &ToolCall) {
+    if let Ok(mut blocks) = TOOL_BLOCKS.lock() {
+        blocks.push(ToolBlock {
+            tool_call: tool_call.clone(),
+            outcome: None,
+        });
+    }
+}
+
+fn set_last_outcome(outcome: ToolOutcome) {
+    if let Ok(mut blocks) = TOOL_BLOCKS.lock()
+        && let Some(last) = blocks.last_mut()
+    {
+        last.outcome = Some(outcome);
+    }
+}
+
+fn has_success_outcomes() -> bool {
+    TOOL_BLOCKS
+        .lock()
+        .map(|blocks| {
+            blocks
+                .iter()
+                .any(|b| matches!(b.outcome, Some(ToolOutcome::Success(_))))
+        })
+        .unwrap_or(false)
+}
 
 fn compose_agent_system_prompt(
     agent_prompt: &str,
@@ -55,6 +109,7 @@ enum Key {
     Enter,
     Char(char),
     CtrlC,
+    CtrlE,
     Other,
 }
 
@@ -214,7 +269,8 @@ where
                 append_tool_messages(messages, tool_call, result_text);
             }
             ToolConfirmResult::Deny => {
-                print_warning("tool call denied.");
+                set_last_outcome(ToolOutcome::Denied);
+                render_denied_inline();
                 append_tool_messages(messages, tool_call, denied_tool_result());
             }
             ToolConfirmResult::Cancel => return Err(LarpshellError::Cancelled),
@@ -293,39 +349,247 @@ where
     handle_agent_response(response, tool_registry, messages, confirm_tool)
 }
 
-fn display_tool_call(tool_call: &ToolCall) -> usize {
-    let width = terminal_width();
-    let mut lines = 0;
-
-    // Create user-friendly preview
+fn tool_line_string(tool_call: &ToolCall) -> String {
     if let Some(arguments) = tool_call.arguments.as_object() {
         let preview = format_tool_preview(&tool_call.name, arguments);
-        let preview_line = format!("  {} {}", "tool".custom_color(CTP_OVERLAY0), preview);
-        eprintln!("{preview_line}");
-        lines += count_visual_lines(&preview_line, width);
+        format!("  {} {}", "tool".custom_color(CTP_OVERLAY0), preview)
     } else {
-        // Fallback for tools with no arguments
-        let tool_line = format!(
+        format!(
             "  {}  {}",
             "tool".custom_color(CTP_OVERLAY0),
             tool_call.name.custom_color(CTP_BLUE).bold()
-        );
-        eprintln!("{tool_line}");
-        lines += count_visual_lines(&tool_line, width);
+        )
+    }
+}
+
+fn success_summary_string(output: &str) -> String {
+    let line_count = output.lines().count();
+    let line_word = if line_count == 1 { "line" } else { "lines" };
+    format!(
+        "  {} {}  {}",
+        "result".custom_color(CTP_OVERLAY0),
+        format!("({} {})", line_count, line_word).custom_color(CTP_GREEN),
+        "ctrl+e".custom_color(CTP_OVERLAY0),
+    )
+}
+
+fn expanded_output_line_string(line: &str, is_first: bool) -> String {
+    let prefix = if is_first { "  └ " } else { "    " };
+    format!(
+        "{}{}",
+        prefix.custom_color(CTP_OVERLAY0),
+        line.custom_color(CTP_OVERLAY0)
+    )
+}
+
+fn error_line_string(msg: &str) -> String {
+    format!(
+        "  {} {}",
+        "error".custom_color(CTP_OVERLAY0),
+        msg.custom_color(CTP_RED)
+    )
+}
+
+fn tip_line_string(msg: &str) -> Option<String> {
+    command_not_allowed_tip(msg).map(|tip| {
+        format!(
+            "  {} {}",
+            "tip:".custom_color(CTP_OVERLAY0).italic(),
+            tip
+        )
+    })
+}
+
+fn more_lines_indicator(hidden: usize) -> String {
+    let word = if hidden == 1 { "line" } else { "lines" };
+    format!(
+        "    {}",
+        format!("... {hidden} more {word}")
+            .custom_color(CTP_OVERLAY0)
+            .italic()
+    )
+}
+
+fn render_success_inline(output: &str, expanded: bool, cap: usize) {
+    eprintln!("{}", success_summary_string(output));
+    if expanded {
+        let total = output.lines().count();
+        let shown = total.min(cap);
+        for (i, line) in output.lines().take(shown).enumerate() {
+            eprintln!("{}", expanded_output_line_string(line, i == 0));
+        }
+        if total > shown {
+            eprintln!("{}", more_lines_indicator(total - shown));
+        }
+    }
+    eprintln!();
+}
+
+fn render_error_inline(msg: &str) {
+    eprintln!("{}", error_line_string(msg));
+    if let Some(tip) = tip_line_string(msg) {
+        eprintln!("{}", tip);
+    }
+    eprintln!();
+}
+
+fn render_denied_inline() {
+    print_warning("tool call denied.");
+    eprintln!();
+}
+
+fn render_block(block: &ToolBlock, expanded: bool, is_current: bool, cap: usize) {
+    eprintln!("{}", tool_line_string(&block.tool_call));
+    if is_current {
+        return;
+    }
+    match &block.outcome {
+        Some(ToolOutcome::Success(output)) => render_success_inline(output, expanded, cap),
+        Some(ToolOutcome::Error(msg)) => render_error_inline(msg),
+        Some(ToolOutcome::Denied) => render_denied_inline(),
+        None => {}
+    }
+}
+
+fn compute_expanded_cap(blocks: &[ToolBlock]) -> usize {
+    let width = terminal_width();
+    let height = terminal_height();
+    let mut non_output = 0usize;
+    let mut success_count = 0usize;
+    let last_idx = blocks.len().saturating_sub(1);
+    for (i, block) in blocks.iter().enumerate() {
+        let is_current = i == last_idx && block.outcome.is_none();
+        non_output += count_visual_lines(&tool_line_string(&block.tool_call), width);
+        if is_current {
+            continue;
+        }
+        match &block.outcome {
+            Some(ToolOutcome::Success(output)) => {
+                non_output += count_visual_lines(&success_summary_string(output), width);
+                non_output += 1;
+                success_count += 1;
+            }
+            Some(ToolOutcome::Error(msg)) => {
+                non_output += count_visual_lines(&error_line_string(msg), width);
+                if let Some(tip) = tip_line_string(msg) {
+                    non_output += count_visual_lines(&tip, width);
+                }
+                non_output += 1;
+            }
+            Some(ToolOutcome::Denied) => {
+                non_output += 2;
+            }
+            None => {}
+        }
+    }
+    if success_count == 0 {
+        return usize::MAX;
+    }
+    let reserved = non_output + 2 /* prompt */ + 1 /* safety */;
+    if reserved >= height {
+        return 1;
+    }
+    ((height - reserved) / success_count).max(1)
+}
+
+fn block_visual_lines(block: &ToolBlock, expanded: bool, is_current: bool, cap: usize) -> usize {
+    let width = terminal_width();
+    let mut n = count_visual_lines(&tool_line_string(&block.tool_call), width);
+    if is_current {
+        return n;
+    }
+    match &block.outcome {
+        Some(ToolOutcome::Success(output)) => {
+            n += count_visual_lines(&success_summary_string(output), width);
+            if expanded {
+                let total = output.lines().count();
+                let shown = total.min(cap);
+                for (i, line) in output.lines().take(shown).enumerate() {
+                    n += count_visual_lines(&expanded_output_line_string(line, i == 0), width);
+                }
+                if total > shown {
+                    n += count_visual_lines(&more_lines_indicator(total - shown), width);
+                }
+            }
+            n += 1;
+        }
+        Some(ToolOutcome::Error(msg)) => {
+            n += count_visual_lines(&error_line_string(msg), width);
+            if let Some(tip) = tip_line_string(msg) {
+                n += count_visual_lines(&tip, width);
+            }
+            n += 1;
+        }
+        Some(ToolOutcome::Denied) => {
+            n += 1;
+            n += 1;
+        }
+        None => {}
+    }
+    n
+}
+
+fn redraw_all_blocks(prompt_display: &str) {
+    let width = terminal_width();
+    let expanded = EXPANDED.load(Ordering::Relaxed);
+    let blocks_snapshot: Vec<ToolBlock> = {
+        let blocks = TOOL_BLOCKS.lock().unwrap_or_else(|e| e.into_inner());
+        blocks
+            .iter()
+            .map(|b| ToolBlock {
+                tool_call: b.tool_call.clone(),
+                outcome: b.outcome.clone(),
+            })
+            .collect()
+    };
+    let last_idx = blocks_snapshot.len().saturating_sub(1);
+    let current_cap = compute_expanded_cap(&blocks_snapshot);
+
+    let mut total = 0usize;
+    for (i, block) in blocks_snapshot.iter().enumerate() {
+        let is_current = i == last_idx && block.outcome.is_none();
+        total += block_visual_lines(block, expanded, is_current, current_cap);
+    }
+    total += count_visual_lines(prompt_display, width);
+
+    clear_n_lines(total);
+
+    let new_expanded = !expanded;
+    EXPANDED.store(new_expanded, Ordering::Relaxed);
+
+    for (i, block) in blocks_snapshot.iter().enumerate() {
+        let is_current = i == last_idx && block.outcome.is_none();
+        render_block(block, new_expanded, is_current, current_cap);
     }
 
+    eprint!("{prompt_display}");
+    let _ = std::io::Write::flush(&mut std::io::stderr());
+}
+
+fn display_tool_call(tool_call: &ToolCall) -> usize {
+    push_tool_call(tool_call);
+    let tool_line = tool_line_string(tool_call);
+    let lines = count_visual_lines(&tool_line, terminal_width());
+    eprintln!("{tool_line}");
     lines
 }
 
 fn confirm_tool_call() -> ToolConfirmResult {
+    let hint = if has_success_outcomes() {
+        format!("  {}", "ctrl+e expand".custom_color(CTP_OVERLAY0))
+    } else {
+        String::new()
+    };
     let prompt = format!(
-        "  {} [{}] allow, [{}] deny, [{}] cancel",
+        "  {} [{}] allow, [{}] deny, [{}] cancel{}",
         "Allow?".custom_color(CTP_YELLOW),
         "Y/Enter".custom_color(CTP_PRIMARY).bold(),
         "N".custom_color(CTP_PRIMARY).bold(),
-        "Ctrl+C".custom_color(CTP_PRIMARY).bold()
+        "Ctrl+C".custom_color(CTP_PRIMARY).bold(),
+        hint,
     );
-    eprint!("{}", prompt.custom_color(CTP_BLUE));
+    let prompt_display = format!("{}", prompt.custom_color(CTP_BLUE));
+    eprint!("{prompt_display}");
     let _ = std::io::Write::flush(&mut std::io::stderr());
 
     #[cfg(unix)]
@@ -348,6 +612,11 @@ fn confirm_tool_call() -> ToolConfirmResult {
                 clear_line();
                 return ToolConfirmResult::Cancel;
             }
+            Key::CtrlE => {
+                if has_success_outcomes() {
+                    redraw_all_blocks(&prompt_display);
+                }
+            }
             Key::Other | Key::Char(_) => {}
         }
     }
@@ -357,6 +626,7 @@ fn parse_byte(b: u8) -> Key {
     match b {
         b'\n' | b'\r' => Key::Enter,
         b'\x03' => Key::CtrlC,
+        b'\x05' => Key::CtrlE,
         ch @ 32..=126 => Key::Char(ch as char),
         _ => Key::Other,
     }
@@ -398,14 +668,12 @@ fn read_key() -> Key {
 }
 
 fn display_tool_result(result: &str) {
-    let line_count = result.lines().count();
-    let line_word = if line_count == 1 { "line" } else { "lines" };
-    eprintln!(
-        "  {} {}",
-        "result".custom_color(CTP_OVERLAY0),
-        format!("({} {})", line_count, line_word).custom_color(CTP_GREEN)
-    );
-    eprintln!();
+    set_last_outcome(ToolOutcome::Success(result.to_string()));
+    let cap = TOOL_BLOCKS
+        .lock()
+        .map(|blocks| compute_expanded_cap(&blocks))
+        .unwrap_or(1);
+    render_success_inline(result, EXPANDED.load(Ordering::Relaxed), cap);
 }
 
 fn command_not_allowed_tip(error: &str) -> Option<ColoredString> {
@@ -416,15 +684,8 @@ fn command_not_allowed_tip(error: &str) -> Option<ColoredString> {
 }
 
 fn display_tool_error(error: &str) {
-    eprintln!(
-        "  {} {}",
-        "error".custom_color(CTP_OVERLAY0),
-        error.custom_color(CTP_RED)
-    );
-    if let Some(tip) = command_not_allowed_tip(error) {
-        eprintln!("  {} {}", "tip:".custom_color(CTP_OVERLAY0).italic(), tip);
-    }
-    eprintln!();
+    set_last_outcome(ToolOutcome::Error(error.to_string()));
+    render_error_inline(error);
 }
 
 async fn run_agent_loop_with_confirm<F>(
@@ -437,6 +698,7 @@ async fn run_agent_loop_with_confirm<F>(
 where
     F: FnMut(&ToolCall) -> ToolConfirmResult,
 {
+    reset_tool_blocks();
     let (mut messages, tool_definitions) = agent_context(user_input, config, tool_registry)?;
 
     for iteration in 0..MAX_AGENT_ITERATIONS {
