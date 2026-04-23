@@ -1,12 +1,13 @@
 use crate::config::{ActiveProvider, AgentMode, Config, ProviderSpecificConfig};
 use crate::error::LarpshellError;
 use crate::providers::create_provider;
+use std::ffi::OsString;
 use std::fs;
 use std::io::Write;
 use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use toml::from_str;
 
 mod agent;
@@ -15,10 +16,22 @@ mod explain;
 mod slash;
 
 fn binary() -> PathBuf {
+    if let Some(path) = TEST_BINARY_OVERRIDE.lock().unwrap().clone() {
+        return PathBuf::from(path);
+    }
+
+    if let Some(path) = option_env!("CARGO_BIN_EXE_larpshell") {
+        return PathBuf::from(path);
+    }
+
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/debug/larpshell")
 }
 
 fn ensure_binary_built() {
+    if TEST_BINARY_OVERRIDE.lock().unwrap().is_some() || option_env!("CARGO_BIN_EXE_larpshell").is_some() {
+        return;
+    }
+
     static BUILD_ONCE: OnceLock<()> = OnceLock::new();
     BUILD_ONCE.get_or_init(|| {
         let status = Command::new("cargo")
@@ -28,6 +41,39 @@ fn ensure_binary_built() {
             .expect("failed to build larpshell test binary");
         assert!(status.success(), "cargo build --bin larpshell failed");
     });
+}
+
+static TEST_BINARY_OVERRIDE: Mutex<Option<OsString>> = Mutex::new(None);
+
+struct TestBinaryOverrideGuard {
+    original: Option<OsString>,
+}
+
+impl TestBinaryOverrideGuard {
+    fn set(path: &str) -> Self {
+        let mut override_path = TEST_BINARY_OVERRIDE.lock().unwrap();
+        let original = override_path.replace(OsString::from(path));
+        drop(override_path);
+        Self { original }
+    }
+}
+
+impl Drop for TestBinaryOverrideGuard {
+    fn drop(&mut self) {
+        *TEST_BINARY_OVERRIDE.lock().unwrap() = self.original.take();
+    }
+}
+
+#[test]
+fn binary_prefers_explicit_test_override() {
+    let _guard = TestBinaryOverrideGuard::set("/tmp/larpshell-test-bin");
+    assert_eq!(binary(), PathBuf::from("/tmp/larpshell-test-bin"));
+}
+
+#[test]
+fn ensure_binary_built_skips_nested_cargo_when_override_is_present() {
+    let _guard = TestBinaryOverrideGuard::set("/tmp/larpshell-test-bin");
+    ensure_binary_built();
 }
 
 fn run(home: &std::path::Path, args: &[&str]) -> std::process::Output {
