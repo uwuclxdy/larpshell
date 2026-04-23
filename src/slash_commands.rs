@@ -474,7 +474,7 @@ mod tests {
         let (start, candidates) = arg_completions("/prompt system ").unwrap();
         assert_eq!(start, 15);
         let values: Vec<_> = candidates.iter().map(|c| c.value).collect();
-        assert_eq!(values, ["show", "edit"]);
+        assert_eq!(values, ["show", "edit", "reset"]);
     }
 
     #[test]
