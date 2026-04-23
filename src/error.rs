@@ -175,7 +175,7 @@ mod tests {
         let err = LarpshellError::AgentMaxIterations(10);
         assert_eq!(
             err.to_string(),
-            "agent reached maximum iterations (10) without producing a command"
+            "agent reached maximum iterations (10) without producing a final response"
         );
     }
 }
