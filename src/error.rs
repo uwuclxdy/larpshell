@@ -53,7 +53,7 @@ pub enum LarpshellError {
     #[error("empty response from {0}")]
     EmptyResponse(String),
 
-    #[error("agent reached maximum iterations ({0}) without producing a command")]
+    #[error("agent reached maximum iterations ({0}) without producing a final response")]
     AgentMaxIterations(usize),
 }
 

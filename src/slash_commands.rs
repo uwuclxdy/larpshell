@@ -195,7 +195,9 @@ pub enum SlashCmd {
     },
 }
 
-fn parse_agent_mode_strict(arg: Option<&str>) -> Result<Option<AgentMode>, (&'static str, &'static str)> {
+fn parse_agent_mode_strict(
+    arg: Option<&str>,
+) -> Result<Option<AgentMode>, (&'static str, &'static str)> {
     match arg {
         None => Ok(None),
         Some("off") => Ok(Some(AgentMode::Off)),
@@ -205,7 +207,9 @@ fn parse_agent_mode_strict(arg: Option<&str>) -> Result<Option<AgentMode>, (&'st
     }
 }
 
-fn parse_history_toggle_strict(arg: Option<&str>) -> Result<Option<bool>, (&'static str, &'static str)> {
+fn parse_history_toggle_strict(
+    arg: Option<&str>,
+) -> Result<Option<bool>, (&'static str, &'static str)> {
     match arg {
         None => Ok(None),
         Some("on") => Ok(Some(true)),

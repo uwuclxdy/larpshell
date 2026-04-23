@@ -475,12 +475,12 @@ fn execute_run_command(
 }
 
 fn expand_tilde(path: &str) -> String {
-    if path.starts_with('~') {
-        if let Some(home) = dirs::home_dir() {
-            let remaining = path.strip_prefix('~').unwrap_or("");
-            let remaining = remaining.strip_prefix('/').unwrap_or(remaining);
-            return home.join(remaining).to_string_lossy().to_string();
-        }
+    if path.starts_with('~')
+        && let Some(home) = dirs::home_dir()
+    {
+        let remaining = path.strip_prefix('~').unwrap_or("");
+        let remaining = remaining.strip_prefix('/').unwrap_or(remaining);
+        return home.join(remaining).to_string_lossy().to_string();
     }
     path.to_string()
 }

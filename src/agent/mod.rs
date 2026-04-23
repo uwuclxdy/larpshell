@@ -9,9 +9,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::cli::print_warning;
 use crate::common::{
-    CTP_BLUE, CTP_GREEN, CTP_OVERLAY0, CTP_PRIMARY, CTP_RED, CTP_YELLOW, clear_line,
-    clear_n_lines, count_visual_lines, eprint_flush, hide_cursor, show_cursor, terminal_height,
-    terminal_width,
+    CTP_BLUE, CTP_GREEN, CTP_OVERLAY0, CTP_PRIMARY, CTP_RED, CTP_YELLOW, clear_line, clear_n_lines,
+    count_visual_lines, eprint_flush, hide_cursor, show_cursor, terminal_height, terminal_width,
 };
 use crate::config::{
     AgentMode, Config, load_agent_prompt, load_agent_safe_prompt, load_sys_prompt,
@@ -25,6 +24,18 @@ use crate::providers::{AIProvider, ChatMessage, ChatResponse, ToolCall};
 use tools::ToolRegistry;
 
 const MAX_AGENT_ITERATIONS: usize = 10;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FinalResponseKind {
+    Command,
+    Message,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FinalResponse {
+    pub kind: FinalResponseKind,
+    pub content: String,
+}
 
 static EXPANDED: AtomicBool = AtomicBool::new(false);
 static TOOL_BLOCKS: Mutex<Vec<ToolBlock>> = Mutex::new(Vec::new());
@@ -213,7 +224,7 @@ fn append_tool_messages(
 }
 
 fn denied_tool_result() -> &'static str {
-    "Tool call denied by user. Try a different approach or produce the final command."
+    "Tool call denied by user. Try a different approach or produce the final response."
 }
 
 fn initial_agent_messages(user_input: &str, config: &Config) -> Vec<ChatMessage> {
@@ -287,17 +298,40 @@ fn show_next_iteration_prompt(iteration: usize) {
     }
 }
 
+fn parse_final_response(text: &str) -> FinalResponse {
+    let trimmed = text.trim();
+
+    if let Some(command) = trimmed.strip_prefix("COMMAND:") {
+        return FinalResponse {
+            kind: FinalResponseKind::Command,
+            content: command.trim().to_string(),
+        };
+    }
+
+    if let Some(message) = trimmed.strip_prefix("MESSAGE:") {
+        return FinalResponse {
+            kind: FinalResponseKind::Message,
+            content: message.trim().to_string(),
+        };
+    }
+
+    FinalResponse {
+        kind: FinalResponseKind::Command,
+        content: trimmed.to_string(),
+    }
+}
+
 fn handle_agent_response<F>(
     response: ChatResponse,
     tool_registry: &ToolRegistry,
     messages: &mut Vec<ChatMessage>,
     confirm_tool: &mut F,
-) -> Result<Option<String>, LarpshellError>
+) -> Result<Option<FinalResponse>, LarpshellError>
 where
     F: FnMut(&ToolCall) -> ToolConfirmResult,
 {
     match response {
-        ChatResponse::Message(text) => Ok(Some(text)),
+        ChatResponse::Message(text) => Ok(Some(parse_final_response(&text))),
         ChatResponse::ToolCalls(tool_calls) => {
             handle_tool_calls(&tool_calls, tool_registry, messages, confirm_tool)?;
             Ok(None)
@@ -342,7 +376,7 @@ fn tool_response<F>(
     tool_registry: &ToolRegistry,
     messages: &mut Vec<ChatMessage>,
     confirm_tool: &mut F,
-) -> Result<Option<String>, LarpshellError>
+) -> Result<Option<FinalResponse>, LarpshellError>
 where
     F: FnMut(&ToolCall) -> ToolConfirmResult,
 {
@@ -391,13 +425,8 @@ fn error_line_string(msg: &str) -> String {
 }
 
 fn tip_line_string(msg: &str) -> Option<String> {
-    command_not_allowed_tip(msg).map(|tip| {
-        format!(
-            "  {} {}",
-            "tip:".custom_color(CTP_OVERLAY0).italic(),
-            tip
-        )
-    })
+    command_not_allowed_tip(msg)
+        .map(|tip| format!("  {} {}", "tip:".custom_color(CTP_OVERLAY0).italic(), tip))
 }
 
 fn more_lines_indicator(hidden: usize) -> String {
@@ -694,7 +723,7 @@ async fn run_agent_loop_with_confirm<F>(
     config: &Config,
     tool_registry: &ToolRegistry,
     mut confirm_tool: F,
-) -> Result<String, LarpshellError>
+) -> Result<FinalResponse, LarpshellError>
 where
     F: FnMut(&ToolCall) -> ToolConfirmResult,
 {
@@ -724,7 +753,7 @@ pub async fn run_agent_loop(
     provider: &dyn AIProvider,
     config: &Config,
     tool_registry: &ToolRegistry,
-) -> Result<String, LarpshellError> {
+) -> Result<FinalResponse, LarpshellError> {
     run_agent_loop_with_confirm(user_input, provider, config, tool_registry, |_| {
         confirm_tool_call()
     })
@@ -854,11 +883,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn run_agent_loop_returns_message_without_tool_calls() {
-        let provider = MockProvider::new(vec![ChatResponse::Message("ls -la".to_string())]);
+    async fn run_agent_loop_returns_command_without_tool_calls() {
+        let provider =
+            MockProvider::new(vec![ChatResponse::Message("COMMAND: ls -la".to_string())]);
         let tool_registry = ToolRegistry::with_builtins(AgentMode::Safe);
 
-        let command = run_agent_loop_with_confirm(
+        let response = run_agent_loop_with_confirm(
             "list files",
             &provider,
             &test_config(),
@@ -868,7 +898,39 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(command, "ls -la");
+        assert_eq!(
+            response,
+            FinalResponse {
+                kind: FinalResponseKind::Command,
+                content: "ls -la".to_string(),
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn run_agent_loop_returns_message_without_tool_calls() {
+        let provider = MockProvider::new(vec![ChatResponse::Message(
+            "MESSAGE: no command needed".to_string(),
+        )]);
+        let tool_registry = ToolRegistry::with_builtins(AgentMode::Safe);
+
+        let response = run_agent_loop_with_confirm(
+            "say hi",
+            &provider,
+            &test_config(),
+            &tool_registry,
+            |_| ToolConfirmResult::Allow,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            response,
+            FinalResponse {
+                kind: FinalResponseKind::Message,
+                content: "no command needed".to_string(),
+            }
+        );
     }
 
     #[tokio::test]
@@ -884,11 +946,11 @@ mod tests {
                     "directory_path": directory.display().to_string()
                 }),
             }]),
-            ChatResponse::Message("cat hello.txt".to_string()),
+            ChatResponse::Message("COMMAND: cat hello.txt".to_string()),
         ]);
         let tool_registry = ToolRegistry::with_builtins(AgentMode::Safe);
 
-        let command = run_agent_loop_with_confirm(
+        let response = run_agent_loop_with_confirm(
             "show me the file",
             &provider,
             &test_config(),
@@ -898,7 +960,13 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(command, "cat hello.txt");
+        assert_eq!(
+            response,
+            FinalResponse {
+                kind: FinalResponseKind::Command,
+                content: "cat hello.txt".to_string(),
+            }
+        );
 
         let captured_messages = provider.captured_messages.lock().unwrap();
         assert_eq!(captured_messages.len(), 2);
@@ -1013,5 +1081,29 @@ mod tests {
         assert!(tip.contains("run /agent on to enable all commands"));
 
         assert!(plain_tip("dangerous argument detected: --force").is_none());
+    }
+
+	    #[test]
+    fn parse_final_response_parses_command_prefix() {
+        let response = parse_final_response("  COMMAND:   echo hello  ");
+
+        assert!(matches!(response.kind, FinalResponseKind::Command));
+        assert_eq!(response.content, "echo hello");
+    }
+
+    #[test]
+    fn parse_final_response_parses_message_prefix() {
+        let response = parse_final_response("  MESSAGE:   done  ");
+
+        assert!(matches!(response.kind, FinalResponseKind::Message));
+        assert_eq!(response.content, "done");
+    }
+
+    #[test]
+    fn parse_final_response_defaults_to_command_without_prefix() {
+        let response = parse_final_response("  ls -la  ");
+
+        assert!(matches!(response.kind, FinalResponseKind::Command));
+        assert_eq!(response.content, "ls -la");
     }
 }

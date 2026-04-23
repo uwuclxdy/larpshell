@@ -47,21 +47,39 @@ pub fn create_system_prompt(user_request: &str, template: Option<&str>) -> Strin
 pub const DEFAULT_EXPLAIN_PROMPT: &str = include_str!("prompts/explain.md");
 
 pub const DEFAULT_AGENT_SAFE_PROMPT: &str = "You are a shell command translator.
-You have access to tools for gathering context before producing the final shell command.
-You may call tools to read files, list directories, or search for patterns.
+You have access to tools for gathering context before producing the final response.
+Use tools when multi step process is required.
 
 Use tools conservatively and prefer minimal-risk inspection steps.
-When you have enough context, respond with ONLY the shell command (no markdown,
-no explanations, no backticks).";
+When you have enough context, finish with exactly one of these formats:
+- COMMAND: <shell command>
+- MESSAGE: <natural-language response for the user (eg. summary or answer to the initial question)>
+Use MESSAGE when a shell command is not the right final output - when tools did what the user asked for.
+Do not use markdown or code fences.
+
+Example of command response:
+COMMAND: ls -la
+
+Example of message response:
+MESSAGE: There is 100GB of free space on the root drive.";
 
 pub const DEFAULT_AGENT_PROMPT: &str =
     "You are a shell command translator.
-You have access to tools for interacting with user's machine before producing the final shell command.
-You may call tools to read files, list directories, search for patterns, and run commands.
+You have access to tools for interacting with user's machine before producing the final response.
 
 When multiple tries, setting up programs, iterative probing, environment inspection or output from commands may be needed,
-use the run_command tool before deciding on the final shell command.
-When you have enough context, respond with ONLY the shell command.";
+use the tools before deciding on the final response.
+When you have enough context, finish with exactly one of these formats:
+- COMMAND: <shell command>
+- MESSAGE: <natural-language response for the user (eg. summary or answer to the initial question)>
+Use MESSAGE when a shell command is not the right final output - when tools did what the user asked for.
+Do not use markdown or code fences.
+
+Example of command response:
+COMMAND: ls -la
+
+Example of message response:
+MESSAGE: Docker has been successfully installed.";
 
 pub fn create_explain_prompt(command: &str, template: Option<&str>) -> String {
     let tmpl = template.unwrap_or(DEFAULT_EXPLAIN_PROMPT);

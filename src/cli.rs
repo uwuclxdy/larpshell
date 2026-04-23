@@ -84,7 +84,10 @@ pub fn parse_cli_args() -> Result<CliArgs, LarpshellError> {
     #[command(disable_help_subcommand = true)]
     #[command(override_usage = "larpshell [REQUEST]\n       larpshell <COMMAND>")]
     struct Cli {
-        #[arg(value_name = "REQUEST", help = "Natural language request to convert to a shell command")]
+        #[arg(
+            value_name = "REQUEST",
+            help = "Natural language request to convert to a shell command"
+        )]
         command: Vec<String>,
 
         #[command(subcommand)]
@@ -110,9 +113,7 @@ pub fn parse_cli_args() -> Result<CliArgs, LarpshellError> {
             action: ClapPromptAction,
         },
         /// Explain what a shell command does
-        Explain {
-            command: Vec<String>,
-        },
+        Explain { command: Vec<String> },
         /// Enable or disable agent mode
         Agent {
             #[arg(value_enum)]

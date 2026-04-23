@@ -119,6 +119,19 @@ fn read_key_event() -> KeyEvent {
     parse_key_from_reader(&mut std::io::stdin().lock())
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResponseStyle {
+    Command,
+    Message,
+}
+
+pub fn display_response(text: &str, style: ResponseStyle) -> usize {
+    match style {
+        ResponseStyle::Command => display_command(text),
+        ResponseStyle::Message => display_message(text),
+    }
+}
+
 pub fn display_command(command: &str) -> usize {
     let width = terminal_width();
     let lines: Vec<&str> = command.lines().collect();
@@ -147,6 +160,25 @@ pub fn display_command(command: &str) -> usize {
         }
         visual
     }
+}
+
+pub fn display_message(message: &str) -> usize {
+    let width = terminal_width();
+    let lines: Vec<&str> = message.lines().collect();
+    let mut visual = 0;
+
+    for (index, line) in lines.iter().enumerate() {
+        let prefix = if index == 0 { "● " } else { "  " };
+        let rendered = format!("{prefix}{line}");
+        visual += count_visual_lines(&rendered, width);
+        eprintln!(
+            "{}{}",
+            prefix.custom_color(CTP_BLUE),
+            line.custom_color(CTP_TEXT)
+        );
+    }
+
+    visual
 }
 
 pub fn display_explanation(explanation: &str) -> usize {
@@ -434,6 +466,21 @@ mod tests {
     fn display_command_multiline_returns_n_plus_one() {
         assert_eq!(display_command("echo hi\necho bye"), 3);
         assert_eq!(display_command("a\nb\nc"), 4);
+    }
+
+    #[test]
+    fn display_message_single_line_returns_one() {
+        assert_eq!(display_message("done"), 1);
+    }
+
+    #[test]
+    fn display_message_multiline_returns_line_count() {
+        assert_eq!(display_message("line one\nline two\nline three"), 3);
+    }
+
+    #[test]
+    fn display_response_delegates_to_message_renderer() {
+        assert_eq!(display_response("done", ResponseStyle::Message), 1);
     }
 
     #[test]

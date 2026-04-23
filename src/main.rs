@@ -32,8 +32,8 @@ use common::{
 };
 use config::{AgentMode, Config, interactive_setup, load_config};
 use confirmation::{
-    ConfirmResult, confirm_execution, confirm_with_explain, display_command, display_explanation,
-    edit_command,
+    ConfirmResult, ResponseStyle, confirm_execution, confirm_with_explain, display_explanation,
+    display_response, edit_command,
 };
 use error::LarpshellError;
 use interactive::{user_input, user_input_prefilled};
@@ -561,7 +561,9 @@ async fn inner_main() -> Result<(), LarpshellError> {
                         print_error(&format!("unknown command '{s}'"));
                     }
                     slash_commands::SlashCmd::InvalidArgs { command, expected } => {
-                        print_error(&format!("invalid argument for /{command}: expected {expected}"));
+                        print_error(&format!(
+                            "invalid argument for /{command}: expected {expected}"
+                        ));
                     }
                 }
             } else {
@@ -641,7 +643,9 @@ async fn inner_main() -> Result<(), LarpshellError> {
                         print_error(&format!("unknown command '{s}'"));
                     }
                     slash_commands::SlashCmd::InvalidArgs { command, expected } => {
-                        print_error(&format!("invalid argument for /{command}: expected {expected}"));
+                        print_error(&format!(
+                            "invalid argument for /{command}: expected {expected}"
+                        ));
                     }
                 }
                 continue;
@@ -797,7 +801,7 @@ async fn process_command(
         return Err(LarpshellError::EmptyResponse(provider.name()));
     }
 
-    confirm_loop(command, user_input, provider, &mode).await
+    confirm_loop(command, user_input, provider, &mode, ResponseStyle::Command).await
 }
 
 async fn process_command_agent(
@@ -809,12 +813,25 @@ async fn process_command_agent(
 ) -> Result<Option<String>, LarpshellError> {
     let response = agent::run_agent_loop(user_input, provider, config, tool_registry).await?;
 
-    let command = clean_response(&response);
-    if command.trim().is_empty() {
-        return Err(LarpshellError::EmptyResponse(provider.name()));
-    }
+    match response.kind {
+        agent::FinalResponseKind::Command => {
+            let command = clean_response(&response.content);
+            if command.trim().is_empty() {
+                return Err(LarpshellError::EmptyResponse(provider.name()));
+            }
 
-    confirm_loop(command, user_input, provider, &mode).await
+            confirm_loop(command, user_input, provider, &mode, ResponseStyle::Command).await
+        }
+        agent::FinalResponseKind::Message => {
+            let message = response.content.trim().to_string();
+            if message.is_empty() {
+                return Err(LarpshellError::EmptyResponse(provider.name()));
+            }
+
+            display_response(&message, ResponseStyle::Message);
+            Ok(None)
+        }
+    }
 }
 
 // ── confirmation loop ──────────────────────────────────────────────────────
@@ -824,9 +841,10 @@ async fn confirm_loop(
     user_input: &str,
     provider: &dyn providers::AIProvider,
     mode: &CommandMode,
+    response_style: ResponseStyle,
 ) -> Result<Option<String>, LarpshellError> {
     let cancelled = 'outer: loop {
-        let cmd_lines = display_command(&command);
+        let cmd_lines = display_response(&command, response_style);
         match confirm_with_explain(cmd_lines)? {
             ConfirmResult::Yes => {
                 execute_or_print(&command)?;
