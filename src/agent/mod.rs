@@ -852,7 +852,7 @@ mod tests {
         assert!(prompt.contains("User request: list the rust files"));
         assert!(prompt.contains("Current dir:"));
         assert!(prompt.contains("Shell:"));
-        assert!(prompt.contains("Use tools conservatively"));
+        assert!(prompt.contains("safe, read-only tools"));
         assert!(prompt.contains("You are a shell command translator."));
         assert_eq!(prompt, format!("{DEFAULT_AGENT_SAFE_PROMPT}\n\n{expected_system_prompt}"));
     }
@@ -878,7 +878,7 @@ mod tests {
             DEFAULT_PROMPT_TEMPLATE,
         );
 
-        assert!(prompt.contains("Use tools conservatively"));
+        assert!(prompt.contains("safe, read-only tools"));
         assert!(!prompt.contains("use the run_command tool"));
     }
 

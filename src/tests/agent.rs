@@ -190,7 +190,7 @@ fn prompt_agent_safe_edit_creates_prompt_file_on_clean_home() {
 
     let contents = fs::read_to_string(agent_safe_prompt_path(&home)).unwrap();
     assert!(!contents.contains("{request}"));
-    assert!(contents.contains("Use tools conservatively"));
+    assert!(contents.contains("safe, read-only tools"));
 }
 
 #[test]
