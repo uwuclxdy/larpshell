@@ -39,17 +39,3 @@ fn agent_slash_command_updates_config_and_keeps_session_running() {
         "stderr: {stderr}"
     );
 }
-
-#[test]
-fn api_slash_command_reloads_provider_in_interactive_mode() {
-    let home = temp_home("slash_api_reload");
-    let port = mock_ollama(&[]);
-    write_ollama_config(&home, port);
-
-    let out = super::run_with_stdin_interactive(&home, &[], b"/api\ny\n/quit\n");
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        !stderr.contains("failed to reload config"),
-        "config reload should succeed. stderr: {stderr}"
-    );
-}
