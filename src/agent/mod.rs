@@ -854,7 +854,10 @@ mod tests {
         assert!(prompt.contains("Shell:"));
         assert!(prompt.contains("safe, read-only tools"));
         assert!(prompt.contains("You are a shell command translator."));
-        assert_eq!(prompt, format!("{DEFAULT_AGENT_SAFE_PROMPT}\n\n{expected_system_prompt}"));
+        assert_eq!(
+            prompt,
+            format!("{DEFAULT_AGENT_SAFE_PROMPT}\n\n{expected_system_prompt}")
+        );
     }
 
     #[test]
@@ -1083,7 +1086,7 @@ mod tests {
         assert!(plain_tip("dangerous argument detected: --force").is_none());
     }
 
-	    #[test]
+    #[test]
     fn parse_final_response_parses_command_prefix() {
         let response = parse_final_response("  COMMAND:   echo hello  ");
 

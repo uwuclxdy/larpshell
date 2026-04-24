@@ -28,7 +28,9 @@ fn binary() -> PathBuf {
 }
 
 fn ensure_binary_built() {
-    if TEST_BINARY_OVERRIDE.lock().unwrap().is_some() || option_env!("CARGO_BIN_EXE_larpshell").is_some() {
+    if TEST_BINARY_OVERRIDE.lock().unwrap().is_some()
+        || option_env!("CARGO_BIN_EXE_larpshell").is_some()
+    {
         return;
     }
 
