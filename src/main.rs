@@ -21,7 +21,7 @@ use tokio_util::sync::CancellationToken;
 use agent::tools::ToolRegistry;
 use cli::home_dir;
 use cli::{
-    PromptAction, PromptKind, execute_shell_command, parse_cli_args, print_error, print_warning,
+    PromptAction, PromptKind, execute_shell_command, parse_cli_args, print_warning,
 };
 use colored::*;
 #[cfg(unix)]
@@ -260,7 +260,7 @@ fn edit_prompt(spec: &PromptSpec) -> Result<(), LarpshellError> {
         if spec.warn_only {
             print_warning(spec.invalid_message);
         } else {
-            print_error(spec.invalid_message);
+            return Err(LarpshellError::ConfigError(spec.invalid_message.to_string()));
         }
     }
     Ok(())
@@ -305,14 +305,12 @@ async fn handle_explain_subcommand(
     provider: &dyn providers::AIProvider,
 ) -> Result<(), LarpshellError> {
     if cmd_parts.is_empty() {
-        print_error("no command provided.");
-        exit_with_code(1);
+        return Err(LarpshellError::NoCommandProvided);
     }
     let command = cmd_parts.join(" ");
     let explanation = get_explanation(&command, provider).await?;
     if explanation.is_empty() {
-        print_error("failed to generate a valid explanation.");
-        return Ok(());
+        return Err(LarpshellError::EmptyExplanation);
     }
     display_explanation(&explanation);
     Ok(())
@@ -322,36 +320,33 @@ fn reload_runtime_state(
     config: &mut Config,
     provider: &mut Box<dyn providers::AIProvider>,
     tool_registry: &mut Option<ToolRegistry>,
-) {
-    match load_config() {
-        Ok(new_config) => match create_provider(&new_config) {
-            Ok(new_provider) => {
-                *config = new_config;
-                *provider = new_provider;
-                *tool_registry = if config.agent.is_enabled() {
-                    Some(build_tool_registry(config.agent))
-                } else {
-                    None
-                };
-            }
-            Err(e) => print_error(&e.to_string()),
-        },
-        Err(e) => print_error(&format!("failed to reload config: {e}")),
-    }
+) -> Result<(), LarpshellError> {
+    let new_config = load_config()
+        .map_err(|e| LarpshellError::ConfigError(format!("failed to reload config: {e}")))?;
+    let new_provider = create_provider(&new_config)?;
+    *config = new_config;
+    *provider = new_provider;
+    *tool_registry = if config.agent.is_enabled() {
+        Some(build_tool_registry(config.agent))
+    } else {
+        None
+    };
+    Ok(())
 }
 
-fn reload_agent_state(config: &mut Config, tool_registry: &mut Option<ToolRegistry>) {
-    match load_config() {
-        Ok(new_config) => {
-            *config = new_config;
-            *tool_registry = if config.agent.is_enabled() {
-                Some(build_tool_registry(config.agent))
-            } else {
-                None
-            };
-        }
-        Err(e) => print_error(&format!("failed to reload config: {e}")),
-    }
+fn reload_agent_state(
+    config: &mut Config,
+    tool_registry: &mut Option<ToolRegistry>,
+) -> Result<(), LarpshellError> {
+    let new_config = load_config()
+        .map_err(|e| LarpshellError::ConfigError(format!("failed to reload config: {e}")))?;
+    *config = new_config;
+    *tool_registry = if config.agent.is_enabled() {
+        Some(build_tool_registry(config.agent))
+    } else {
+        None
+    };
+    Ok(())
 }
 
 fn handle_api_slash_command(
@@ -360,9 +355,9 @@ fn handle_api_slash_command(
     tool_registry: &mut Option<ToolRegistry>,
 ) {
     if let Err(e) = interactive_setup() {
-        print_error(&e.to_string());
-    } else {
-        reload_runtime_state(config, provider, tool_registry);
+        e.print();
+    } else if let Err(e) = reload_runtime_state(config, provider, tool_registry) {
+        e.print();
     }
 }
 
@@ -372,9 +367,9 @@ fn handle_agent_slash_command(
     tool_registry: &mut Option<ToolRegistry>,
 ) {
     if let Err(e) = handle_agent_subcommand(mode) {
-        print_error(&e.to_string());
-    } else {
-        reload_agent_state(config, tool_registry);
+        e.print();
+    } else if let Err(e) = reload_agent_state(config, tool_registry) {
+        e.print();
     }
 }
 
@@ -485,24 +480,19 @@ async fn inner_main() -> Result<(), LarpshellError> {
         Err(e) => {
             if matches!(&e, LarpshellError::IoError(io_err) if io_err.kind() == std::io::ErrorKind::NotFound)
             {
-                print_error("no API provider configured.");
                 eprintln!(
                     "{}",
                     "run 'larpshell api' to set up your preferred provider.".custom_color(CTP_BLUE)
                 );
-                exit_with_code(1);
+                return Err(LarpshellError::NoProviderConfigured);
             }
-            print_error(&e.to_string());
-            exit_with_code(1);
+            return Err(e);
         }
     };
 
     let mut provider = match create_provider(&config) {
         Ok(p) => p,
-        Err(e) => {
-            print_error(&e.to_string());
-            exit_with_code(1);
-        }
+        Err(e) => return Err(e),
     };
 
     let update_task = tokio::task::spawn(update::is_update_available());
@@ -558,12 +548,14 @@ async fn inner_main() -> Result<(), LarpshellError> {
                         }
                     }
                     slash_commands::SlashCmd::Unknown(s) => {
-                        print_error(&format!("unknown command '{s}'"));
+                        LarpshellError::UnknownSlashCommand(s).print();
                     }
                     slash_commands::SlashCmd::InvalidArgs { command, expected } => {
-                        print_error(&format!(
-                            "invalid argument for /{command}: expected {expected}"
-                        ));
+                        LarpshellError::InvalidSlashArg {
+                            command: command.to_string(),
+                            expected: expected.to_string(),
+                        }
+                        .print();
                     }
                 }
             } else {
@@ -614,24 +606,24 @@ async fn inner_main() -> Result<(), LarpshellError> {
                     }
                     slash_commands::SlashCmd::Uninstall => {
                         if let Err(e) = uninstall_larpshell() {
-                            print_error(&e.to_string());
+                            e.print();
                         }
                     }
                     slash_commands::SlashCmd::History { enable } => {
                         if let Err(e) = handle_history_subcommand(enable) {
-                            print_error(&e.to_string());
+                            e.print();
                         }
                     }
                     slash_commands::SlashCmd::Prompt { kind, action } => {
                         if let Err(e) = handle_prompt_subcommand(&kind, &action) {
-                            print_error(&e.to_string());
+                            e.print();
                         }
                     }
                     slash_commands::SlashCmd::Explain { args } => {
                         if let Err(e) = handle_explain_subcommand(args, provider.as_ref()).await
                             && !matches!(e, LarpshellError::Cancelled)
                         {
-                            print_error(&e.to_string());
+                            e.print();
                         }
                     }
                     slash_commands::SlashCmd::Help => {
@@ -640,12 +632,14 @@ async fn inner_main() -> Result<(), LarpshellError> {
                         }
                     }
                     slash_commands::SlashCmd::Unknown(s) => {
-                        print_error(&format!("unknown command '{s}'"));
+                        LarpshellError::UnknownSlashCommand(s).print();
                     }
                     slash_commands::SlashCmd::InvalidArgs { command, expected } => {
-                        print_error(&format!(
-                            "invalid argument for /{command}: expected {expected}"
-                        ));
+                        LarpshellError::InvalidSlashArg {
+                            command: command.to_string(),
+                            expected: expected.to_string(),
+                        }
+                        .print();
                     }
                 }
                 continue;
@@ -656,7 +650,7 @@ async fn inner_main() -> Result<(), LarpshellError> {
                 continue;
             }
             if user_input == "!" {
-                print_error("expected command after '!'");
+                LarpshellError::ExpectedCommandAfterBang.print();
                 continue;
             }
 
@@ -690,7 +684,7 @@ async fn inner_main() -> Result<(), LarpshellError> {
                 Ok(None) => {}
                 Err(e) => {
                     if !matches!(e, LarpshellError::Cancelled) {
-                        print_error(&e.to_string());
+                        e.print();
                     }
                 }
             }

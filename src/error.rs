@@ -55,6 +55,27 @@ pub enum LarpshellError {
 
     #[error("agent reached maximum iterations ({0}) without producing a final response")]
     AgentMaxIterations(usize),
+
+    #[error("no command provided.")]
+    NoCommandProvided,
+
+    #[error("failed to generate a valid explanation.")]
+    EmptyExplanation,
+
+    #[error("no API provider configured.")]
+    NoProviderConfigured,
+
+    #[error("unknown command '{0}'")]
+    UnknownSlashCommand(String),
+
+    #[error("invalid argument for /{command}: expected {expected}")]
+    InvalidSlashArg {
+        command: String,
+        expected: String,
+    },
+
+    #[error("expected command after '!'")]
+    ExpectedCommandAfterBang,
 }
 
 impl LarpshellError {
