@@ -865,8 +865,8 @@ mod tests {
             DEFAULT_PROMPT_TEMPLATE,
         );
 
-        assert!(prompt.contains("interacting with user's machine"));
-        assert!(prompt.contains("iterative probing"));
+        assert!(prompt.contains("interacting with the user's machine"));
+        assert!(prompt.contains("Multi-step probing"));
         assert!(prompt.starts_with(DEFAULT_AGENT_PROMPT));
     }
 

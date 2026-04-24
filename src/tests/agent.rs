@@ -208,7 +208,7 @@ fn prompt_agent_show_uses_default_on_clean_home() {
     assert_prompt_show_uses_default(
         "prompt_agent_clean_home",
         &["prompt", "agent", "show"],
-        "interacting with user's machine",
+        "interacting with the user's machine",
     );
 }
 
