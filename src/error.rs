@@ -69,10 +69,7 @@ pub enum LarpshellError {
     UnknownSlashCommand(String),
 
     #[error("invalid argument for /{command}: expected {expected}")]
-    InvalidSlashArg {
-        command: String,
-        expected: String,
-    },
+    InvalidSlashArg { command: String, expected: String },
 
     #[error("expected command after '!'")]
     ExpectedCommandAfterBang,
