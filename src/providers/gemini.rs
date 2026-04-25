@@ -29,12 +29,13 @@ struct Content {
 }
 
 #[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct Part {
     #[serde(skip_serializing_if = "Option::is_none")]
     text: Option<String>,
-    #[serde(rename = "functionCall", skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     function_call: Option<FunctionCall>,
-    #[serde(rename = "functionResponse", skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     function_response: Option<FunctionResponse>,
 }
 
@@ -51,8 +52,8 @@ struct FunctionResponse {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct GeminiToolDeclaration {
-    #[serde(rename = "functionDeclarations")]
     function_declarations: Vec<GeminiFunctionDeclaration>,
 }
 
@@ -69,9 +70,9 @@ struct GeminiResponse {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct Candidate {
     content: Option<ContentResponse>,
-    #[serde(rename = "finishReason")]
     finish_reason: Option<String>,
 }
 

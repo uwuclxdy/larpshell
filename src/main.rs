@@ -85,7 +85,7 @@ async fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             error.print();
-            ExitCode::from(1)
+            ExitCode::FAILURE
         }
     }
 }
@@ -430,7 +430,7 @@ fn build_tool_registry(agent_mode: AgentMode) -> ToolRegistry {
                 match client.list_tools() {
                     Ok(tools) => {
                         for tool in tools {
-                            registry.register_mcp_tool(tool, mcp_config.name.clone());
+                            registry.register_mcp_tool(tool);
                         }
                     }
                     Err(error) => {

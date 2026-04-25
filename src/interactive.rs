@@ -308,7 +308,7 @@ where
                 .completion_type(CompletionType::Circular)
                 .build(),
         )
-        .unwrap();
+        .expect("failed to initialize rustyline editor");
         ed.set_helper(Some(NlshHelper));
         ed.bind_sequence(
             Event::Any,

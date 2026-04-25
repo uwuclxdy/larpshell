@@ -49,11 +49,11 @@ struct ToolsListResult {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct McpToolInfo {
     name: String,
     #[serde(default)]
     description: Option<String>,
-    #[serde(rename = "inputSchema")]
     input_schema: Option<serde_json::Value>,
 }
 
@@ -266,8 +266,8 @@ pub fn load_mcp_configs() -> Vec<McpServerConfig> {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct McpConfigFile {
-    #[serde(rename = "mcpServers")]
     mcp_servers: HashMap<String, McpServerEntry>,
 }
 

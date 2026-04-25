@@ -42,9 +42,9 @@ impl ToolRegistry {
         self.tools.push(tool);
     }
 
-    pub fn register_mcp_tool(&mut self, definition: ToolDefinition, _server_name: String) {
-        // Register the definition so it appears in definitions() sent to the LLM.
-        // Execution is always routed through mcp_clients, never through this executor.
+    /// Registers an MCP-backed tool's definition. Execution is always routed
+    /// through `mcp_clients`, so the executor closure is unreachable.
+    pub fn register_mcp_tool(&mut self, definition: ToolDefinition) {
         self.tools.push(RegisteredTool::new(
             definition,
             Box::new(|_| unreachable!("MCP tools are executed via mcp_clients")),
@@ -76,7 +76,7 @@ impl ToolRegistry {
         args: &serde_json::Value,
     ) -> Option<Result<String, String>> {
         for client_mutex in &self.mcp_clients {
-            let mut client = client_mutex.lock().unwrap();
+            let mut client = client_mutex.lock().unwrap_or_else(|e| e.into_inner());
             let prefix = format!("{}_", client.server_name());
             if name.starts_with(&prefix) {
                 return Some(client.call_tool(name, args.clone()));
