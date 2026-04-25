@@ -6,8 +6,8 @@ use std::path::Path;
 
 use crate::error::LarpshellError;
 use crate::prompt::DEFAULT_EXPLAIN_PROMPT;
-const OLD_EXPLAIN_PROMPT_V1: &str = include_str!("../prompts/old_explain_v1.md");
-const OLD_EXPLAIN_PROMPT_V2: &str = include_str!("../prompts/old_explain_v2.md");
+const OLD_EXPLAIN_PROMPT_V1: &str = include_str!("../prompts/old/explain_v1.md");
+const OLD_EXPLAIN_PROMPT_V2: &str = include_str!("../prompts/old/explain_v2.md");
 
 use super::{ActiveProvider, Config, MultiProviderConfig, explain_prompt_path};
 

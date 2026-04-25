@@ -21,7 +21,7 @@ fn prompt_explain_show_uses_saved_custom_prompt() {
     let home = tests::temp_home("explain_show_custom");
     let config_dir = home.join("config").join("larpshell");
     fs::create_dir_all(&config_dir).unwrap();
-    fs::write(config_dir.join("explain-prompt.txt"), "describe: {command}").unwrap();
+    fs::write(config_dir.join("explain-prompt.md"), "describe: {command}").unwrap();
 
     let out = tests::run(&home, &["prompt", "explain", "show"]);
 

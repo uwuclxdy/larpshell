@@ -101,7 +101,7 @@ fn run_clean_home_with_editor(
 fn agent_safe_prompt_path(home: &std::path::Path) -> std::path::PathBuf {
     home.join(".config")
         .join("larpshell")
-        .join("agent-safe-prompt.txt")
+        .join("agent-safe-prompt.md")
 }
 
 fn make_noop_editor(home: &std::path::Path) -> std::path::PathBuf {

@@ -182,6 +182,17 @@ pub struct OpenAIConfig {
     pub model: String,
 }
 
+fn migrate_txt_prompt(md_path: &std::path::Path) {
+    let txt_path = md_path.with_extension("txt");
+    if txt_path.exists() && !md_path.exists() {
+        let _ = fs::rename(&txt_path, md_path)
+            .or_else(|_| fs::copy(&txt_path, md_path).map(|_| ()));
+        if md_path.exists() {
+            let _ = fs::remove_file(&txt_path);
+        }
+    }
+}
+
 pub fn ensure_config_dir() -> Result<PathBuf, LarpshellError> {
     let config_dir = dirs::config_dir()
         .ok_or_else(|| LarpshellError::ConfigError("failed to get config directory".to_string()))?
@@ -197,11 +208,13 @@ fn config_path() -> Result<PathBuf, LarpshellError> {
 }
 
 pub fn sys_prompt_path() -> Result<PathBuf, LarpshellError> {
-    Ok(ensure_config_dir()?.join("sys-prompt.txt"))
+    Ok(ensure_config_dir()?.join("sys-prompt.md"))
 }
 
 pub fn load_sys_prompt() -> Option<String> {
-    fs::read_to_string(sys_prompt_path().ok()?).ok()
+    let path = sys_prompt_path().ok()?;
+    migrate_txt_prompt(&path);
+    fs::read_to_string(path).ok()
 }
 
 pub fn save_sys_prompt(content: &str) -> Result<(), LarpshellError> {
@@ -209,12 +222,14 @@ pub fn save_sys_prompt(content: &str) -> Result<(), LarpshellError> {
 }
 
 pub fn explain_prompt_path() -> Result<PathBuf, LarpshellError> {
-    Ok(ensure_config_dir()?.join("explain-prompt.txt"))
+    Ok(ensure_config_dir()?.join("explain-prompt.md"))
 }
 
 pub fn load_explain_prompt() -> Option<String> {
+    let path = explain_prompt_path().ok()?;
+    migrate_txt_prompt(&path);
     let _ = migration::migrate_explain_prompt();
-    fs::read_to_string(explain_prompt_path().ok()?).ok()
+    fs::read_to_string(path).ok()
 }
 
 pub fn save_explain_prompt(content: &str) -> Result<(), LarpshellError> {
@@ -222,11 +237,13 @@ pub fn save_explain_prompt(content: &str) -> Result<(), LarpshellError> {
 }
 
 pub fn agent_prompt_path() -> Result<PathBuf, LarpshellError> {
-    Ok(ensure_config_dir()?.join("agent-prompt.txt"))
+    Ok(ensure_config_dir()?.join("agent-prompt.md"))
 }
 
 pub fn load_agent_prompt() -> Option<String> {
-    fs::read_to_string(agent_prompt_path().ok()?).ok()
+    let path = agent_prompt_path().ok()?;
+    migrate_txt_prompt(&path);
+    fs::read_to_string(path).ok()
 }
 
 pub fn save_agent_prompt(content: &str) -> Result<(), LarpshellError> {
@@ -234,11 +251,13 @@ pub fn save_agent_prompt(content: &str) -> Result<(), LarpshellError> {
 }
 
 pub fn agent_safe_prompt_path() -> Result<PathBuf, LarpshellError> {
-    Ok(ensure_config_dir()?.join("agent-safe-prompt.txt"))
+    Ok(ensure_config_dir()?.join("agent-safe-prompt.md"))
 }
 
 pub fn load_agent_safe_prompt() -> Option<String> {
-    fs::read_to_string(agent_safe_prompt_path().ok()?).ok()
+    let path = agent_safe_prompt_path().ok()?;
+    migrate_txt_prompt(&path);
+    fs::read_to_string(path).ok()
 }
 
 pub fn save_agent_safe_prompt(content: &str) -> Result<(), LarpshellError> {
