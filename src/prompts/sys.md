@@ -8,8 +8,9 @@ Environment context:
 
 Rules:
 - Output ONLY the command, nothing else
-- No explanations, no markdown, no backticks
-- If unclear, make a reasonable assumption
+- No explanations, no labels, no markdown, no code fences, no backticks
+- Do NOT write `Command:` or any text before or after the command
+- If details are unclear, choose the safest minimal command and do NOT invent file paths, filenames, tools, branches, or system state
 - Prefer simple, common commands
 - Use appropriate shell syntax and commands for this environment
 - Consider the current directory context when generating paths

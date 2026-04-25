@@ -45,34 +45,60 @@ pub fn validate_explain_prompt(template: &str) -> bool {
     template.contains("{command}")
 }
 
-pub fn clean_response(response: &str) -> String {
-    let mut cleaned = response.trim();
+fn strip_fence(text: &str) -> &str {
+    let trimmed = text.trim();
+    let Some(after_fence) = trimmed.strip_prefix("```") else {
+        return trimmed;
+    };
 
-    if let Some(after_fence) = cleaned.strip_prefix("```") {
-        cleaned = after_fence
-            .trim_start_matches("shell")
-            .trim_start_matches("bash")
-            .trim_start_matches("zsh")
-            .trim_start_matches("sh");
-        cleaned = cleaned.trim_end_matches("```");
+    let after_language = after_fence
+        .trim_start_matches("shell")
+        .trim_start_matches("bash")
+        .trim_start_matches("zsh")
+        .trim_start_matches("sh")
+        .trim_start_matches('\n');
+
+    after_language.trim_end_matches("```").trim()
+}
+
+pub(crate) fn prefixed_payload<'a>(text: &'a str, prefix: &str) -> Option<&'a str> {
+    for line in strip_fence(text).lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix(prefix) {
+            return Some(rest.trim());
+        }
+    }
+    None
+}
+
+fn normalize_model_output(text: &str) -> String {
+    let stripped = strip_fence(text);
+
+    if let Some(command) = prefixed_payload(stripped, "COMMAND:") {
+        return command.to_string();
     }
 
-    cleaned.trim().to_string()
+    if let Some(message) = prefixed_payload(stripped, "MESSAGE:") {
+        return message.to_string();
+    }
+
+    stripped.trim().to_string()
+}
+
+pub fn clean_response(response: &str) -> String {
+    normalize_model_output(response)
 }
 
 pub fn clean_explanation(response: &str, command: &str) -> String {
-    let trimmed = response.trim();
+    let trimmed = normalize_model_output(response);
     let cmd_trimmed = command.trim();
 
-    // Remove leading command if present
-    if let Some(after) = trimmed.strip_prefix(cmd_trimmed) {
-        if after.starts_with('\n') || after.starts_with(' ') || after.is_empty() {
-            after.trim_start().to_string()
-        } else {
-            trimmed.to_string()
-        }
+    if let Some(after) = trimmed.strip_prefix(cmd_trimmed)
+        && (after.starts_with('\n') || after.starts_with(' ') || after.is_empty())
+    {
+        after.trim_start().to_string()
     } else {
-        trimmed.to_string()
+        trimmed
     }
 }
 
@@ -192,6 +218,24 @@ mod tests {
     #[test]
     fn clean_explanation_handles_command_with_space() {
         let result = clean_explanation("free -h Shows memory usage.", "free -h");
+        assert_eq!(result, "Shows memory usage.");
+    }
+
+    #[test]
+    fn clean_response_extracts_prefixed_command_from_fenced_block() {
+        let result = clean_response("```bash\nCOMMAND: ls -la\n```");
+        assert_eq!(result, "ls -la");
+    }
+
+    #[test]
+    fn clean_response_extracts_command_after_leading_prose() {
+        let result = clean_response("Here is the command:\nCOMMAND: ls -la");
+        assert_eq!(result, "ls -la");
+    }
+
+    #[test]
+    fn clean_explanation_removes_repeated_command_inside_fenced_block() {
+        let result = clean_explanation("```\nfree -h\nShows memory usage.\n```", "free -h");
         assert_eq!(result, "Shows memory usage.");
     }
 }

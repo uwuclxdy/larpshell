@@ -301,23 +301,23 @@ fn show_next_iteration_prompt(iteration: usize) {
 fn parse_final_response(text: &str) -> FinalResponse {
     let trimmed = text.trim();
 
-    if let Some(command) = trimmed.strip_prefix("COMMAND:") {
+    if let Some(command) = crate::prompt::prefixed_payload(trimmed, "COMMAND:") {
         return FinalResponse {
             kind: FinalResponseKind::Command,
-            content: command.trim().to_string(),
+            content: command.to_string(),
         };
     }
 
-    if let Some(message) = trimmed.strip_prefix("MESSAGE:") {
+    if let Some(message) = crate::prompt::prefixed_payload(trimmed, "MESSAGE:") {
         return FinalResponse {
             kind: FinalResponseKind::Message,
-            content: message.trim().to_string(),
+            content: message.to_string(),
         };
     }
 
     FinalResponse {
-        kind: FinalResponseKind::Command,
-        content: trimmed.to_string(),
+        kind: FinalResponseKind::Message,
+        content: crate::prompt::clean_response(trimmed),
     }
 }
 
@@ -1026,6 +1026,42 @@ mod tests {
     }
 
     #[test]
+    fn parse_final_response_treats_unprefixed_text_as_message() {
+        let response = parse_final_response("here is what I found");
+        assert_eq!(
+            response,
+            FinalResponse {
+                kind: FinalResponseKind::Message,
+                content: "here is what I found".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_final_response_extracts_prefixed_line_from_fenced_block() {
+        let response = parse_final_response("```\nMESSAGE: no command needed\n```");
+        assert_eq!(
+            response,
+            FinalResponse {
+                kind: FinalResponseKind::Message,
+                content: "no command needed".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_final_response_extracts_prefixed_line_after_leading_prose() {
+        let response = parse_final_response("Done.\nCOMMAND: ls -la");
+        assert_eq!(
+            response,
+            FinalResponse {
+                kind: FinalResponseKind::Command,
+                content: "ls -la".to_string(),
+            }
+        );
+    }
+
+    #[test]
     fn format_tool_preview_creates_user_friendly_messages() {
         use serde_json::json;
 
@@ -1103,10 +1139,10 @@ mod tests {
     }
 
     #[test]
-    fn parse_final_response_defaults_to_command_without_prefix() {
+    fn parse_final_response_defaults_to_message_without_prefix() {
         let response = parse_final_response("  ls -la  ");
 
-        assert!(matches!(response.kind, FinalResponseKind::Command));
+        assert!(matches!(response.kind, FinalResponseKind::Message));
         assert_eq!(response.content, "ls -la");
     }
 }

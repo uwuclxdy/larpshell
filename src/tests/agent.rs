@@ -250,7 +250,7 @@ fn agent_slash_command_parsed_in_interactive() {
     let out = run_with_stdin(&home, &[], b"/agent safe\n/quit\n");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("agent mode set to safe"),
+        stderr.contains("agent mode: safe"),
         "expected agent safe message; stderr: {stderr}"
     );
 

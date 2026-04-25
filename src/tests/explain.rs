@@ -99,7 +99,7 @@ fn explain_subcommand_no_args_exits_error() {
 #[test]
 fn explain_subcommand_with_mock_shows_explanation_in_stderr() {
     let home = tests::temp_home("explain_mock_stderr");
-    let port = tests::mock_ollama(&["✅ echoes hello to stdout"]);
+    let port = tests::mock_ollama(&["SAFE: echoes hello to stdout"]);
     tests::write_ollama_config(&home, port);
 
     let out = tests::run(&home, &["explain", "echo", "hello"]);

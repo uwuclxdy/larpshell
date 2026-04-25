@@ -35,7 +35,7 @@ fn agent_slash_command_updates_config_and_keeps_session_running() {
     let out = super::run_with_stdin_interactive(&home, &[], b"/agent safe\n/quit\n");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("agent mode set to safe"),
+        stderr.contains("agent mode: safe"),
         "stderr: {stderr}"
     );
 }

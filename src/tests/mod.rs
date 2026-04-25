@@ -416,7 +416,7 @@ fn agent_subcommand_on_prints_confirmation() {
         "agent on should exit 0; stderr: {stderr}"
     );
     assert!(
-        stderr.contains("agent mode set to on"),
+        stderr.contains("agent mode: on"),
         "expected confirmation message; stderr: {stderr}"
     );
     let config_path = home.join("config").join("larpshell").join("config.toml");
@@ -439,7 +439,7 @@ fn agent_subcommand_safe_prints_confirmation() {
         "agent safe should exit 0; stderr: {stderr}"
     );
     assert!(
-        stderr.contains("agent mode set to safe"),
+        stderr.contains("agent mode: safe"),
         "expected confirmation message; stderr: {stderr}"
     );
     let config_path = home.join("config").join("larpshell").join("config.toml");
@@ -463,7 +463,7 @@ fn agent_subcommand_off_prints_confirmation() {
         "agent off should exit 0; stderr: {stderr}"
     );
     assert!(
-        stderr.contains("agent mode disabled"),
+        stderr.contains("agent mode: off"),
         "expected confirmation message; stderr: {stderr}"
     );
     let config_path = home.join("config").join("larpshell").join("config.toml");

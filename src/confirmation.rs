@@ -2,8 +2,8 @@ use colored::*;
 
 use crate::cli::is_interactive_terminal;
 use crate::common::{
-    ANSI_CLEAR_LINE, CTP_BLUE, CTP_PRIMARY, CTP_TEXT, CTP_YELLOW, EXIT_SIGINT, clear_n_lines,
-    count_visual_lines, exit_with_code, flush_stderr, show_cursor, terminal_width,
+    ANSI_CLEAR_LINE, CTP_BLUE, CTP_GREEN, CTP_PRIMARY, CTP_RED, CTP_TEXT, CTP_YELLOW, EXIT_SIGINT,
+    clear_n_lines, count_visual_lines, exit_with_code, flush_stderr, show_cursor, terminal_width,
 };
 use crate::error::LarpshellError;
 
@@ -162,28 +162,59 @@ pub fn display_command(command: &str) -> usize {
 }
 
 pub fn display_message(message: &str) -> usize {
+    display_bulleted(message, CTP_BLUE)
+}
+
+fn display_bulleted(text: &str, prefix_color: colored::CustomColor) -> usize {
     let width = terminal_width();
     let mut visual = 0;
-    for (index, line) in message.lines().enumerate() {
+    for (index, line) in text.lines().enumerate() {
         let prefix = if index == 0 { "● " } else { "  " };
         visual += count_visual_lines(&format!("{prefix}{line}"), width);
-        eprintln!(
-            "{}{}",
-            prefix.custom_color(CTP_BLUE),
-            line.custom_color(CTP_TEXT)
-        );
+        eprintln!("{}{}", prefix.custom_color(prefix_color), line.custom_color(CTP_TEXT));
     }
     visual
 }
 
-pub fn display_explanation(explanation: &str) -> usize {
-    let width = terminal_width();
-    let styled = style_html_tags(explanation);
-    let visual = count_visual_lines(&styled, width);
-    for line in styled.lines() {
-        eprintln!("{}", line.custom_color(CTP_TEXT));
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SafetyLevel {
+    Safe,
+    Unsafe,
+    Dangerous,
+}
+
+fn safety_color(level: SafetyLevel) -> colored::CustomColor {
+    match level {
+        SafetyLevel::Safe => CTP_GREEN,
+        SafetyLevel::Unsafe => CTP_YELLOW,
+        SafetyLevel::Dangerous => CTP_RED,
     }
-    visual
+}
+
+fn parse_safety_level(text: &str) -> (SafetyLevel, &str) {
+    let trimmed = text.trim_start();
+    if let Some(rest) = trimmed.strip_prefix("SAFE:") {
+        return (SafetyLevel::Safe, rest.trim_start());
+    }
+    if let Some(rest) = trimmed.strip_prefix("UNSURE:") {
+        return (SafetyLevel::Unsafe, rest.trim_start());
+    }
+    if let Some(rest) = trimmed.strip_prefix("DANGEROUS:") {
+        return (SafetyLevel::Dangerous, rest.trim_start());
+    }
+    (SafetyLevel::Unsafe, trimmed)
+}
+
+pub fn display_explanation(explanation: &str) -> usize {
+    let styled = style_html_tags(explanation);
+    let (first, tail) = styled.split_once('\n').unwrap_or((&styled, ""));
+    let (level, rest) = parse_safety_level(first);
+    let body = if tail.is_empty() {
+        rest.to_string()
+    } else {
+        format!("{rest}\n{tail}")
+    };
+    display_bulleted(&body, safety_color(level))
 }
 
 pub(crate) fn style_html_tags(text: &str) -> String {
