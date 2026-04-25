@@ -188,9 +188,9 @@ pub fn parse_cli_args() -> Result<CliArgs, LarpshellError> {
 }
 
 static CWD_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
-static CWD_LOCK: Mutex<()> = Mutex::new(());
+pub(crate) static CWD_LOCK: Mutex<()> = Mutex::new(());
 
-fn execute_shell_command_unlocked(command: &str) -> Result<(), LarpshellError> {
+pub(crate) fn execute_shell_command_unlocked(command: &str) -> Result<(), LarpshellError> {
     let trimmed = command.trim();
 
     if trimmed.is_empty() {
@@ -246,8 +246,7 @@ pub fn prompt_select(
 ) -> Result<usize, LarpshellError> {
     let selection = Select::new(prompt, items.to_vec())
         .with_starting_cursor(default)
-        .prompt()
-        .map_err(LarpshellError::InquireError)?;
+        .prompt()?;
     Ok(items
         .iter()
         .position(|x| x == &selection)
@@ -255,16 +254,11 @@ pub fn prompt_select(
 }
 
 pub fn prompt_input(prompt: &str) -> Result<String, LarpshellError> {
-    Text::new(prompt)
-        .prompt()
-        .map_err(LarpshellError::InquireError)
+    Ok(Text::new(prompt).prompt()?)
 }
 
 pub fn prompt_input_with_default(prompt: &str, default: &str) -> Result<String, LarpshellError> {
-    Text::new(prompt)
-        .with_default(default)
-        .prompt()
-        .map_err(LarpshellError::InquireError)
+    Ok(Text::new(prompt).with_default(default).prompt()?)
 }
 
 pub fn home_dir() -> PathBuf {
@@ -273,109 +267,4 @@ pub fn home_dir() -> PathBuf {
         .or_else(|| env::var("USERPROFILE").ok())
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("~"))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    // `set_current_dir` is process-global, so cwd tests must not run in parallel.
-    /// Run a test while preserving the original working directory.
-    fn with_saved_cwd(f: impl FnOnce() + std::panic::UnwindSafe) {
-        let _guard = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let original = env::current_dir().unwrap();
-        let result = std::panic::catch_unwind(f);
-        env::set_current_dir(&original).unwrap();
-        if let Err(payload) = result {
-            std::panic::resume_unwind(payload);
-        }
-    }
-
-    #[test]
-    fn empty_command_is_noop() {
-        assert!(execute_shell_command("").is_ok());
-        assert!(execute_shell_command("   ").is_ok());
-    }
-
-    #[test]
-    fn cd_bare_goes_home() {
-        with_saved_cwd(|| {
-            let home = env::var("HOME").unwrap();
-            execute_shell_command_unlocked("cd").unwrap();
-            assert_eq!(env::current_dir().unwrap(), PathBuf::from(&home));
-        });
-    }
-
-    #[test]
-    fn cd_absolute_path() {
-        with_saved_cwd(|| {
-            execute_shell_command_unlocked("cd /tmp").unwrap();
-            assert_eq!(env::current_dir().unwrap(), PathBuf::from("/tmp"));
-        });
-    }
-
-    #[test]
-    fn cd_tilde_expands_to_home() {
-        with_saved_cwd(|| {
-            let home = env::var("HOME").unwrap();
-            execute_shell_command_unlocked("cd ~").unwrap();
-            assert_eq!(env::current_dir().unwrap(), PathBuf::from(&home));
-        });
-    }
-
-    #[test]
-    fn cd_tilde_subdir_expands() {
-        with_saved_cwd(|| {
-            let home = env::var("HOME").unwrap();
-            let subdir = PathBuf::from(&home);
-            // Ensure $HOME exists, then cd ~ should land there.
-            assert!(subdir.is_dir(), "$HOME must exist");
-            execute_shell_command_unlocked("cd ~").unwrap();
-            assert_eq!(env::current_dir().unwrap(), subdir);
-        });
-    }
-
-    #[test]
-    fn cd_nonexistent_keeps_cwd() {
-        with_saved_cwd(|| {
-            let before = env::current_dir().unwrap();
-            // sh prints an error to stderr; cwd stays unchanged.
-            execute_shell_command_unlocked("cd /nonexistent_dir_that_should_not_exist").unwrap();
-            assert_eq!(env::current_dir().unwrap(), before);
-        });
-    }
-
-    #[test]
-    fn compound_cd_changes_cwd() {
-        with_saved_cwd(|| {
-            // `cd /tmp && echo ok` should run both parts and sync cwd back.
-            execute_shell_command_unlocked("cd /tmp && echo ok").unwrap();
-            assert_eq!(env::current_dir().unwrap(), PathBuf::from("/tmp"));
-        });
-    }
-
-    #[test]
-    fn compound_cd_failed_keeps_cwd() {
-        with_saved_cwd(|| {
-            let before = env::current_dir().unwrap();
-            // cd to nonexistent dir fails, `echo ok` never runs, cwd unchanged.
-            execute_shell_command_unlocked("cd /nonexistent_dir && echo ok").unwrap();
-            assert_eq!(env::current_dir().unwrap(), before);
-        });
-    }
-
-    #[test]
-    fn pipe_command_runs() {
-        assert!(execute_shell_command("echo hello | cat").is_ok());
-    }
-
-    #[test]
-    fn regular_command_runs_via_shell() {
-        assert!(execute_shell_command("echo hello").is_ok());
-    }
-
-    #[test]
-    fn multiline_command_runs_via_shell() {
-        assert!(execute_shell_command("echo line1\necho line2").is_ok());
-    }
 }

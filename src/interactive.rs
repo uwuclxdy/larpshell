@@ -27,14 +27,10 @@ static SHELL_MODE: AtomicBool = AtomicBool::new(false);
 // "uninstall" = 9 chars. Column = 2 (indent) + 1 (/) + 9 (name) + 4 (gap) = 16
 const PREVIEW_DESC_COL: usize = 16;
 
-/// Formats one preview row with ANSI coloring.
-/// `cmd_name` includes the leading `/`.
-/// `typed_len` is how many chars of `cmd_name` the user has already typed.
-fn format_preview_row(cmd_name: &str, typed_len: usize, description: &str) -> String {
-    let typed = &cmd_name[..typed_len.min(cmd_name.len())];
-    let untyped = &cmd_name[typed_len.min(cmd_name.len())..];
-    let name_display_len = 1 + cmd_name.len(); // "  " + "/" + name
-    let pad = PREVIEW_DESC_COL.saturating_sub(name_display_len + 2);
+pub(crate) fn format_preview_row(cmd_name: &str, typed_len: usize, description: &str) -> String {
+    let split = typed_len.min(cmd_name.len());
+    let (typed, untyped) = cmd_name.split_at(split);
+    let pad = PREVIEW_DESC_COL.saturating_sub(cmd_name.len() + 3);
     format!(
         "  {}{}{}{}",
         typed.custom_color(CTP_PRIMARY).bold(),
@@ -371,55 +367,4 @@ pub fn user_input_prefilled(initial: &str) -> Result<Option<String>, io::Error> 
 
 pub fn user_input() -> Result<Option<String>, io::Error> {
     with_editor(|editor, prompt| editor.readline(prompt))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use rustyline::highlight::{CmdKind, Highlighter};
-
-    #[test]
-    fn highlight_slash_prefix_colors_typed_part() {
-        colored::control::set_override(true);
-        let helper = NlshHelper;
-        let result = helper.highlight("/pr", 3);
-        assert!(result.contains("\x1b["), "expected ANSI codes in: {result}");
-        assert!(result.contains("/pr"), "typed part must appear in output");
-    }
-
-    #[test]
-    fn highlight_non_slash_line_is_unchanged() {
-        let helper = NlshHelper;
-        let result = helper.highlight("list files", 10);
-        assert_eq!(result.as_ref(), "list files");
-    }
-
-    #[test]
-    fn highlight_char_true_for_slash_line() {
-        let helper = NlshHelper;
-        assert!(helper.highlight_char("/api", 4, CmdKind::Other));
-    }
-
-    #[test]
-    fn highlight_char_false_for_normal_line() {
-        let helper = NlshHelper;
-        assert!(!helper.highlight_char("list files", 10, CmdKind::Other));
-    }
-
-    #[test]
-    fn format_preview_row_pads_to_column() {
-        colored::control::set_override(false);
-        let row = format_preview_row_plain("/api", 0, "configure API provider");
-        assert!(row.contains("configure API provider"), "row: {row}");
-        let row2 = format_preview_row_plain("/uninstall", 0, "uninstall larpshell");
-        let desc_pos1 = row.find("configure").unwrap();
-        let desc_pos2 = row2.find("uninstall larpshell").unwrap();
-        assert_eq!(desc_pos1, desc_pos2, "descriptions must align");
-    }
-
-    fn format_preview_row_plain(cmd_name: &str, typed_len: usize, description: &str) -> String {
-        colored::control::set_override(false);
-        let r = format_preview_row(cmd_name, typed_len, description);
-        strip_ansi_escapes::strip_str(&r)
-    }
 }

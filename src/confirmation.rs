@@ -16,12 +16,12 @@ pub enum ConfirmResult {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum ConfirmPromptMode {
+pub(crate) enum ConfirmPromptMode {
     WithExplain,
     Simple,
 }
 
-enum KeyEvent {
+pub(crate) enum KeyEvent {
     Char(char),
     Backspace,
     Delete,
@@ -38,7 +38,7 @@ enum KeyEvent {
 
 /// Parse one logical key event from any `Read` source. Works on both raw-mode
 /// terminals and plain pipes (e.g. during tests with piped stdin).
-fn parse_key_from_reader(reader: &mut impl std::io::Read) -> KeyEvent {
+pub(crate) fn parse_key_from_reader(reader: &mut impl std::io::Read) -> KeyEvent {
     let mut key_byte = [0u8; 1];
     if reader.read(&mut key_byte).unwrap_or(0) == 0 {
         return KeyEvent::Eof;
@@ -134,9 +134,8 @@ pub fn display_response(text: &str, style: ResponseStyle) -> usize {
 
 pub fn display_command(command: &str) -> usize {
     let width = terminal_width();
-    let lines: Vec<&str> = command.lines().collect();
-    if lines.len() == 1 {
-        let visual = count_visual_lines(&format!("$ {}", command), width);
+    if command.lines().count() == 1 {
+        let visual = count_visual_lines(&format!("$ {command}"), width);
         eprintln!(
             "{} {}",
             "$".custom_color(CTP_PRIMARY),
@@ -150,8 +149,8 @@ pub fn display_command(command: &str) -> usize {
             ">".custom_color(CTP_PRIMARY),
             "multiline command:".custom_color(CTP_TEXT).bold()
         );
-        for line in lines.iter() {
-            visual += count_visual_lines(&format!("$ {}", line), width);
+        for line in command.lines() {
+            visual += count_visual_lines(&format!("$ {line}"), width);
             eprintln!(
                 "{} {}",
                 "$".custom_color(CTP_PRIMARY),
@@ -164,20 +163,16 @@ pub fn display_command(command: &str) -> usize {
 
 pub fn display_message(message: &str) -> usize {
     let width = terminal_width();
-    let lines: Vec<&str> = message.lines().collect();
     let mut visual = 0;
-
-    for (index, line) in lines.iter().enumerate() {
+    for (index, line) in message.lines().enumerate() {
         let prefix = if index == 0 { "● " } else { "  " };
-        let rendered = format!("{prefix}{line}");
-        visual += count_visual_lines(&rendered, width);
+        visual += count_visual_lines(&format!("{prefix}{line}"), width);
         eprintln!(
             "{}{}",
             prefix.custom_color(CTP_BLUE),
             line.custom_color(CTP_TEXT)
         );
     }
-
     visual
 }
 
@@ -185,14 +180,13 @@ pub fn display_explanation(explanation: &str) -> usize {
     let width = terminal_width();
     let styled = style_html_tags(explanation);
     let visual = count_visual_lines(&styled, width);
-    let lines: Vec<&str> = styled.lines().collect();
-    for line in &lines {
+    for line in styled.lines() {
         eprintln!("{}", line.custom_color(CTP_TEXT));
     }
     visual
 }
 
-fn style_html_tags(text: &str) -> String {
+pub(crate) fn style_html_tags(text: &str) -> String {
     if colored::control::SHOULD_COLORIZE.should_colorize() {
         text.replace("<b>", "\x1b[1m")
             .replace("</b>", "\x1b[22m")
@@ -210,9 +204,7 @@ fn style_html_tags(text: &str) -> String {
     }
 }
 
-/// Shared confirmation loop for both WithExplain and Simple modes.
-/// Takes a callback to read keys, allowing tests to inject input.
-fn confirm_from_reader(
+pub(crate) fn confirm_from_reader(
     mut read_key: impl FnMut() -> KeyEvent,
     mode: ConfirmPromptMode,
     cmd_line_count: usize,
@@ -304,33 +296,27 @@ pub fn confirm_execution(
 
 fn confirmation_prompt(mode: ConfirmPromptMode) -> usize {
     let width = terminal_width();
-    let mut visual = 0;
-    if matches!(mode, ConfirmPromptMode::WithExplain) {
-        let line1 = format!("{}", "Run this?".custom_color(CTP_YELLOW));
-        visual += count_visual_lines(&line1, width);
-        eprintln!("{}", line1);
-        let line2 = format!(
+    let header = "Run this?".custom_color(CTP_YELLOW).to_string();
+    let mut visual = count_visual_lines(&header, width);
+    eprintln!("{header}");
+    let hint = if matches!(mode, ConfirmPromptMode::WithExplain) {
+        format!(
             "[{}] to execute, [{}] to explain, [{}] to edit, [{}] to cancel",
             "Y/Enter".custom_color(CTP_PRIMARY).bold(),
             "E".custom_color(CTP_PRIMARY).bold(),
             "Arrow Up".custom_color(CTP_PRIMARY).bold(),
             "N".custom_color(CTP_PRIMARY).bold()
-        );
-        visual += count_visual_lines(&line2, width);
-        eprint!("{}", line2.custom_color(CTP_BLUE));
+        )
     } else {
-        let line1 = format!("{}", "Run this?".custom_color(CTP_YELLOW));
-        visual += count_visual_lines(&line1, width);
-        eprintln!("{}", line1);
-        let line2 = format!(
+        format!(
             "[{}] to execute, [{}] to edit, [{}] to cancel",
             "Y/Enter".custom_color(CTP_PRIMARY).bold(),
             "Arrow Up".custom_color(CTP_PRIMARY).bold(),
             "N".custom_color(CTP_PRIMARY).bold()
-        );
-        visual += count_visual_lines(&line2, width);
-        eprint!("{}", line2.custom_color(CTP_BLUE));
-    }
+        )
+    };
+    visual += count_visual_lines(&hint, width);
+    eprint!("{}", hint.custom_color(CTP_BLUE));
     visual
 }
 
@@ -450,250 +436,5 @@ pub fn edit_command(current: &str) -> Option<String> {
             }
             KeyEvent::ArrowUp | KeyEvent::Other => {}
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn display_command_single_line_returns_one() {
-        assert_eq!(display_command("echo hi"), 1);
-    }
-
-    #[test]
-    fn display_command_multiline_returns_n_plus_one() {
-        assert_eq!(display_command("echo hi\necho bye"), 3);
-        assert_eq!(display_command("a\nb\nc"), 4);
-    }
-
-    #[test]
-    fn display_message_single_line_returns_one() {
-        assert_eq!(display_message("done"), 1);
-    }
-
-    #[test]
-    fn display_message_multiline_returns_line_count() {
-        assert_eq!(display_message("line one\nline two\nline three"), 3);
-    }
-
-    #[test]
-    fn display_response_delegates_to_message_renderer() {
-        assert_eq!(display_response("done", ResponseStyle::Message), 1);
-    }
-
-    #[test]
-    fn display_explanation_single_line_returns_one() {
-        assert_eq!(display_explanation("pipes stdout to a file"), 1);
-    }
-
-    #[test]
-    fn display_explanation_multiline_returns_line_count() {
-        assert_eq!(display_explanation("line one\nline two\nline three"), 3);
-    }
-
-    #[test]
-    fn style_html_tags_converts_bold() {
-        colored::control::set_override(true);
-        let result = style_html_tags("<b>hello</b>");
-        assert_eq!(result, "\x1b[1mhello\x1b[22m");
-    }
-
-    #[test]
-    fn style_html_tags_converts_italic() {
-        colored::control::set_override(true);
-        let result = style_html_tags("<i>hello</i>");
-        assert_eq!(result, "\x1b[3mhello\x1b[23m");
-    }
-
-    #[test]
-    fn style_html_tags_converts_underline() {
-        colored::control::set_override(true);
-        let result = style_html_tags("<u>hello</u>");
-        assert_eq!(result, "\x1b[4mhello\x1b[24m");
-    }
-
-    #[test]
-    fn style_html_tags_strips_when_no_color() {
-        colored::control::set_override(false);
-        let result = style_html_tags("<b>bold</b> and <i>italic</i>");
-        assert_eq!(result, "bold and italic");
-        colored::control::set_override(true);
-    }
-
-    // Characterization tests for key parsing and confirmation behavior
-    #[test]
-    fn parse_key_from_reader_maps_enter() {
-        let mut input = std::io::Cursor::new(b"\n");
-        assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::Enter));
-    }
-
-    #[test]
-    fn parse_key_from_reader_maps_carriage_return() {
-        let mut input = std::io::Cursor::new(b"\r");
-        assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::Enter));
-    }
-
-    #[test]
-    fn parse_key_from_reader_maps_char_y() {
-        let mut input = std::io::Cursor::new(b"y");
-        assert!(matches!(
-            parse_key_from_reader(&mut input),
-            KeyEvent::Char('y')
-        ));
-    }
-
-    #[test]
-    fn parse_key_from_reader_maps_char_uppercase_y() {
-        let mut input = std::io::Cursor::new(b"Y");
-        assert!(matches!(
-            parse_key_from_reader(&mut input),
-            KeyEvent::Char('Y')
-        ));
-    }
-
-    #[test]
-    fn parse_key_from_reader_maps_char_e() {
-        let mut input = std::io::Cursor::new(b"e");
-        assert!(matches!(
-            parse_key_from_reader(&mut input),
-            KeyEvent::Char('e')
-        ));
-    }
-
-    #[test]
-    fn parse_key_from_reader_maps_char_n() {
-        let mut input = std::io::Cursor::new(b"n");
-        assert!(matches!(
-            parse_key_from_reader(&mut input),
-            KeyEvent::Char('n')
-        ));
-    }
-
-    #[test]
-    fn parse_key_from_reader_maps_ctrl_c() {
-        let mut input = std::io::Cursor::new(b"\x03");
-        assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::CtrlC));
-    }
-
-    #[test]
-    fn parse_key_from_reader_maps_backspace() {
-        let mut input = std::io::Cursor::new(b"\x7f"); // DEL = backspace
-        assert!(matches!(
-            parse_key_from_reader(&mut input),
-            KeyEvent::Backspace
-        ));
-    }
-
-    #[test]
-    fn parse_key_from_reader_maps_arrow_up_escape_sequence() {
-        let mut input = std::io::Cursor::new(b"\x1b[A");
-        assert!(matches!(
-            parse_key_from_reader(&mut input),
-            KeyEvent::ArrowUp
-        ));
-    }
-
-    #[test]
-    fn parse_key_from_reader_maps_arrow_down_escape_sequence() {
-        let mut input = std::io::Cursor::new(b"\x1b[B");
-        assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::Other));
-    }
-
-    #[test]
-    fn parse_key_from_reader_maps_arrow_right_escape_sequence() {
-        let mut input = std::io::Cursor::new(b"\x1b[C");
-        assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::Right));
-    }
-
-    #[test]
-    fn parse_key_from_reader_maps_arrow_left_escape_sequence() {
-        let mut input = std::io::Cursor::new(b"\x1b[D");
-        assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::Left));
-    }
-
-    #[test]
-    fn parse_key_from_reader_maps_delete_key() {
-        let mut input = std::io::Cursor::new(b"\x1b[3~");
-        assert!(matches!(
-            parse_key_from_reader(&mut input),
-            KeyEvent::Delete
-        ));
-    }
-
-    #[test]
-    fn parse_key_from_reader_maps_eof() {
-        let mut input = std::io::Cursor::new(b"");
-        assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::Eof));
-    }
-
-    #[test]
-    fn confirm_from_reader_with_explain_on_enter_returns_yes() {
-        let mut keys = vec![KeyEvent::Enter].into_iter();
-        let result = confirm_from_reader(
-            || keys.next().unwrap(),
-            ConfirmPromptMode::WithExplain,
-            1,
-            0,
-        );
-        assert!(matches!(result, ConfirmResult::Yes));
-    }
-
-    #[test]
-    fn confirm_from_reader_with_explain_on_y_returns_yes() {
-        let mut keys = vec![KeyEvent::Char('y')].into_iter();
-        let result = confirm_from_reader(
-            || keys.next().unwrap(),
-            ConfirmPromptMode::WithExplain,
-            1,
-            0,
-        );
-        assert!(matches!(result, ConfirmResult::Yes));
-    }
-
-    #[test]
-    fn confirm_from_reader_with_explain_on_e_returns_explain() {
-        let mut keys = vec![KeyEvent::Char('e')].into_iter();
-        let result = confirm_from_reader(
-            || keys.next().unwrap(),
-            ConfirmPromptMode::WithExplain,
-            1,
-            0,
-        );
-        assert!(matches!(result, ConfirmResult::Explain));
-    }
-
-    #[test]
-    fn confirm_from_reader_with_explain_on_n_returns_cancel() {
-        let mut keys = vec![KeyEvent::Char('n')].into_iter();
-        let result = confirm_from_reader(
-            || keys.next().unwrap(),
-            ConfirmPromptMode::WithExplain,
-            1,
-            0,
-        );
-        assert!(matches!(result, ConfirmResult::Cancel));
-    }
-
-    #[test]
-    fn confirm_from_reader_on_arrow_up_returns_edit() {
-        let mut keys = vec![KeyEvent::ArrowUp].into_iter();
-        let result = confirm_from_reader(|| keys.next().unwrap(), ConfirmPromptMode::Simple, 1, 1);
-        assert!(matches!(result, ConfirmResult::Edit));
-    }
-
-    #[test]
-    fn confirm_from_reader_on_eof_returns_no() {
-        let mut keys = vec![KeyEvent::Eof].into_iter();
-        let result = confirm_from_reader(|| keys.next().unwrap(), ConfirmPromptMode::Simple, 1, 0);
-        assert!(matches!(result, ConfirmResult::No));
-    }
-
-    #[test]
-    fn confirm_from_reader_ignores_e_in_simple_mode() {
-        let mut keys = vec![KeyEvent::Char('e'), KeyEvent::Enter].into_iter();
-        let result = confirm_from_reader(|| keys.next().unwrap(), ConfirmPromptMode::Simple, 1, 0);
-        assert!(matches!(result, ConfirmResult::Yes));
     }
 }

@@ -211,8 +211,9 @@ async fn run_piped(runtime: &mut Runtime) -> Result<(), LarpshellError> {
         return Ok(());
     }
 
-    process_user_input(input, runtime, CommandMode::Single).await?;
-    Ok(())
+    process_user_input(input, runtime, CommandMode::Single)
+        .await
+        .map(drop)
 }
 
 // ── REPL mode ───────────────────────────────────────────────────────────────
@@ -447,23 +448,20 @@ fn build_tool_registry(agent_mode: AgentMode) -> ToolRegistry {
 // ── subcommand handlers ─────────────────────────────────────────────────────
 
 fn handle_history_subcommand(enable: Option<bool>) -> Result<(), LarpshellError> {
-    match enable {
-        Some(true) => {
-            config::set_history_enabled(true)?;
-            cli::print_ok("command history enabled.");
-        }
-        Some(false) => {
-            config::set_history_enabled(false)?;
-            cli::print_ok("command history disabled.");
-        }
-        None => {
-            let status = if config::history_enabled() {
-                "enabled"
-            } else {
-                "disabled"
-            };
-            println!("command history is {status}.");
-        }
+    if let Some(on) = enable {
+        config::set_history_enabled(on)?;
+        cli::print_ok(if on {
+            "command history enabled."
+        } else {
+            "command history disabled."
+        });
+    } else {
+        let status = if config::history_enabled() {
+            "enabled"
+        } else {
+            "disabled"
+        };
+        println!("command history is {status}.");
     }
     Ok(())
 }
