@@ -171,7 +171,11 @@ fn display_bulleted(text: &str, prefix_color: colored::CustomColor) -> usize {
     for (index, line) in text.lines().enumerate() {
         let prefix = if index == 0 { "● " } else { "  " };
         visual += count_visual_lines(&format!("{prefix}{line}"), width);
-        eprintln!("{}{}", prefix.custom_color(prefix_color), line.custom_color(CTP_TEXT));
+        eprintln!(
+            "{}{}",
+            prefix.custom_color(prefix_color),
+            line.custom_color(CTP_TEXT)
+        );
     }
     visual
 }

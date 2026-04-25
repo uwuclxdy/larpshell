@@ -458,11 +458,16 @@ fn execute_run_command(
     let is_shell_expr = args.is_empty() && has_shell_metacharacters(command);
 
     if is_shell_expr && agent_mode.is_safe() {
-        return Err(format!("shell expressions not allowed in safe mode: {command}"));
+        return Err(format!(
+            "shell expressions not allowed in safe mode: {command}"
+        ));
     }
 
     let (cmd, cmd_args) = if is_shell_expr {
-        ("sh".to_string(), vec!["-c".to_string(), command.to_string()])
+        (
+            "sh".to_string(),
+            vec!["-c".to_string(), command.to_string()],
+        )
     } else {
         let (c, a) = split_command_and_args(command, args)?;
         if agent_mode.is_safe() {
