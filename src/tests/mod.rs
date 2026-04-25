@@ -11,8 +11,12 @@ use std::sync::{Mutex, OnceLock};
 use toml::from_str;
 
 mod agent;
+mod cli;
+mod confirmation;
 mod edit;
+mod error;
 mod explain;
+mod interactive;
 mod slash;
 
 fn binary() -> PathBuf {
