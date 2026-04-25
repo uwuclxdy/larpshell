@@ -37,6 +37,10 @@ struct Part {
     function_call: Option<FunctionCall>,
     #[serde(skip_serializing_if = "Option::is_none")]
     function_response: Option<FunctionResponse>,
+    /// Opaque token from the model. Must be echoed back unchanged on the
+    /// next turn alongside the functionCall, or the API rejects the request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    thought_signature: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -118,6 +122,7 @@ impl AIProvider for GeminiProvider {
                     text: Some(prompt.to_string()),
                     function_call: None,
                     function_response: None,
+                    thought_signature: None,
                 }],
             }],
             tools: None,
@@ -226,6 +231,7 @@ impl AIProvider for GeminiProvider {
                                 args: tool_call.arguments.clone(),
                             }),
                             function_response: None,
+                            thought_signature: tool_call.thought_signature.clone(),
                         })
                         .collect()
                 } else if message.role == Role::Tool {
@@ -238,12 +244,14 @@ impl AIProvider for GeminiProvider {
                                 "result": message.content.clone().unwrap_or_default()
                             }),
                         }),
+                        thought_signature: None,
                     }]
                 } else {
                     vec![Part {
                         text: message.content.clone(),
                         function_call: None,
                         function_response: None,
+                        thought_signature: None,
                     }]
                 };
 
@@ -321,13 +329,20 @@ impl AIProvider for GeminiProvider {
 
         let tool_calls: Vec<crate::providers::ToolCall> = parts
             .iter()
-            .filter_map(|part| part.function_call.as_ref())
-            .enumerate()
-            .map(|(index, function_call)| crate::providers::ToolCall {
-                id: format!("gemini_tc_{index}"),
-                name: function_call.name.clone(),
-                arguments: function_call.args.clone(),
+            .filter_map(|part| {
+                part.function_call
+                    .as_ref()
+                    .map(|call| (call, part.thought_signature.clone()))
             })
+            .enumerate()
+            .map(
+                |(index, (function_call, thought_signature))| crate::providers::ToolCall {
+                    id: format!("gemini_tc_{index}"),
+                    name: function_call.name.clone(),
+                    arguments: function_call.args.clone(),
+                    thought_signature,
+                },
+            )
             .collect();
 
         if !tool_calls.is_empty() {

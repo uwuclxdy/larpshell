@@ -249,6 +249,7 @@ impl OpenAICompatibleProvider {
                         id: tool_call.id.clone(),
                         name: tool_call.function.name.clone(),
                         arguments,
+                        thought_signature: None,
                     }
                 })
                 .collect();

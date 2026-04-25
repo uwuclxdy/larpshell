@@ -186,6 +186,7 @@ impl AIProvider for OllamaProvider {
                     id: format!("ollama_tc_{index}"),
                     name: tool_call.function.name.clone(),
                     arguments: tool_call.function.arguments.clone(),
+                    thought_signature: None,
                 })
                 .collect();
             return Ok(ChatResponse::ToolCalls(calls));

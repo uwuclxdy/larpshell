@@ -914,6 +914,7 @@ mod tests {
                 arguments: serde_json::json!({
                     "directory_path": directory.display().to_string()
                 }),
+                thought_signature: None,
             }]),
             ChatResponse::Message("COMMAND: cat hello.txt".to_string()),
         ]);
@@ -957,6 +958,7 @@ mod tests {
             id: "tool-1".to_string(),
             name: "search_files".to_string(),
             arguments: serde_json::json!({ "pattern": "main" }),
+            thought_signature: None,
         };
         let responses = std::iter::repeat_n(
             ChatResponse::ToolCalls(vec![tool_call]),

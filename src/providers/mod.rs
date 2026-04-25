@@ -72,6 +72,11 @@ pub struct ToolCall {
     #[serde(rename = "function")]
     pub name: String,
     pub arguments: serde_json::Value,
+    /// Provider-specific opaque token preserved across multi-turn conversations
+    /// (currently used by Gemini's thought_signature). Skipped in serde since
+    /// it's only carried internally between provider calls.
+    #[serde(skip)]
+    pub thought_signature: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -189,6 +194,7 @@ mod tests {
             id: String::from("call-1"),
             name: String::from("search"),
             arguments: json!({ "query": "rust" }),
+            thought_signature: None,
         }];
         let message = ChatMessage::assistant_tool_calls(tool_calls.clone());
 
@@ -243,6 +249,7 @@ mod tests {
             id: String::from("call-1"),
             name: String::from("search"),
             arguments: json!({ "query": "rust" }),
+            thought_signature: None,
         };
 
         assert_eq!(
@@ -268,6 +275,7 @@ mod tests {
             id: String::from("call-1"),
             name: String::from("search"),
             arguments: json!({}),
+            thought_signature: None,
         }];
         let response = ChatResponse::ToolCalls(tool_calls.clone());
 
