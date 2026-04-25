@@ -455,14 +455,24 @@ fn execute_run_command(
     command: &str,
     args: &[String],
 ) -> Result<String, String> {
-    let (command, args) = split_command_and_args(command, args)?;
+    let is_shell_expr = args.is_empty() && has_shell_metacharacters(command);
 
-    if agent_mode.is_safe() {
-        validate_safe_run_command(&command, &args)?;
+    if is_shell_expr && agent_mode.is_safe() {
+        return Err(format!("shell expressions not allowed in safe mode: {command}"));
     }
 
-    let output = Command::new(&command)
-        .args(&args)
+    let (cmd, cmd_args) = if is_shell_expr {
+        ("sh".to_string(), vec!["-c".to_string(), command.to_string()])
+    } else {
+        let (c, a) = split_command_and_args(command, args)?;
+        if agent_mode.is_safe() {
+            validate_safe_run_command(&c, &a)?;
+        }
+        (c, a)
+    };
+
+    let output = Command::new(&cmd)
+        .args(&cmd_args)
         .output()
         .map_err(|error| format!("failed to execute command: {}", error))?;
 
@@ -686,6 +696,23 @@ mod tests {
         assert_ok_trimmed(
             execute_run_command(AgentMode::On, "echo", &["--force".to_string()]),
             "--force",
+        );
+    }
+
+    #[test]
+    fn run_command_on_executes_compound_shell_expression() {
+        assert_ok_trimmed(
+            execute_run_command(AgentMode::On, "echo foo && echo bar", &[]),
+            "foo
+bar",
+        );
+    }
+
+    #[test]
+    fn run_command_safe_rejects_compound_shell_expression() {
+        assert_err_contains(
+            execute_run_command(AgentMode::Safe, "echo foo && echo bar", &[]),
+            "shell expressions not allowed in safe mode",
         );
     }
 }
