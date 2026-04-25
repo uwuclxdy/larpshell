@@ -459,7 +459,7 @@ fn apply_provider_config(providers: &mut MultiProviderConfig, config: &ProviderC
 fn display_config_summary(config: &Config, provider_name: &str) -> Result<(), LarpshellError> {
     print_ok_bold("Configuration saved!");
     eprintln!();
-    eprintln!("Provider: {}", provider_name);
+    eprintln!("Provider: {provider_name}");
 
     let provider_config = config.provider_config()?;
     match &provider_config.config {

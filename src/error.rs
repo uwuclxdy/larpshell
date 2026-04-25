@@ -117,7 +117,7 @@ impl LarpshellError {
                 if body.contains("model") {
                     LarpshellError::ModelNotFound(body.to_string())
                 } else {
-                    LarpshellError::InvalidResponse(format!("endpoint not found: {}", body))
+                    LarpshellError::InvalidResponse(format!("endpoint not found: {body}"))
                 }
             }
             429 => {
@@ -133,7 +133,7 @@ impl LarpshellError {
                 LarpshellError::RateLimitExceeded { retry_after }
             }
             500..=599 => LarpshellError::server_error(provider, body),
-            _ => LarpshellError::InvalidResponse(format!("{}: {}", status, body)),
+            _ => LarpshellError::InvalidResponse(format!("{status}: {body}")),
         }
     }
 

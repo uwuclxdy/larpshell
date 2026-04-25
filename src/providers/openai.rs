@@ -119,9 +119,9 @@ impl OpenAICompatibleProvider {
     fn chat_completions_url(&self) -> String {
         let normalized = self.base_url.trim_end_matches('/');
         if normalized.ends_with("/v1") {
-            format!("{}/chat/completions", normalized)
+            format!("{normalized}/chat/completions")
         } else {
-            format!("{}/v1/chat/completions", normalized)
+            format!("{normalized}/v1/chat/completions")
         }
     }
 
@@ -142,7 +142,7 @@ impl OpenAICompatibleProvider {
 
         let mut request = self.base.client.post(&url).json(&request_body);
         if let Some(ref api_key) = self.api_key {
-            request = request.header("Authorization", format!("Bearer {}", api_key));
+            request = request.header("Authorization", format!("Bearer {api_key}"));
         }
 
         let response = BaseProvider::send_json(request, self.provider_slug).await?;
@@ -223,7 +223,7 @@ impl OpenAICompatibleProvider {
 
         let mut request = self.base.client.post(&url).json(&request_body);
         if let Some(ref api_key) = self.api_key {
-            request = request.header("Authorization", format!("Bearer {}", api_key));
+            request = request.header("Authorization", format!("Bearer {api_key}"));
         }
 
         let response = BaseProvider::send_json(request, self.provider_slug).await?;

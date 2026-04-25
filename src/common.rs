@@ -74,7 +74,7 @@ pub fn os_name() -> String {
         linux_info()
     } else if cfg!(target_os = "macos") {
         "macOS".to_string()
-    } else if cfg!(target_os = "windows") {
+    } else if cfg!(windows) {
         "Windows".to_string()
     } else {
         "Unix".to_string()
@@ -99,7 +99,7 @@ fn linux_info() -> String {
     let distro = linux_distro();
     let kernel = kernel_version();
 
-    format!("linux ({}; kernel: {})", distro, kernel)
+    format!("linux ({distro}; kernel: {kernel})")
 }
 
 /// reads /etc/os-release to get the distro name and version.
@@ -117,7 +117,7 @@ fn linux_distro() -> String {
         }
 
         match (name, version) {
-            (Some(n), Some(v)) => format!("{} {}", n, v),
+            (Some(n), Some(v)) => format!("{n} {v}"),
             (Some(n), None) => n,
             _ => "linux".to_string(),
         }
@@ -140,17 +140,17 @@ fn kernel_version() -> String {
 }
 
 pub fn show_cursor() {
-    eprint!("{}", ANSI_SHOW_CURSOR);
+    eprint!("{ANSI_SHOW_CURSOR}");
     flush_stderr();
 }
 
 pub fn hide_cursor() {
-    eprint!("{}", ANSI_HIDE_CURSOR);
+    eprint!("{ANSI_HIDE_CURSOR}");
     flush_stderr();
 }
 
 pub fn clear_line() {
-    eprint!("{}", ANSI_CLEAR_LINE);
+    eprint!("{ANSI_CLEAR_LINE}");
     flush_stderr();
 }
 
@@ -161,15 +161,15 @@ pub fn clear_n_lines(n: usize) {
     if n == 0 {
         return;
     }
-    eprint!("{}", ANSI_CLEAR_LINE);
+    eprint!("{ANSI_CLEAR_LINE}");
     for _ in 0..n.saturating_sub(1) {
-        eprint!("{}", ANSI_CURSOR_UP_CLEAR);
+        eprint!("{ANSI_CURSOR_UP_CLEAR}");
     }
     flush_stderr();
 }
 
 pub fn eprint_flush(msg: &str) {
-    eprint!("{}", msg);
+    eprint!("{msg}");
     flush_stderr();
 }
 

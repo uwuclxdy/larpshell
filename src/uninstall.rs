@@ -36,7 +36,7 @@ fn handle_shell_integration() {
     match remove_shell_integration() {
         Ok(true) => print_ok("removed shell integration"),
         Ok(false) => eprintln!("{}", "  no shell integration found".dimmed()),
-        Err(e) => print_warning(&format!("failed to remove shell integration: {}", e)),
+        Err(e) => print_warning(&format!("failed to remove shell integration: {e}")),
     }
 }
 
@@ -54,7 +54,8 @@ fn uninstall_cargo_crate() -> Result<(), LarpshellError> {
         {
             eprintln!("{}", "  cargo crate not installed".dimmed());
         } else {
-            print_warning(&format!("failed to uninstall: {}", stderr.trim()));
+            let trimmed = stderr.trim();
+            print_warning(&format!("failed to uninstall: {trimmed}"));
         }
     }
     Ok(())

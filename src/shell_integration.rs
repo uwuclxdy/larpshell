@@ -200,7 +200,7 @@ fn verify_and_fix_bash_autocomplete() -> Result<(), LarpshellError> {
             .truncate(true)
             .open(&completion_path)?;
         writeln!(file, "# larpshell bash autocomplete")?;
-        writeln!(file, "{}", expected)?;
+        writeln!(file, "{expected}")?;
     }
 
     Ok(())
@@ -223,7 +223,7 @@ fn verify_and_fix_zsh_autocomplete() -> Result<(), LarpshellError> {
             .truncate(true)
             .open(&completion_path)?;
         writeln!(file, "# larpshell zsh autocomplete")?;
-        writeln!(file, "{}", expected)?;
+        writeln!(file, "{expected}")?;
     }
 
     Ok(())
@@ -245,7 +245,7 @@ fn verify_and_fix_fish_autocomplete() -> Result<(), LarpshellError> {
             .write(true)
             .truncate(true)
             .open(&completion_path)?;
-        writeln!(file, "{}", expected)?;
+        writeln!(file, "{expected}")?;
     }
 
     Ok(())
@@ -318,7 +318,6 @@ fn setup_bash_integration() -> Result<bool, LarpshellError> {
 
     writeln!(file, "\n# larpshell shell integration")?;
     writeln!(file, "{}", generate_bash_function())?;
-
     Ok(true)
 }
 

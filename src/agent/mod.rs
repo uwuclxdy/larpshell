@@ -238,10 +238,11 @@ fn initial_agent_messages(user_input: &str, config: &Config) -> Vec<ChatMessage>
 fn show_agent_start(config: &Config) -> Result<(), LarpshellError> {
     let model_name = config.provider_config()?.config.model().to_string();
     hide_cursor();
-    eprint_flush(&format!(
-        "{}",
-        format!("using {} (agent)...", model_name).custom_color(CTP_OVERLAY0)
-    ));
+    eprint_flush(
+        &format!("using {model_name} (agent)...")
+            .custom_color(CTP_OVERLAY0)
+            .to_string(),
+    );
     Ok(())
 }
 
@@ -294,7 +295,7 @@ where
 fn show_next_iteration_prompt(iteration: usize) {
     if iteration < MAX_AGENT_ITERATIONS - 1 {
         hide_cursor();
-        eprint_flush(&format!("{}", "thinking...".custom_color(CTP_OVERLAY0)));
+        eprint_flush(&"thinking...".custom_color(CTP_OVERLAY0).to_string());
     }
 }
 
@@ -339,10 +340,6 @@ where
     }
 }
 
-fn max_iterations_error() -> LarpshellError {
-    LarpshellError::AgentMaxIterations(MAX_AGENT_ITERATIONS)
-}
-
 fn agent_context(
     user_input: &str,
     config: &Config,
@@ -353,34 +350,6 @@ fn agent_context(
         initial_agent_messages(user_input, config),
         tool_registry.definitions(),
     ))
-}
-
-fn continue_after_response(iteration: usize) {
-    show_next_iteration_prompt(iteration);
-}
-
-fn agent_iteration_error() -> LarpshellError {
-    max_iterations_error()
-}
-
-async fn provider_response(
-    provider: &dyn AIProvider,
-    messages: &[ChatMessage],
-    tool_definitions: &[crate::providers::ToolDefinition],
-) -> Result<ChatResponse, LarpshellError> {
-    next_agent_response(provider, messages, tool_definitions).await
-}
-
-fn tool_response<F>(
-    response: ChatResponse,
-    tool_registry: &ToolRegistry,
-    messages: &mut Vec<ChatMessage>,
-    confirm_tool: &mut F,
-) -> Result<Option<FinalResponse>, LarpshellError>
-where
-    F: FnMut(&ToolCall) -> ToolConfirmResult,
-{
-    handle_agent_response(response, tool_registry, messages, confirm_tool)
 }
 
 fn tool_line_string(tool_call: &ToolCall) -> String {
@@ -402,7 +371,7 @@ fn success_summary_string(output: &str) -> String {
     format!(
         "  {} {}  {}",
         "result".custom_color(CTP_OVERLAY0),
-        format!("({} {})", line_count, line_word).custom_color(CTP_GREEN),
+        format!("({line_count} {line_word})").custom_color(CTP_GREEN),
         "ctrl+e".custom_color(CTP_OVERLAY0),
     )
 }
@@ -457,7 +426,7 @@ fn render_success_inline(output: &str, expanded: bool, cap: usize) {
 fn render_error_inline(msg: &str) {
     eprintln!("{}", error_line_string(msg));
     if let Some(tip) = tip_line_string(msg) {
-        eprintln!("{}", tip);
+        eprintln!("{tip}");
     }
     eprintln!();
 }
@@ -617,7 +586,7 @@ fn confirm_tool_call() -> ToolConfirmResult {
         "Ctrl+C".custom_color(CTP_PRIMARY).bold(),
         hint,
     );
-    let prompt_display = format!("{}", prompt.custom_color(CTP_BLUE));
+    let prompt_display = prompt.custom_color(CTP_BLUE).to_string();
     eprint!("{prompt_display}");
     let _ = std::io::Write::flush(&mut std::io::stderr());
 
@@ -731,21 +700,18 @@ where
     let (mut messages, tool_definitions) = agent_context(user_input, config, tool_registry)?;
 
     for iteration in 0..MAX_AGENT_ITERATIONS {
-        let response = match provider_response(provider, &messages, &tool_definitions).await {
-            Ok(response) => response,
-            Err(error) => return Err(error),
-        };
+        let response = next_agent_response(provider, &messages, &tool_definitions).await?;
 
         if let Some(text) =
-            tool_response(response, tool_registry, &mut messages, &mut confirm_tool)?
+            handle_agent_response(response, tool_registry, &mut messages, &mut confirm_tool)?
         {
             return Ok(text);
         }
 
-        continue_after_response(iteration);
+        show_next_iteration_prompt(iteration);
     }
 
-    Err(agent_iteration_error())
+    Err(LarpshellError::AgentMaxIterations(MAX_AGENT_ITERATIONS))
 }
 
 pub async fn run_agent_loop(

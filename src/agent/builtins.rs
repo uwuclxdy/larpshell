@@ -479,7 +479,7 @@ fn execute_run_command(
     let output = Command::new(&cmd)
         .args(&cmd_args)
         .output()
-        .map_err(|error| format!("failed to execute command: {}", error))?;
+        .map_err(|error| format!("failed to execute command: {error}"))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);

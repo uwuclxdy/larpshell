@@ -168,9 +168,9 @@ impl AIProvider for GeminiProvider {
         if let Some(finish_reason) = &candidate.finish_reason
             && (finish_reason == "SAFETY" || finish_reason == "RECITATION")
         {
+            let reason = finish_reason.to_lowercase();
             return Err(LarpshellError::InvalidResponse(format!(
-                "content blocked by gemini: {}",
-                finish_reason.to_lowercase()
+                "content blocked by gemini: {reason}"
             )));
         }
 

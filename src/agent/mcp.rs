@@ -30,7 +30,7 @@ struct JsonRpcRequest {
 
 #[derive(Deserialize)]
 struct JsonRpcResponse {
-    #[allow(dead_code)]
+    #[expect(dead_code, reason = "deserialized for protocol completeness")]
     id: Option<u64>,
     result: Option<serde_json::Value>,
     error: Option<JsonRpcError>,
@@ -38,7 +38,7 @@ struct JsonRpcResponse {
 
 #[derive(Deserialize)]
 struct JsonRpcError {
-    #[allow(dead_code)]
+    #[expect(dead_code, reason = "deserialized for protocol completeness")]
     code: i64,
     message: String,
 }

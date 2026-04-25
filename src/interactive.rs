@@ -52,7 +52,7 @@ pub fn clear_slash_preview() {
     for _ in 0..n {
         seq.push_str("\n\x1b[K");
     }
-    seq.push_str(&format!("\x1b[{}A\r", n));
+    seq.push_str(&format!("\x1b[{n}A\r"));
     print!("{seq}");
     let _ = io::stdout().flush();
 }
@@ -87,7 +87,7 @@ pub fn draw_slash_preview(line: &str) {
         }
     }
     // Return cursor to the prompt line.
-    seq.push_str(&format!("\x1b[{}A\r", max_lines));
+    seq.push_str(&format!("\x1b[{max_lines}A\r"));
 
     PREVIEW_LINE_COUNT.store(new_count, Ordering::Relaxed);
     print!("{seq}");
@@ -122,7 +122,7 @@ fn draw_arg_preview(line: &str) {
             ));
         }
     }
-    seq.push_str(&format!("\x1b[{}A\r", max_lines));
+    seq.push_str(&format!("\x1b[{max_lines}A\r"));
 
     PREVIEW_LINE_COUNT.store(new_count, Ordering::Relaxed);
     print!("{seq}");
@@ -136,7 +136,7 @@ pub fn reserve_preview_space() {
     for _ in 0..n {
         seq.push('\n');
     }
-    seq.push_str(&format!("\x1b[{}A", n));
+    seq.push_str(&format!("\x1b[{n}A"));
     print!("{seq}");
     let _ = io::stdout().flush();
 }
