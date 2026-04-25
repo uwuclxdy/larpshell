@@ -355,7 +355,7 @@ pub fn interactive_setup() -> Result<(), LarpshellError> {
     let config = Config {
         active_provider,
         providers: multi_providers,
-        agent: AgentMode::Off,
+        agent: existing_config.as_ref().map_or(AgentMode::Off, |c| c.agent),
     };
 
     save_config(&config)?;
