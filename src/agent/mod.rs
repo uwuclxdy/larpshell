@@ -23,7 +23,7 @@ use crate::prompt::{
 use crate::providers::{AIProvider, ChatMessage, ChatResponse, ToolCall};
 use tools::ToolRegistry;
 
-const MAX_AGENT_ITERATIONS: usize = 10;
+const MAX_AGENT_ITERATIONS: usize = 25;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FinalResponseKind {
