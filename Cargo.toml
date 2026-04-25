@@ -1,9 +1,9 @@
 [package]
 name = "larpshell"
-version = "0.1.5"
+version = "0.2.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
-description = "Ctrl+C then Ctrl+V is simply too much work. Just let an LLM rule your terminal directly!!"
+description = "Ctrl+C then Ctrl+V is simply too much work. Just let an LLM rule your terminal!!"
 homepage = "https://github.com/uwuclxdy/larpshell"
 repository = "https://github.com/uwuclxdy/larpshell"
 readme = "README.md"
@@ -11,8 +11,8 @@ keywords = ["cli", "ai", "shell", "terminal", "larp"]
 categories = ["command-line-utilities"]
 
 [dependencies]
-clap = { version = "4.6.0", features = ["derive"] }
-tokio = { version = "1.51.0", features = ["rt-multi-thread", "macros", "signal", "sync"] }
+clap = { version = "4.6.1", features = ["derive"] }
+tokio = { version = "1.52.1", features = ["rt-multi-thread", "macros", "signal", "sync"] }
 tokio-util = "0.7.18"
 reqwest = { version = "0.13.2", features = ["json", "rustls"] }
 serde = { version = "1.0.228", features = ["derive"] }
