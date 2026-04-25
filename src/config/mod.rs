@@ -185,8 +185,8 @@ pub struct OpenAIConfig {
 fn migrate_txt_prompt(md_path: &std::path::Path) {
     let txt_path = md_path.with_extension("txt");
     if txt_path.exists() && !md_path.exists() {
-        let _ = fs::rename(&txt_path, md_path)
-            .or_else(|_| fs::copy(&txt_path, md_path).map(|_| ()));
+        let _ =
+            fs::rename(&txt_path, md_path).or_else(|_| fs::copy(&txt_path, md_path).map(|_| ()));
         if md_path.exists() {
             let _ = fs::remove_file(&txt_path);
         }

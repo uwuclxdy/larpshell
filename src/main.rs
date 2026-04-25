@@ -470,7 +470,7 @@ fn handle_agent_subcommand(mode: Option<AgentMode>) -> Result<(), LarpshellError
     match mode {
         Some(mode) => {
             config::set_agent_mode(mode)?;
-            cli::print_ok(agent_mode_set_message(mode));
+            cli::print_ok(agent_mode_status_message(mode));
         }
         None => {
             let mode = match config::load_config() {
@@ -490,21 +490,9 @@ fn handle_agent_subcommand(mode: Option<AgentMode>) -> Result<(), LarpshellError
 
 fn agent_mode_status_message(mode: AgentMode) -> &'static str {
     match mode {
-        AgentMode::Off => "agent mode is currently off.",
-        AgentMode::Safe => "agent mode is currently safe.",
-        AgentMode::On => "agent mode is currently on.",
-    }
-}
-
-fn agent_mode_set_message(mode: AgentMode) -> &'static str {
-    match mode {
-        AgentMode::Off => "agent mode disabled.",
-        AgentMode::Safe => {
-            "agent mode set to safe — tools are enabled with restricted command execution."
-        }
-        AgentMode::On => {
-            "agent mode set to on — tools are enabled and commands are only gated by confirmation."
-        }
+        AgentMode::Off => "agent mode: off",
+        AgentMode::Safe => "agent mode: safe (restricted to read-only commands)",
+        AgentMode::On => "agent mode: on",
     }
 }
 
