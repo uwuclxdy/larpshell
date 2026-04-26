@@ -1,7 +1,7 @@
 use crate::config::GeminiConfig;
 use crate::error::LarpshellError;
-use crate::providers::AIProvider;
 use crate::providers::base::{BaseProvider, strip_url_for_display};
+use crate::providers::{AIProvider, ChatMessage, ChatResponse, Role, ToolCall, ToolDefinition};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
@@ -105,17 +105,16 @@ impl GeminiProvider {
             model: config.model.clone(),
         })
     }
-}
 
-#[async_trait]
-impl AIProvider for GeminiProvider {
-    async fn generate(&self, prompt: &str) -> Result<String, LarpshellError> {
-        let url = format!(
+    fn generate_url(&self) -> String {
+        format!(
             "{}/v1beta/models/{}:generateContent?key={}",
             self.base_url, self.model, self.api_key
-        );
+        )
+    }
 
-        let request_body = GeminiRequest {
+    fn prompt_request(prompt: &str) -> GeminiRequest {
+        GeminiRequest {
             contents: vec![Content {
                 role: None,
                 parts: vec![Part {
@@ -126,43 +125,27 @@ impl AIProvider for GeminiProvider {
                 }],
             }],
             tools: None,
-        };
+        }
+    }
 
-        let response = self
-            .base
-            .client
-            .post(&url)
-            .json(&request_body)
-            .send()
-            .await
-            .map_err(|e| LarpshellError::from_reqwest(e, "gemini"))?;
-
-        let status = response.status();
-        let response_text = response
-            .text()
-            .await
-            .map_err(|e| LarpshellError::InvalidResponse(e.to_string()))?;
-
-        if !status.is_success() {
-            if let Ok(error_response) = serde_json::from_str::<GeminiErrorResponse>(&response_text)
-            {
-                return Err(LarpshellError::from_http_status(
-                    reqwest::StatusCode::from_u16(error_response.error.code).unwrap_or(status),
-                    "gemini",
-                    &error_response.error.message,
-                ));
-            }
-
-            return Err(LarpshellError::from_http_status(
-                status,
+    fn parse_generate_error(status: reqwest::StatusCode, response_text: &str) -> LarpshellError {
+        if let Ok(error_response) = serde_json::from_str::<GeminiErrorResponse>(response_text) {
+            return LarpshellError::from_http_status(
+                reqwest::StatusCode::from_u16(error_response.error.code).unwrap_or(status),
                 "gemini",
-                &response_text,
-            ));
+                &error_response.error.message,
+            );
         }
 
-        let gemini_response: GeminiResponse = serde_json::from_str(&response_text)
-            .map_err(|e| LarpshellError::InvalidResponse(e.to_string()))?;
+        LarpshellError::from_http_status(status, "gemini", response_text)
+    }
 
+    fn parse_generate_response(response_text: &str) -> Result<GeminiResponse, LarpshellError> {
+        serde_json::from_str(response_text)
+            .map_err(|error| LarpshellError::InvalidResponse(error.to_string()))
+    }
+
+    fn extract_generate_text(gemini_response: GeminiResponse) -> Result<String, LarpshellError> {
         let candidates = gemini_response.candidates.ok_or_else(|| {
             LarpshellError::InvalidResponse("no candidates in response".to_string())
         })?;
@@ -190,51 +173,48 @@ impl AIProvider for GeminiProvider {
             .as_ref()
             .ok_or_else(|| LarpshellError::InvalidResponse("no parts in content".to_string()))?;
 
-        let text = parts
+        parts
             .first()
             .and_then(|part| part.text.clone())
-            .ok_or_else(|| LarpshellError::InvalidResponse("no text in response".to_string()))?;
-
-        Ok(text)
+            .ok_or_else(|| LarpshellError::InvalidResponse("no text in response".to_string()))
     }
 
-    async fn generate_with_tools(
+    async fn request_generate(
         &self,
-        messages: &[crate::providers::ChatMessage],
-        tools: &[crate::providers::ToolDefinition],
-    ) -> Result<crate::providers::ChatResponse, LarpshellError> {
-        use crate::providers::{ChatResponse, Role};
+        request_body: &GeminiRequest,
+    ) -> Result<GeminiResponse, LarpshellError> {
+        let response = self
+            .base
+            .client
+            .post(self.generate_url())
+            .json(request_body)
+            .send()
+            .await
+            .map_err(|e| LarpshellError::from_reqwest(&e, "gemini"))?;
 
-        let url = format!(
-            "{}/v1beta/models/{}:generateContent?key={}",
-            self.base_url, self.model, self.api_key
-        );
+        let status = response.status();
+        let response_text = response
+            .text()
+            .await
+            .map_err(|e| LarpshellError::InvalidResponse(e.to_string()))?;
 
-        let contents: Vec<Content> = messages
-            .iter()
-            .filter(|message| message.role != Role::System)
-            .map(|message| {
-                let role = match message.role {
-                    Role::User => Some("user".to_string()),
-                    Role::Assistant => Some("model".to_string()),
-                    Role::Tool => Some("user".to_string()),
-                    Role::System => None,
-                };
+        if !status.is_success() {
+            return Err(Self::parse_generate_error(status, &response_text));
+        }
 
-                let parts = if let Some(ref tool_calls) = message.tool_calls {
-                    tool_calls
-                        .iter()
-                        .map(|tool_call| Part {
-                            text: None,
-                            function_call: Some(FunctionCall {
-                                name: tool_call.name.clone(),
-                                args: tool_call.arguments.clone(),
-                            }),
-                            function_response: None,
-                            thought_signature: tool_call.thought_signature.clone(),
-                        })
-                        .collect()
-                } else if message.role == Role::Tool {
+        Self::parse_generate_response(&response_text)
+    }
+
+    fn message_content(message: &ChatMessage) -> Content {
+        let role = match message.role {
+            Role::User | Role::Tool => Some("user".to_string()),
+            Role::Assistant => Some("model".to_string()),
+            Role::System => None,
+        };
+
+        let parts = message.tool_calls.as_ref().map_or_else(
+            || {
+                if message.role == Role::Tool {
                     vec![Part {
                         text: None,
                         function_call: None,
@@ -253,16 +233,30 @@ impl AIProvider for GeminiProvider {
                         function_response: None,
                         thought_signature: None,
                     }]
-                };
+                }
+            },
+            |tool_calls| {
+                tool_calls
+                    .iter()
+                    .map(|tool_call| Part {
+                        text: None,
+                        function_call: Some(FunctionCall {
+                            name: tool_call.name.clone(),
+                            args: tool_call.arguments.clone(),
+                        }),
+                        function_response: None,
+                        thought_signature: tool_call.thought_signature.clone(),
+                    })
+                    .collect()
+            },
+        );
 
-                Content { role, parts }
-            })
-            .collect();
+        Content { role, parts }
+    }
 
-        let gemini_tools = if tools.is_empty() {
-            None
-        } else {
-            Some(vec![GeminiToolDeclaration {
+    fn tool_declarations(tools: &[ToolDefinition]) -> Option<Vec<GeminiToolDeclaration>> {
+        (!tools.is_empty()).then(|| {
+            vec![GeminiToolDeclaration {
                 function_declarations: tools
                     .iter()
                     .map(|tool| GeminiFunctionDeclaration {
@@ -271,48 +265,39 @@ impl AIProvider for GeminiProvider {
                         parameters: tool.parameters.clone(),
                     })
                     .collect(),
-            }])
-        };
+            }]
+        })
+    }
 
-        let request_body = GeminiRequest {
-            contents,
-            tools: gemini_tools,
-        };
+    fn extract_tool_parts(candidate: &Candidate) -> Result<&Vec<Part>, LarpshellError> {
+        candidate
+            .content
+            .as_ref()
+            .and_then(|content| content.parts.as_ref())
+            .ok_or_else(|| LarpshellError::InvalidResponse("no parts in response".to_string()))
+    }
 
-        let response = self
-            .base
-            .client
-            .post(&url)
-            .json(&request_body)
-            .send()
-            .await
-            .map_err(|e| LarpshellError::from_reqwest(e, "gemini"))?;
+    fn extract_tool_calls(parts: &[Part]) -> Vec<ToolCall> {
+        parts
+            .iter()
+            .filter_map(|part| {
+                part.function_call
+                    .as_ref()
+                    .map(|call| (call, part.thought_signature.clone()))
+            })
+            .enumerate()
+            .map(|(index, (function_call, thought_signature))| ToolCall {
+                id: format!("gemini_tc_{index}"),
+                name: function_call.name.clone(),
+                arguments: function_call.args.clone(),
+                thought_signature,
+            })
+            .collect()
+    }
 
-        let status = response.status();
-        let response_text = response
-            .text()
-            .await
-            .map_err(|e| LarpshellError::InvalidResponse(e.to_string()))?;
-
-        if !status.is_success() {
-            if let Ok(error_response) = serde_json::from_str::<GeminiErrorResponse>(&response_text)
-            {
-                return Err(LarpshellError::from_http_status(
-                    reqwest::StatusCode::from_u16(error_response.error.code).unwrap_or(status),
-                    "gemini",
-                    &error_response.error.message,
-                ));
-            }
-            return Err(LarpshellError::from_http_status(
-                status,
-                "gemini",
-                &response_text,
-            ));
-        }
-
-        let gemini_response: GeminiResponse = serde_json::from_str(&response_text)
-            .map_err(|e| LarpshellError::InvalidResponse(e.to_string()))?;
-
+    fn extract_chat_response(
+        gemini_response: GeminiResponse,
+    ) -> Result<ChatResponse, LarpshellError> {
         let candidates = gemini_response.candidates.ok_or_else(|| {
             LarpshellError::InvalidResponse("no candidates in response".to_string())
         })?;
@@ -321,29 +306,8 @@ impl AIProvider for GeminiProvider {
             .first()
             .ok_or_else(|| LarpshellError::InvalidResponse("empty candidates list".to_string()))?;
 
-        let parts = candidate
-            .content
-            .as_ref()
-            .and_then(|content| content.parts.as_ref())
-            .ok_or_else(|| LarpshellError::InvalidResponse("no parts in response".to_string()))?;
-
-        let tool_calls: Vec<crate::providers::ToolCall> = parts
-            .iter()
-            .filter_map(|part| {
-                part.function_call
-                    .as_ref()
-                    .map(|call| (call, part.thought_signature.clone()))
-            })
-            .enumerate()
-            .map(
-                |(index, (function_call, thought_signature))| crate::providers::ToolCall {
-                    id: format!("gemini_tc_{index}"),
-                    name: function_call.name.clone(),
-                    arguments: function_call.args.clone(),
-                    thought_signature,
-                },
-            )
-            .collect();
+        let parts = Self::extract_tool_parts(candidate)?;
+        let tool_calls = Self::extract_tool_calls(parts);
 
         if !tool_calls.is_empty() {
             return Ok(ChatResponse::ToolCalls(tool_calls));
@@ -355,6 +319,33 @@ impl AIProvider for GeminiProvider {
             .ok_or_else(|| LarpshellError::InvalidResponse("no text in response".to_string()))?;
 
         Ok(ChatResponse::Message(text))
+    }
+}
+
+#[async_trait]
+impl AIProvider for GeminiProvider {
+    async fn generate(&self, prompt: &str) -> Result<String, LarpshellError> {
+        let request_body = Self::prompt_request(prompt);
+        let response = self.request_generate(&request_body).await?;
+        Self::extract_generate_text(response)
+    }
+
+    async fn generate_with_tools(
+        &self,
+        messages: &[ChatMessage],
+        tools: &[ToolDefinition],
+    ) -> Result<ChatResponse, LarpshellError> {
+        let request_body = GeminiRequest {
+            contents: messages
+                .iter()
+                .filter(|message| message.role != Role::System)
+                .map(Self::message_content)
+                .collect(),
+            tools: Self::tool_declarations(tools),
+        };
+
+        let response = self.request_generate(&request_body).await?;
+        Self::extract_chat_response(response)
     }
 
     fn name(&self) -> String {

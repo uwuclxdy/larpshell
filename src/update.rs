@@ -1,6 +1,6 @@
 use std::sync::OnceLock;
 
-use colored::*;
+use colored::Colorize;
 use serde::Deserialize;
 use tokio::task::JoinHandle;
 
@@ -90,7 +90,7 @@ fn print_notice() {
 }
 
 pub async fn print_if_available(task: JoinHandle<bool>) {
-    if let Ok(true) = task.await {
+    if matches!(task.await, Ok(true)) {
         print_notice();
     }
 }

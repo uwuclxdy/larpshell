@@ -1,4 +1,4 @@
-use colored::*;
+use colored::Colorize;
 use inquire::{Select, Text};
 use std::env;
 use std::io::IsTerminal;
@@ -75,7 +75,7 @@ pub enum PromptAction {
     Reset,
 }
 
-pub fn parse_cli_args() -> Result<CliArgs, LarpshellError> {
+pub fn parse_cli_args() -> CliArgs {
     use clap::{Parser, Subcommand};
 
     #[derive(Parser)]
@@ -181,16 +181,16 @@ pub fn parse_cli_args() -> Result<CliArgs, LarpshellError> {
         None => None,
     };
 
-    Ok(CliArgs {
+    CliArgs {
         command: cli.command,
         subcommand,
-    })
+    }
 }
 
 static CWD_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
-pub(crate) static CWD_LOCK: Mutex<()> = Mutex::new(());
+pub static CWD_LOCK: Mutex<()> = Mutex::new(());
 
-pub(crate) fn execute_shell_command_unlocked(command: &str) -> Result<(), LarpshellError> {
+pub fn execute_shell_command_unlocked(command: &str) -> Result<(), LarpshellError> {
     let trimmed = command.trim();
 
     if trimmed.is_empty() {
@@ -228,7 +228,9 @@ pub(crate) fn execute_shell_command_unlocked(command: &str) -> Result<(), Larpsh
 }
 
 pub fn execute_shell_command(command: &str) -> Result<(), LarpshellError> {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = CWD_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     execute_shell_command_unlocked(command)
 }
 
@@ -265,6 +267,5 @@ pub fn home_dir() -> PathBuf {
     env::var("HOME")
         .ok()
         .or_else(|| env::var("USERPROFILE").ok())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("~"))
+        .map_or_else(|| PathBuf::from("~"), PathBuf::from)
 }

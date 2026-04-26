@@ -1,4 +1,4 @@
-use colored::*;
+use colored::Colorize;
 use inquire::Confirm;
 use std::fs;
 use std::process::Command;

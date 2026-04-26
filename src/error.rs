@@ -77,47 +77,43 @@ pub enum LarpshellError {
 
 impl LarpshellError {
     pub fn connection_failed(provider: impl Into<String>, message: impl Into<String>) -> Self {
-        LarpshellError::ConnectionFailed {
+        Self::ConnectionFailed {
             provider: provider.into(),
             message: message.into(),
         }
     }
 
     pub fn server_error(provider: impl Into<String>, message: impl Into<String>) -> Self {
-        LarpshellError::ServerError {
+        Self::ServerError {
             provider: provider.into(),
             message: message.into(),
         }
     }
 
-    pub fn timeout(seconds: u64) -> Self {
-        LarpshellError::Timeout { seconds }
+    pub const fn timeout(seconds: u64) -> Self {
+        Self::Timeout { seconds }
     }
 
     pub fn auth_failed(message: impl Into<String>) -> Self {
-        LarpshellError::AuthenticationFailed {
+        Self::AuthenticationFailed {
             message: message.into(),
         }
     }
 
-    pub fn from_http_status(
-        status: reqwest::StatusCode,
-        provider: &str,
-        body: &str,
-    ) -> LarpshellError {
+    pub fn from_http_status(status: reqwest::StatusCode, provider: &str, body: &str) -> Self {
         match status.as_u16() {
             401 | 403 => {
                 if body.contains("key") || body.contains("api") || body.contains("token") {
-                    LarpshellError::InvalidApiKey
+                    Self::InvalidApiKey
                 } else {
-                    LarpshellError::auth_failed(body)
+                    Self::auth_failed(body)
                 }
             }
             404 => {
                 if body.contains("model") {
-                    LarpshellError::ModelNotFound(body.to_string())
+                    Self::ModelNotFound(body.to_string())
                 } else {
-                    LarpshellError::InvalidResponse(format!("endpoint not found: {body}"))
+                    Self::InvalidResponse(format!("endpoint not found: {body}"))
                 }
             }
             429 => {
@@ -126,31 +122,32 @@ impl LarpshellError {
                         .nth(1)
                         .and_then(|s| s.split('s').next())
                         .and_then(|s| s.parse::<f64>().ok())
-                        .map(|f| f.ceil() as u64)
+                        .map(f64::ceil)
+                        .map(|seconds| seconds as u64)
                 } else {
                     None
                 };
-                LarpshellError::RateLimitExceeded { retry_after }
+                Self::RateLimitExceeded { retry_after }
             }
-            500..=599 => LarpshellError::server_error(provider, body),
-            _ => LarpshellError::InvalidResponse(format!("{status}: {body}")),
+            500..=599 => Self::server_error(provider, body),
+            _ => Self::InvalidResponse(format!("{status}: {body}")),
         }
     }
 
-    pub fn from_reqwest(error: reqwest::Error, provider: &str) -> LarpshellError {
+    pub fn from_reqwest(error: &reqwest::Error, provider: &str) -> Self {
         if error.is_timeout() {
-            LarpshellError::timeout(crate::common::DEFAULT_PROVIDER_TIMEOUT_SECS)
+            Self::timeout(crate::common::DEFAULT_PROVIDER_TIMEOUT_SECS)
         } else if error.is_connect() {
-            LarpshellError::connection_failed(
+            Self::connection_failed(
                 provider,
                 "check if the service is running and the URL is correct",
             )
         } else if error.is_request() {
-            LarpshellError::NetworkError("invalid request".to_string())
+            Self::NetworkError("invalid request".to_string())
         } else if let Some(status) = error.status() {
-            LarpshellError::from_http_status(status, provider, &error.to_string())
+            Self::from_http_status(status, provider, &error.to_string())
         } else {
-            LarpshellError::NetworkError(error.to_string())
+            Self::NetworkError(error.to_string())
         }
     }
 

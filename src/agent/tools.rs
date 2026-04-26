@@ -31,7 +31,7 @@ pub struct ToolRegistry {
 }
 
 impl ToolRegistry {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             tools: Vec::new(),
             mcp_clients: Vec::new(),
@@ -76,10 +76,12 @@ impl ToolRegistry {
         args: &serde_json::Value,
     ) -> Option<Result<String, String>> {
         for client_mutex in &self.mcp_clients {
-            let mut client = client_mutex.lock().unwrap_or_else(|e| e.into_inner());
+            let mut client = client_mutex
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             let prefix = format!("{}_", client.server_name());
             if name.starts_with(&prefix) {
-                return Some(client.call_tool(name, args.clone()));
+                return Some(client.call_tool(name, args));
             }
         }
 

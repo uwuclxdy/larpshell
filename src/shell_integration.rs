@@ -4,7 +4,7 @@ use std::io::Write;
 use crate::cli::home_dir;
 use crate::error::LarpshellError;
 
-pub fn generate_bash_autocomplete() -> &'static str {
+pub const fn generate_bash_autocomplete() -> &'static str {
     r#"_larpshell_completions() {
     local cur prev
     COMPREPLY=()
@@ -34,7 +34,7 @@ pub fn generate_bash_autocomplete() -> &'static str {
 complete -F _larpshell_completions larpshell"#
 }
 
-pub fn generate_zsh_autocomplete() -> &'static str {
+pub const fn generate_zsh_autocomplete() -> &'static str {
     r#"#compdef larpshell
 
 _larpshell() {
@@ -88,7 +88,7 @@ _larpshell() {
 _larpshell"#
 }
 
-pub fn generate_fish_autocomplete() -> &'static str {
+pub const fn generate_fish_autocomplete() -> &'static str {
     r#"# larpshell autocomplete
 complete -c larpshell -f
 complete -c larpshell -n "__fish_use_subcommand" -a api -d 'configure API provider (Gemini, Ollama, OpenRouter, LM Studio, OpenAI)'
@@ -106,7 +106,7 @@ complete -c larpshell -n "__fish_seen_subcommand_from prompt" -a explain -d 'exp
 complete -c larpshell -n "__fish_seen_subcommand_from prompt; and __fish_seen_subcommand_from system explain" -a "show edit" -d 'prompt action'"#
 }
 
-pub fn generate_bash_function() -> &'static str {
+pub const fn generate_bash_function() -> &'static str {
     r#"larpshell() {
     if [ $# -eq 0 ]; then
         command larpshell
@@ -134,7 +134,7 @@ pub fn generate_bash_function() -> &'static str {
 }"#
 }
 
-pub fn generate_fish_function() -> &'static str {
+pub const fn generate_fish_function() -> &'static str {
     r#"function larpshell
     if test (count $argv) -eq 0
         command larpshell
@@ -371,10 +371,10 @@ fn remove_marked_function_block(content: &str, marker: &str, function_sig: &str)
         if skip {
             if !in_function && line.contains(function_sig) {
                 in_function = true;
-                brace_depth += line.matches('{').count() as i32;
+                brace_depth += i32::try_from(line.matches('{').count()).unwrap_or(i32::MAX);
             } else if in_function {
-                brace_depth += line.matches('{').count() as i32;
-                brace_depth -= line.matches('}').count() as i32;
+                brace_depth += i32::try_from(line.matches('{').count()).unwrap_or(i32::MAX);
+                brace_depth -= i32::try_from(line.matches('}').count()).unwrap_or(i32::MAX);
 
                 if brace_depth == 0 {
                     skip = false;

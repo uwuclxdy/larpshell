@@ -124,7 +124,7 @@ fn execute_read_file(file_path: &str) -> Result<String, String> {
     let metadata = fs::metadata(path).map_err(|error| format!("cannot read file: {error}"))?;
     let content = fs::read_to_string(path).map_err(|error| format!("cannot read file: {error}"))?;
 
-    if metadata.len() as usize > MAX_FILE_SIZE {
+    if metadata.len() > MAX_FILE_SIZE as u64 {
         Ok(truncate_content(&content, metadata.len()))
     } else {
         Ok(content)
@@ -274,7 +274,7 @@ fn search_recursive(dir: &Path, pattern: &str, matches: &mut Vec<String>) {
     }
 }
 
-fn reached_search_limit(matches: &[String]) -> bool {
+const fn reached_search_limit(matches: &[String]) -> bool {
     matches.len() >= MAX_SEARCH_MATCHES
 }
 
@@ -339,7 +339,7 @@ fn run_command_tool(agent_mode: AgentMode) -> RegisteredTool {
     )
 }
 
-fn run_command_description(agent_mode: AgentMode) -> &'static str {
+const fn run_command_description(agent_mode: AgentMode) -> &'static str {
     match agent_mode {
         AgentMode::Safe => "Run a restricted read-only command to gather context.",
         AgentMode::On => {

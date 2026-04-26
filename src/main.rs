@@ -94,7 +94,7 @@ async fn run() -> Result<(), LarpshellError> {
     setup_environment();
     do_nlsh_rs_migration();
 
-    let cli = parse_cli_args()?;
+    let cli = parse_cli_args();
 
     if cli.subcommand.is_none() {
         try_auto_install_shell();
@@ -174,7 +174,7 @@ fn do_nlsh_rs_migration() {
 }
 
 fn try_auto_install_shell() {
-    if let Ok(true) = auto_setup_shell_function() {
+    if matches!(auto_setup_shell_function(), Ok(true)) {
         eprintln!(
             "{}",
             "restart shell or run 'source ~/.bashrc' ('source ~/.config/fish/config.fish' for fish).".custom_color(CTP_YELLOW)
@@ -244,7 +244,7 @@ async fn run_repl(runtime: &mut Runtime) -> Result<(), LarpshellError> {
                     break;
                 }
                 Ok(SlashOutcome::Continue) => {}
-                Err(error) => print_unless_cancelled(error),
+                Err(error) => print_unless_cancelled(&error),
             }
             continue;
         }
@@ -265,7 +265,7 @@ async fn run_repl(runtime: &mut Runtime) -> Result<(), LarpshellError> {
                 prefill = Some(resubmit);
             }
             Ok(None) => {}
-            Err(error) => print_unless_cancelled(error),
+            Err(error) => print_unless_cancelled(&error),
         }
     }
 
@@ -297,7 +297,7 @@ fn read_next_input(prefill: Option<String>) -> Result<Option<String>, ReplInputE
     }
 }
 
-fn print_unless_cancelled(error: LarpshellError) {
+fn print_unless_cancelled(error: &LarpshellError) {
     if !matches!(error, LarpshellError::Cancelled) {
         error.print();
     }
@@ -335,7 +335,7 @@ async fn dispatch_slash_command(
         SlashCmd::History { enable } => handle_history_subcommand(enable)?,
         SlashCmd::Prompt { kind, action } => handle_prompt_subcommand(&kind, &action)?,
         SlashCmd::Explain { args } => {
-            handle_explain_subcommand(args, runtime.provider.as_ref()).await?
+            handle_explain_subcommand(args, runtime.provider.as_ref()).await?;
         }
         SlashCmd::Help => print_slash_command_help(),
     }
@@ -467,28 +467,23 @@ fn handle_history_subcommand(enable: Option<bool>) -> Result<(), LarpshellError>
 }
 
 fn handle_agent_subcommand(mode: Option<AgentMode>) -> Result<(), LarpshellError> {
-    match mode {
-        Some(mode) => {
-            config::set_agent_mode(mode)?;
-            cli::print_ok(agent_mode_status_message(mode));
-        }
-        None => {
-            let mode = match config::load_config() {
-                Ok(config) => config.agent,
-                Err(LarpshellError::IoError(error))
-                    if error.kind() == std::io::ErrorKind::NotFound =>
-                {
-                    AgentMode::Off
-                }
-                Err(error) => return Err(error),
-            };
-            println!("{}", agent_mode_status_message(mode));
-        }
+    if let Some(mode) = mode {
+        config::set_agent_mode(mode)?;
+        cli::print_ok(agent_mode_status_message(mode));
+    } else {
+        let mode = match config::load_config() {
+            Ok(config) => config.agent,
+            Err(LarpshellError::IoError(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+                AgentMode::Off
+            }
+            Err(error) => Err(error)?,
+        };
+        println!("{}", agent_mode_status_message(mode));
     }
     Ok(())
 }
 
-fn agent_mode_status_message(mode: AgentMode) -> &'static str {
+const fn agent_mode_status_message(mode: AgentMode) -> &'static str {
     match mode {
         AgentMode::Off => "agent mode: off",
         AgentMode::Safe => "agent mode: safe (restricted to read-only commands)",
@@ -606,11 +601,10 @@ fn edit_prompt(spec: &PromptSpec) -> Result<(), LarpshellError> {
 fn reset_prompt(spec: &PromptSpec) -> Result<(), LarpshellError> {
     let path = (spec.path)()?;
     if path.exists() {
-        let bak = path.with_extension(
-            path.extension()
-                .map(|ext| format!("{}.bak", ext.to_string_lossy()))
-                .unwrap_or_else(|| "bak".to_string()),
-        );
+        let bak = path.with_extension(path.extension().map_or_else(
+            || "bak".to_string(),
+            |ext| format!("{ext}.bak", ext = ext.to_string_lossy()),
+        ));
         std::fs::rename(&path, &bak).map_err(LarpshellError::IoError)?;
         (spec.save)(spec.default)?;
         cli::print_ok(&format!(
@@ -728,12 +722,12 @@ async fn generate_with_cancellation(
             ctrl_c.abort();
             res
         }
-        _ = cancel_token.cancelled() => Err(LarpshellError::Cancelled),
+        () = cancel_token.cancelled() => Err(LarpshellError::Cancelled),
     };
     clear_line();
     show_cursor();
     #[cfg(unix)]
-    if let Some(saved) = saved_echo {
+    if let Some(saved) = saved_echo.as_ref() {
         common::restore_terminal_echo(saved);
     }
     result
@@ -757,7 +751,7 @@ async fn generate_single_shot(
         cancel_clone.cancel();
         eprintln!();
         #[cfg(unix)]
-        if let Some(saved) = saved_for_ctrlc {
+        if let Some(saved) = saved_for_ctrlc.as_ref() {
             common::restore_terminal_echo(saved);
         }
         update::print_if_resolved();
@@ -768,7 +762,7 @@ async fn generate_single_shot(
     clear_line();
     show_cursor();
     #[cfg(unix)]
-    if let Some(saved) = saved_echo {
+    if let Some(saved) = saved_echo.as_ref() {
         common::restore_terminal_echo(saved);
     }
     result
@@ -785,7 +779,7 @@ async fn confirm_loop(
 ) -> Result<Option<String>, LarpshellError> {
     let cancelled = 'outer: loop {
         let cmd_lines = display_response(&command, response_style);
-        match confirm_with_explain(cmd_lines)? {
+        match confirm_with_explain(cmd_lines) {
             ConfirmResult::Yes => {
                 execute_or_print(&command)?;
                 break 'outer false;
@@ -795,28 +789,29 @@ async fn confirm_loop(
                 CommandMode::Interactive => break 'outer true,
                 CommandMode::Single => exit_on_sigint(),
             },
-            ConfirmResult::Edit => match edit_command(&command) {
-                Some(new_cmd) => command = new_cmd,
-                None => continue 'outer,
-            },
+            ConfirmResult::Edit => {
+                if let Some(new_cmd) = edit_command(&command) {
+                    command = new_cmd;
+                }
+            }
             ConfirmResult::Explain => {
                 let explanation = get_explanation(&command, provider).await?;
                 let expl_lines = display_explanation(&explanation);
-                match confirm_execution(cmd_lines, expl_lines)? {
+                match confirm_execution(cmd_lines, expl_lines) {
                     ConfirmResult::Yes => {
                         execute_or_print(&command)?;
                         break 'outer false;
                     }
-                    ConfirmResult::No => break 'outer false,
+                    ConfirmResult::No | ConfirmResult::Explain => break 'outer false,
                     ConfirmResult::Cancel => match mode {
                         CommandMode::Interactive => break 'outer true,
                         CommandMode::Single => exit_on_sigint(),
                     },
-                    ConfirmResult::Edit => match edit_command(&command) {
-                        Some(new_cmd) => command = new_cmd,
-                        None => continue 'outer,
-                    },
-                    ConfirmResult::Explain => break 'outer false,
+                    ConfirmResult::Edit => {
+                        if let Some(new_cmd) = edit_command(&command) {
+                            command = new_cmd;
+                        }
+                    }
                 }
             }
         }

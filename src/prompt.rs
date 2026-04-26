@@ -11,18 +11,16 @@ pub fn create_system_prompt(user_request: &str, template: Option<&str>) -> Strin
     let cwd = current_directory();
     let os = os_name();
     let shell = shell_name();
-    let home = dirs::home_dir()
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|| "~".to_string());
+    let home = dirs::home_dir().map_or_else(|| "~".to_string(), |p| p.display().to_string());
     let user = username();
 
     let tmpl = template.unwrap_or(DEFAULT_PROMPT_TEMPLATE);
 
-    tmpl.replace("{os}", &os)
-        .replace("{cwd}", &cwd)
-        .replace("{home}", &home)
-        .replace("{user}", &user)
-        .replace("{shell}", &shell)
+    tmpl.replace("{os}", os.as_str())
+        .replace("{cwd}", cwd.as_str())
+        .replace("{home}", home.as_str())
+        .replace("{user}", user.as_str())
+        .replace("{shell}", shell.as_str())
         .replace("{request}", user_request)
 }
 
@@ -61,7 +59,7 @@ fn strip_fence(text: &str) -> &str {
     after_language.trim_end_matches("```").trim()
 }
 
-pub(crate) fn prefixed_payload<'a>(text: &'a str, prefix: &str) -> Option<&'a str> {
+pub fn prefixed_payload<'a>(text: &'a str, prefix: &str) -> Option<&'a str> {
     for line in strip_fence(text).lines() {
         let trimmed = line.trim();
         if let Some(rest) = trimmed.strip_prefix(prefix) {

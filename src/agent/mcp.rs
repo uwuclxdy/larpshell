@@ -186,7 +186,7 @@ impl StdioMcpClient {
                 description: tool.description.unwrap_or_default(),
                 parameters: tool
                     .input_schema
-                    .unwrap_or(serde_json::json!({ "type": "object" })),
+                    .unwrap_or_else(|| serde_json::json!({ "type": "object" })),
             })
             .collect())
     }
@@ -194,7 +194,7 @@ impl StdioMcpClient {
     pub fn call_tool(
         &mut self,
         tool_name: &str,
-        arguments: serde_json::Value,
+        arguments: &serde_json::Value,
     ) -> Result<String, String> {
         let original_name = tool_name
             .strip_prefix(&format!("{}_", self.name))
@@ -228,9 +228,8 @@ impl Drop for StdioMcpClient {
 }
 
 pub fn load_mcp_configs() -> Vec<McpServerConfig> {
-    let config_dir = match crate::config::ensure_config_dir() {
-        Ok(dir) => dir,
-        Err(_) => return Vec::new(),
+    let Ok(config_dir) = crate::config::ensure_config_dir() else {
+        return Vec::new();
     };
 
     let mcp_path = config_dir.join("mcp.json");

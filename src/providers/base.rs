@@ -14,7 +14,7 @@ pub fn create_http_client() -> Result<Client, LarpshellError> {
 }
 
 /// strips scheme prefix and trailing slashes from a URL for display purposes.
-pub(crate) fn strip_url_for_display(url: &str) -> &str {
+pub fn strip_url_for_display(url: &str) -> &str {
     url.trim_start_matches("http://")
         .trim_start_matches("https://")
         .trim_end_matches("/*")
@@ -48,7 +48,7 @@ impl BaseProvider {
         let response = request
             .send()
             .await
-            .map_err(|e| LarpshellError::from_reqwest(e, provider))?;
+            .map_err(|e| LarpshellError::from_reqwest(&e, provider))?;
         Self::check_response(response, provider).await
     }
 

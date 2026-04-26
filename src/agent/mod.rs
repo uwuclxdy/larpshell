@@ -2,7 +2,7 @@ pub mod builtins;
 pub mod mcp;
 pub mod tools;
 
-use colored::*;
+use colored::{ColoredString, Colorize};
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -77,14 +77,11 @@ fn set_last_outcome(outcome: ToolOutcome) {
 }
 
 fn has_success_outcomes() -> bool {
-    TOOL_BLOCKS
-        .lock()
-        .map(|blocks| {
-            blocks
-                .iter()
-                .any(|b| matches!(b.outcome, Some(ToolOutcome::Success(_))))
-        })
-        .unwrap_or(false)
+    TOOL_BLOCKS.lock().is_ok_and(|blocks| {
+        blocks
+            .iter()
+            .any(|b| matches!(b.outcome, Some(ToolOutcome::Success(_))))
+    })
 }
 
 fn compose_agent_system_prompt(
@@ -223,7 +220,7 @@ fn append_tool_messages(
     messages.push(ChatMessage::tool_result(&tool_call.id, result.into()));
 }
 
-fn denied_tool_result() -> &'static str {
+const fn denied_tool_result() -> &'static str {
     "Tool call denied by user. Try a different approach or produce the final response."
 }
 
@@ -531,7 +528,9 @@ fn redraw_all_blocks(prompt_display: &str) {
     let width = terminal_width();
     let expanded = EXPANDED.load(Ordering::Relaxed);
     let blocks_snapshot: Vec<ToolBlock> = {
-        let blocks = TOOL_BLOCKS.lock().unwrap_or_else(|e| e.into_inner());
+        let blocks = TOOL_BLOCKS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         blocks
             .iter()
             .map(|b| ToolBlock {
@@ -598,11 +597,11 @@ fn confirm_tool_call() -> ToolConfirmResult {
 
     loop {
         match read_key() {
-            Key::Enter | Key::Char('y') | Key::Char('Y') => {
+            Key::Enter | Key::Char('y' | 'Y') => {
                 clear_line();
                 return ToolConfirmResult::Allow;
             }
-            Key::Char('n') | Key::Char('N') => {
+            Key::Char('n' | 'N') => {
                 clear_line();
                 return ToolConfirmResult::Deny;
             }
@@ -620,7 +619,7 @@ fn confirm_tool_call() -> ToolConfirmResult {
     }
 }
 
-fn parse_byte(b: u8) -> Key {
+const fn parse_byte(b: u8) -> Key {
     match b {
         b'\n' | b'\r' => Key::Enter,
         b'\x03' => Key::CtrlC,
@@ -669,8 +668,7 @@ fn display_tool_result(result: &str) {
     set_last_outcome(ToolOutcome::Success(result.to_string()));
     let cap = TOOL_BLOCKS
         .lock()
-        .map(|blocks| compute_expanded_cap(&blocks))
-        .unwrap_or(1);
+        .map_or(1, |blocks| compute_expanded_cap(&blocks));
     render_success_inline(result, EXPANDED.load(Ordering::Relaxed), cap);
 }
 

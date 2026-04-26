@@ -3,7 +3,9 @@ use std::env;
 use std::path::PathBuf;
 
 fn with_saved_cwd(f: impl FnOnce() + std::panic::UnwindSafe) {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = CWD_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let original = env::current_dir().unwrap();
     let result = std::panic::catch_unwind(f);
     env::set_current_dir(&original).unwrap();

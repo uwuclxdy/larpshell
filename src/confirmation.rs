@@ -1,11 +1,10 @@
-use colored::*;
+use colored::Colorize;
 
 use crate::cli::is_interactive_terminal;
 use crate::common::{
     ANSI_CLEAR_LINE, CTP_BLUE, CTP_GREEN, CTP_PRIMARY, CTP_RED, CTP_TEXT, CTP_YELLOW, EXIT_SIGINT,
     clear_n_lines, count_visual_lines, exit_with_code, flush_stderr, show_cursor, terminal_width,
 };
-use crate::error::LarpshellError;
 
 pub enum ConfirmResult {
     Yes,
@@ -15,13 +14,13 @@ pub enum ConfirmResult {
     Cancel,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum ConfirmPromptMode {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfirmPromptMode {
     WithExplain,
     Simple,
 }
 
-pub(crate) enum KeyEvent {
+pub enum KeyEvent {
     Char(char),
     Backspace,
     Delete,
@@ -38,7 +37,7 @@ pub(crate) enum KeyEvent {
 
 /// Parse one logical key event from any `Read` source. Works on both raw-mode
 /// terminals and plain pipes (e.g. during tests with piped stdin).
-pub(crate) fn parse_key_from_reader(reader: &mut impl std::io::Read) -> KeyEvent {
+pub fn parse_key_from_reader(reader: &mut impl std::io::Read) -> KeyEvent {
     let mut key_byte = [0u8; 1];
     if reader.read(&mut key_byte).unwrap_or(0) == 0 {
         return KeyEvent::Eof;
@@ -187,7 +186,7 @@ pub enum SafetyLevel {
     Dangerous,
 }
 
-fn safety_color(level: SafetyLevel) -> colored::CustomColor {
+const fn safety_color(level: SafetyLevel) -> colored::CustomColor {
     match level {
         SafetyLevel::Safe => CTP_GREEN,
         SafetyLevel::Unsafe => CTP_YELLOW,
@@ -221,7 +220,7 @@ pub fn display_explanation(explanation: &str) -> usize {
     display_bulleted(&body, safety_color(level))
 }
 
-pub(crate) fn style_html_tags(text: &str) -> String {
+pub fn style_html_tags(text: &str) -> String {
     if colored::control::SHOULD_COLORIZE.should_colorize() {
         text.replace("<b>", "\x1b[1m")
             .replace("</b>", "\x1b[22m")
@@ -239,7 +238,7 @@ pub(crate) fn style_html_tags(text: &str) -> String {
     }
 }
 
-pub(crate) fn confirm_from_reader(
+pub fn confirm_from_reader(
     mut read_key: impl FnMut() -> KeyEvent,
     mode: ConfirmPromptMode,
     cmd_line_count: usize,
@@ -289,44 +288,39 @@ pub(crate) fn confirm_from_reader(
 }
 
 /// Prompt for confirmation with explain option
-pub fn confirm_with_explain(cmd_line_count: usize) -> Result<ConfirmResult, LarpshellError> {
+pub fn confirm_with_explain(cmd_line_count: usize) -> ConfirmResult {
     if !is_interactive_terminal() {
-        return Ok(ConfirmResult::Yes);
+        return ConfirmResult::Yes;
     }
 
     flush_stderr();
     flush_stdin_input();
 
-    let result = confirm_from_reader(
+    confirm_from_reader(
         read_key_event,
         ConfirmPromptMode::WithExplain,
         cmd_line_count,
         0, // no ephemeral explanation lines in WithExplain mode
-    );
-    Ok(result)
+    )
 }
 
 /// Prompt without the explain option.
 /// `cmd_line_count` = persistent command lines (kept on Y/Enter).
 /// `expl_line_count` = ephemeral explanation lines (cleared on Y/Enter).
-pub fn confirm_execution(
-    cmd_line_count: usize,
-    expl_line_count: usize,
-) -> Result<ConfirmResult, LarpshellError> {
+pub fn confirm_execution(cmd_line_count: usize, expl_line_count: usize) -> ConfirmResult {
     if !is_interactive_terminal() {
-        return Ok(ConfirmResult::Yes);
+        return ConfirmResult::Yes;
     }
 
     flush_stderr();
     flush_stdin_input();
 
-    let result = confirm_from_reader(
+    confirm_from_reader(
         read_key_event,
         ConfirmPromptMode::Simple,
         cmd_line_count,
         expl_line_count,
-    );
-    Ok(result)
+    )
 }
 
 fn confirmation_prompt(mode: ConfirmPromptMode) -> usize {
@@ -417,7 +411,7 @@ pub fn edit_command(current: &str) -> Option<String> {
                 flush_stderr();
                 return Some(buf.into_iter().collect());
             }
-            KeyEvent::CtrlC => {
+            KeyEvent::CtrlC | KeyEvent::Eof => {
                 clear_editor(&buf);
                 flush_stderr();
                 return None;
@@ -463,11 +457,6 @@ pub fn edit_command(current: &str) -> Option<String> {
                 buf.insert(pos, c);
                 pos += 1;
                 redraw(&buf, pos);
-            }
-            KeyEvent::Eof => {
-                clear_editor(&buf);
-                flush_stderr();
-                return None;
             }
             KeyEvent::ArrowUp | KeyEvent::Other => {}
         }

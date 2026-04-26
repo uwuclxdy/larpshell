@@ -257,7 +257,7 @@ pub fn parse(input: &str) -> SlashCmd {
             },
         },
         Some("/explain") => SlashCmd::Explain {
-            args: parts.map(|s| s.to_string()).collect(),
+            args: parts.map(std::string::ToString::to_string).collect(),
         },
         Some("/prompt") => SlashCmd::Prompt {
             kind: parse_prompt_kind(parts.next()),

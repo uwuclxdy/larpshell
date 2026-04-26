@@ -1,4 +1,4 @@
-use colored::*;
+use colored::Colorize;
 use inquire::{Confirm, Text};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::fs;
@@ -10,7 +10,7 @@ use crate::error::LarpshellError;
 mod migration;
 pub use migration::migrate_from_nlsh_rs;
 
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ActiveProvider {
     Gemini,
@@ -30,11 +30,11 @@ pub enum AgentMode {
 }
 
 impl AgentMode {
-    pub fn is_enabled(self) -> bool {
+    pub const fn is_enabled(self) -> bool {
         !matches!(self, Self::Off)
     }
 
-    pub fn is_safe(self) -> bool {
+    pub const fn is_safe(self) -> bool {
         matches!(self, Self::Safe)
     }
 }
@@ -146,10 +146,10 @@ pub enum ProviderSpecificConfig {
 impl ProviderSpecificConfig {
     pub fn model(&self) -> &str {
         match self {
-            ProviderSpecificConfig::Gemini { gemini } => &gemini.model,
-            ProviderSpecificConfig::Ollama { ollama } => &ollama.model,
-            ProviderSpecificConfig::OpenRouter { openrouter } => &openrouter.model,
-            ProviderSpecificConfig::OpenAI { openai } => &openai.model,
+            Self::Gemini { gemini } => &gemini.model,
+            Self::Ollama { ollama } => &ollama.model,
+            Self::OpenRouter { openrouter } => &openrouter.model,
+            Self::OpenAI { openai } => &openai.model,
         }
     }
 }
@@ -273,7 +273,7 @@ pub fn history_path() -> Result<PathBuf, LarpshellError> {
 }
 
 pub fn history_enabled() -> bool {
-    history_disabled_path().map(|p| !p.exists()).unwrap_or(true)
+    history_disabled_path().map_or(true, |p| !p.exists())
 }
 
 pub fn set_history_enabled(enabled: bool) -> Result<(), LarpshellError> {
@@ -396,7 +396,7 @@ fn colored_provider_options(current_provider: Option<ActiveProvider>) -> Vec<Str
         .collect()
 }
 
-fn provider_has_saved_credentials(
+const fn provider_has_saved_credentials(
     providers: &MultiProviderConfig,
     selected_variant: ActiveProvider,
 ) -> bool {
@@ -490,9 +490,7 @@ fn configure_gemini(existing: Option<&GeminiConfig>) -> Result<ProviderConfig, L
         prompt_input("Gemini API key")?
     };
 
-    let model_default = existing
-        .map(|e| e.model.as_str())
-        .unwrap_or("gemini-flash-latest");
+    let model_default = existing.map_or("gemini-flash-latest", |e| e.model.as_str());
     let model = prompt_input_with_default("Model name", model_default)?;
 
     Ok(ProviderConfig {
@@ -504,9 +502,7 @@ fn configure_gemini(existing: Option<&GeminiConfig>) -> Result<ProviderConfig, L
 }
 
 fn configure_ollama(existing: Option<&OllamaConfig>) -> Result<ProviderConfig, LarpshellError> {
-    let url_default = existing
-        .map(|e| e.base_url.as_str())
-        .unwrap_or("http://localhost:11434");
+    let url_default = existing.map_or("http://localhost:11434", |e| e.base_url.as_str());
     let base_url = prompt_input_with_default("Ollama base URL", url_default)?;
 
     let model = prompt_model_name(existing.map(|e| e.model.as_str()))?;
@@ -522,9 +518,7 @@ fn configure_ollama(existing: Option<&OllamaConfig>) -> Result<ProviderConfig, L
 fn configure_openrouter(
     existing: Option<&OpenRouterConfig>,
 ) -> Result<ProviderConfig, LarpshellError> {
-    let url_default = existing
-        .map(|e| e.base_url.as_str())
-        .unwrap_or("https://openrouter.ai/api/v1");
+    let url_default = existing.map_or("https://openrouter.ai/api/v1", |e| e.base_url.as_str());
     let base_url = prompt_input_with_default("OpenRouter base URL", url_default)?;
 
     let api_key = {
@@ -537,9 +531,7 @@ fn configure_openrouter(
             .map_err(|e| LarpshellError::ConfigError(e.to_string()))?
     };
 
-    let model_default = existing
-        .map(|e| e.model.as_str())
-        .unwrap_or("openrouter/auto");
+    let model_default = existing.map_or("openrouter/auto", |e| e.model.as_str());
     let model = prompt_input_with_default("Model name", model_default)?;
 
     Ok(ProviderConfig {
@@ -555,9 +547,7 @@ fn configure_openrouter(
 }
 
 fn configure_openai(existing: Option<&OpenAIConfig>) -> Result<ProviderConfig, LarpshellError> {
-    let url_default = existing
-        .map(|e| e.base_url.as_str())
-        .unwrap_or("https://api.openai.com/v1");
+    let url_default = existing.map_or("https://api.openai.com/v1", |e| e.base_url.as_str());
     let base_url = prompt_input_with_default("API base URL", url_default)?;
 
     let api_key = {

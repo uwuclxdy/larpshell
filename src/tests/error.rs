@@ -1,6 +1,22 @@
 use crate::error::LarpshellError;
 
 #[test]
+fn from_http_status_rounds_retry_after_up() {
+    let err = LarpshellError::from_http_status(
+        reqwest::StatusCode::TOO_MANY_REQUESTS,
+        "gemini",
+        "rate limited, retry in 1.5s",
+    );
+
+    assert!(matches!(
+        err,
+        LarpshellError::RateLimitExceeded {
+            retry_after: Some(2)
+        }
+    ));
+}
+
+#[test]
 fn display_examples() {
     let err = LarpshellError::ConnectionFailed {
         provider: "ollama".into(),

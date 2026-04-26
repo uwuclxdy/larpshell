@@ -7,7 +7,9 @@ use std::io::Write;
 use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
+
+static BUILD_ONCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
 use toml::from_str;
 
 mod agent;
@@ -38,7 +40,6 @@ fn ensure_binary_built() {
         return;
     }
 
-    static BUILD_ONCE: OnceLock<()> = OnceLock::new();
     BUILD_ONCE.get_or_init(|| {
         let status = Command::new("cargo")
             .args(["build", "--bin", "larpshell"])
@@ -115,7 +116,10 @@ fn mock_ollama(responses: &[&str]) -> u16 {
 
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
-    let responses: Vec<String> = responses.iter().map(|s| s.to_string()).collect();
+    let responses: Vec<String> = responses
+        .iter()
+        .map(std::string::ToString::to_string)
+        .collect();
 
     std::thread::spawn(move || {
         for text in responses {
@@ -124,7 +128,7 @@ fn mock_ollama(responses: &[&str]) -> u16 {
             };
             let mut buf = vec![0u8; 8192];
             let _ = stream.read(&mut buf);
-            let body = format!(r#"{{"response":"{}"}}"#, text);
+            let body = format!(r#"{{"response":"{text}"}}"#);
             let http = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                 body.len(),
@@ -358,7 +362,7 @@ fn connection_failure_prints_pretty_error() {
     let out = run(&home, &["show disk usage"]);
     assert!(!out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
-    eprintln!("stderr for debug: {:?}", stderr);
+    eprintln!("stderr for debug: {stderr:?}");
     // should include the styled prefix and the friendly message
     assert!(stderr.contains("error:") && stderr.contains("failed to connect"));
 }

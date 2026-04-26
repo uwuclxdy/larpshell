@@ -8,7 +8,7 @@ use strip_ansi_escapes::strip;
 use unicode_width::UnicodeWidthStr;
 
 pub const EXIT_SIGINT: i32 = 130;
-pub(crate) const DEFAULT_PROVIDER_TIMEOUT_SECS: u64 = 30;
+pub const DEFAULT_PROVIDER_TIMEOUT_SECS: u64 = 30;
 
 // Catppuccin Mocha palette — terminal truecolor tokens
 pub const CTP_PRIMARY: colored::CustomColor = colored::CustomColor {
@@ -53,9 +53,7 @@ pub const ANSI_CLEAR_LINE: &str = "\r\x1b[K";
 pub const ANSI_CURSOR_UP_CLEAR: &str = "\x1b[1A\r\x1b[K";
 
 pub fn current_directory() -> String {
-    env::current_dir()
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|_| "/".to_string())
+    env::current_dir().map_or_else(|_| "/".to_string(), |p| p.display().to_string())
 }
 
 pub fn current_directory_display() -> String {
@@ -84,7 +82,11 @@ pub fn os_name() -> String {
 pub fn shell_name() -> String {
     env::var("SHELL")
         .ok()
-        .and_then(|s| s.split('/').next_back().map(|s| s.to_string()))
+        .and_then(|s| {
+            s.split('/')
+                .next_back()
+                .map(std::string::ToString::to_string)
+        })
         .unwrap_or_else(|| "sh".to_string())
 }
 
@@ -104,26 +106,27 @@ fn linux_info() -> String {
 
 /// reads /etc/os-release to get the distro name and version.
 fn linux_distro() -> String {
-    if let Ok(contents) = fs::read_to_string("/etc/os-release") {
-        let mut name = None;
-        let mut version = None;
+    fs::read_to_string("/etc/os-release").map_or_else(
+        |_| "linux".to_string(),
+        |contents| {
+            let mut name = None;
+            let mut version = None;
 
-        for line in contents.lines() {
-            if let Some(value) = line.strip_prefix("NAME=") {
-                name = Some(value.trim_matches('"').to_string());
-            } else if let Some(value) = line.strip_prefix("VERSION_ID=") {
-                version = Some(value.trim_matches('"').to_string());
+            for line in contents.lines() {
+                if let Some(value) = line.strip_prefix("NAME=") {
+                    name = Some(value.trim_matches('"').to_string());
+                } else if let Some(value) = line.strip_prefix("VERSION_ID=") {
+                    version = Some(value.trim_matches('"').to_string());
+                }
             }
-        }
 
-        match (name, version) {
-            (Some(n), Some(v)) => format!("{n} {v}"),
-            (Some(n), None) => n,
-            _ => "linux".to_string(),
-        }
-    } else {
-        "linux".to_string()
-    }
+            match (name, version) {
+                (Some(n), Some(v)) => format!("{n} {v}"),
+                (Some(n), None) => n,
+                _ => "linux".to_string(),
+            }
+        },
+    )
 }
 
 /// gets the kernel version from `uname -r` or `/proc/sys/kernel/osrelease`.
@@ -135,8 +138,7 @@ fn kernel_version() -> String {
         .and_then(|output| String::from_utf8(output.stdout).ok())
         .map(|s| s.trim().to_string())
         .or_else(|| fs::read_to_string("/proc/sys/kernel/osrelease").ok())
-        .map(|s| s.trim().to_string())
-        .unwrap_or_else(|| "unknown".to_string())
+        .map_or_else(|| "unknown".to_string(), |s| s.trim().to_string())
 }
 
 pub fn show_cursor() {
@@ -279,7 +281,7 @@ pub fn disable_terminal_echo() -> Option<nix::sys::termios::Termios> {
 
 /// Restores terminal echo state saved by [`disable_terminal_echo`].
 #[cfg(unix)]
-pub fn restore_terminal_echo(saved: nix::sys::termios::Termios) {
+pub fn restore_terminal_echo(saved: &nix::sys::termios::Termios) {
     use nix::sys::termios::{SetArg, tcsetattr};
-    let _ = tcsetattr(std::io::stdin(), SetArg::TCSANOW, &saved);
+    let _ = tcsetattr(std::io::stdin(), SetArg::TCSANOW, saved);
 }

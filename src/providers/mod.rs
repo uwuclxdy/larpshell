@@ -17,7 +17,7 @@ pub enum Role {
     Tool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ChatMessage {
     pub role: Role,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -56,7 +56,7 @@ impl ChatMessage {
         }
     }
 
-    pub fn assistant_tool_calls(tool_calls: Vec<ToolCall>) -> Self {
+    pub const fn assistant_tool_calls(tool_calls: Vec<ToolCall>) -> Self {
         Self {
             role: Role::Assistant,
             content: None,
@@ -73,13 +73,13 @@ pub struct ToolCall {
     pub name: String,
     pub arguments: serde_json::Value,
     /// Provider-specific opaque token preserved across multi-turn conversations
-    /// (currently used by Gemini's thought_signature). Skipped in serde since
+    /// (currently used by Gemini's `thought_signature`). Skipped in serde since
     /// it's only carried internally between provider calls.
     #[serde(skip)]
     pub thought_signature: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ToolDefinition {
     pub name: String,
     pub description: String,

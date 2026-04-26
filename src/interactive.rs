@@ -1,10 +1,11 @@
 use std::borrow::Cow;
+use std::fmt::Write as _;
 use std::io;
 use std::io::Write;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
-use colored::*;
+use colored::Colorize;
 use rustyline::completion::{Completer, Pair};
 use rustyline::error::ReadlineError;
 use rustyline::highlight::{CmdKind, Highlighter};
@@ -27,7 +28,7 @@ static SHELL_MODE: AtomicBool = AtomicBool::new(false);
 // "uninstall" = 9 chars. Column = 2 (indent) + 1 (/) + 9 (name) + 4 (gap) = 16
 const PREVIEW_DESC_COL: usize = 16;
 
-pub(crate) fn format_preview_row(cmd_name: &str, typed_len: usize, description: &str) -> String {
+pub fn format_preview_row(cmd_name: &str, typed_len: usize, description: &str) -> String {
     let split = typed_len.min(cmd_name.len());
     let (typed, untyped) = cmd_name.split_at(split);
     let pad = PREVIEW_DESC_COL.saturating_sub(cmd_name.len() + 3);
@@ -52,7 +53,7 @@ pub fn clear_slash_preview() {
     for _ in 0..n {
         seq.push_str("\n\x1b[K");
     }
-    seq.push_str(&format!("\x1b[{n}A\r"));
+    let _ = write!(seq, "\x1b[{n}A\r");
     print!("{seq}");
     let _ = io::stdout().flush();
 }
@@ -87,7 +88,7 @@ pub fn draw_slash_preview(line: &str) {
         }
     }
     // Return cursor to the prompt line.
-    seq.push_str(&format!("\x1b[{max_lines}A\r"));
+    let _ = write!(seq, "\x1b[{max_lines}A\r");
 
     PREVIEW_LINE_COUNT.store(new_count, Ordering::Relaxed);
     print!("{seq}");
@@ -122,7 +123,7 @@ fn draw_arg_preview(line: &str) {
             ));
         }
     }
-    seq.push_str(&format!("\x1b[{max_lines}A\r"));
+    let _ = write!(seq, "\x1b[{max_lines}A\r");
 
     PREVIEW_LINE_COUNT.store(new_count, Ordering::Relaxed);
     print!("{seq}");
@@ -136,7 +137,7 @@ pub fn reserve_preview_space() {
     for _ in 0..n {
         seq.push('\n');
     }
-    seq.push_str(&format!("\x1b[{n}A"));
+    let _ = write!(seq, "\x1b[{n}A");
     print!("{seq}");
     let _ = io::stdout().flush();
 }
@@ -268,11 +269,7 @@ impl ConditionalEventHandler for SlashPreviewHandler {
                     s
                 }
                 Some(KeyEvent(KeyCode::Backspace, _)) if pos > 0 => {
-                    let char_start = line[..pos]
-                        .char_indices()
-                        .next_back()
-                        .map(|(i, _)| i)
-                        .unwrap_or(0);
+                    let char_start = line[..pos].char_indices().next_back().map_or(0, |(i, _)| i);
                     let mut s = line.to_string();
                     s.replace_range(char_start..pos, "");
                     s
@@ -301,7 +298,9 @@ where
     F: FnOnce(&mut NlshEditor, &str) -> rustyline::Result<String>,
 {
     SHELL_MODE.store(false, Ordering::Relaxed);
-    let mut editor_lock = EDITOR.lock().unwrap_or_else(|e| e.into_inner());
+    let mut editor_lock = EDITOR
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let editor = editor_lock.get_or_insert_with(|| {
         let mut ed = Editor::<NlshHelper, DefaultHistory>::with_config(
             Config::builder()
@@ -332,7 +331,9 @@ where
         Ok(line) => {
             clear_slash_preview();
             let trimmed = line.trim();
-            if !trimmed.is_empty() {
+            if trimmed.is_empty() {
+                Ok(None)
+            } else {
                 let _ = editor.add_history_entry(&line);
                 if config::history_enabled()
                     && let Ok(path) = config::history_path()
@@ -340,8 +341,6 @@ where
                     let _ = editor.save_history(&path);
                 }
                 Ok(Some(trimmed.to_string()))
-            } else {
-                Ok(None)
             }
         }
         Err(ReadlineError::Interrupted) => {
@@ -366,5 +365,5 @@ pub fn user_input_prefilled(initial: &str) -> Result<Option<String>, io::Error> 
 }
 
 pub fn user_input() -> Result<Option<String>, io::Error> {
-    with_editor(|editor, prompt| editor.readline(prompt))
+    with_editor(rustyline::Editor::readline)
 }
