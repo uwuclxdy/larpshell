@@ -49,14 +49,17 @@ fn strip_fence(text: &str) -> &str {
         return trimmed;
     };
 
-    let after_language = after_fence
-        .trim_start_matches("shell")
-        .trim_start_matches("bash")
-        .trim_start_matches("zsh")
-        .trim_start_matches("sh")
-        .trim_start_matches('\n');
+    // Strip the optional language tag using `strip_prefix` (literal substring),
+    // not `trim_start_matches` (character set).
+    let rest = after_fence.strip_prefix("shell").unwrap_or(after_fence);
+    let rest = rest.strip_prefix("bash").unwrap_or(rest);
+    let rest = rest.strip_prefix("zsh").unwrap_or(rest);
+    let rest = rest.strip_prefix("sh").unwrap_or(rest);
+    let rest = rest.strip_prefix('\n').unwrap_or(rest);
 
-    after_language.trim_end_matches("```").trim()
+    rest.strip_suffix("```")
+        .unwrap_or(rest)
+        .trim()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

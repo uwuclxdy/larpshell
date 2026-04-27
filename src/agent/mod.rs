@@ -214,15 +214,6 @@ fn execute_tool_call(tool_registry: &ToolRegistry, tool_call: &ToolCall) -> Stri
     }
 }
 
-fn append_tool_messages(
-    messages: &mut Vec<ChatMessage>,
-    tool_call: &ToolCall,
-    result: impl Into<String>,
-) {
-    messages.push(ChatMessage::assistant_tool_calls(vec![tool_call.clone()]));
-    messages.push(ChatMessage::tool_result(&tool_call.id, result.into()));
-}
-
 const fn denied_tool_result() -> &'static str {
     "Tool call denied by user. Try a different approach or produce the final response."
 }
@@ -272,22 +263,32 @@ fn handle_tool_calls<F>(
 where
     F: FnMut(&ToolCall) -> ToolConfirmResult,
 {
+    // Batch all tool calls into one assistant message to avoid consecutive
+    // assistant messages, which violates the alternating-role contract of
+    // OpenAI/Ollama APIs.
+    let mut pending_messages = vec![ChatMessage::assistant_tool_calls(tool_calls.to_vec())];
+
     for tool_call in tool_calls {
         display_tool_call(tool_call);
 
         match confirm_tool(tool_call) {
             ToolConfirmResult::Allow => {
                 let result_text = execute_tool_call(tool_registry, tool_call);
-                append_tool_messages(messages, tool_call, result_text);
+                pending_messages.push(ChatMessage::tool_result(&tool_call.id, result_text));
             }
             ToolConfirmResult::Deny => {
                 set_last_outcome(ToolOutcome::Denied);
                 render_denied_inline();
-                append_tool_messages(messages, tool_call, denied_tool_result());
+                pending_messages.push(ChatMessage::tool_result(
+                    &tool_call.id,
+                    denied_tool_result(),
+                ));
             }
             ToolConfirmResult::Cancel => return Err(LarpshellError::Cancelled),
         }
     }
+
+    messages.extend(pending_messages);
 
     Ok(())
 }
@@ -1215,6 +1216,37 @@ mod tests {
 
         assert!(matches!(response.kind, FinalResponseKind::Message));
         assert_eq!(response.content, "ls -la");
+    }
+
+    #[test]
+    fn handle_tool_calls_does_not_append_messages_when_cancelled() {
+        let tool_calls = vec![
+            crate::providers::ToolCall {
+                id: "tool-1".to_string(),
+                name: "list_files".to_string(),
+                arguments: serde_json::json!({
+                    "directory_path": std::env::temp_dir().display().to_string()
+                }),
+                thought_signature: None,
+            },
+            crate::providers::ToolCall {
+                id: "tool-2".to_string(),
+                name: "terminal_width".to_string(),
+                arguments: serde_json::json!({}),
+                thought_signature: None,
+            },
+        ];
+        let tool_registry = ToolRegistry::with_builtins(AgentMode::Safe);
+        let mut messages = vec![ChatMessage::user("show me files")];
+        let mut confirmations = vec![ToolConfirmResult::Allow, ToolConfirmResult::Cancel].into_iter();
+
+        let error = handle_tool_calls(&tool_calls, &tool_registry, &mut messages, &mut |_| {
+            confirmations.next().unwrap()
+        })
+        .unwrap_err();
+
+        assert!(matches!(error, LarpshellError::Cancelled));
+        assert_eq!(messages, vec![ChatMessage::user("show me files")]);
     }
 
     #[test]
