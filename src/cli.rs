@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::common::{CTP_GREEN, CTP_RED, CTP_YELLOW};
 use crate::config::AgentMode;
+use crate::confirmation::style_message_markup;
 use crate::error::LarpshellError;
 
 const SYMBOL_CHECK: &str = "\u{2713}";
@@ -16,23 +17,35 @@ const SYMBOL_ERROR: &str = "error:";
 const SYMBOL_WARNING: &str = "warning:";
 
 pub fn print_ok(message: &str) {
-    eprintln!("{} {}", SYMBOL_CHECK.custom_color(CTP_GREEN), message);
+    eprintln!(
+        "{} {}",
+        SYMBOL_CHECK.custom_color(CTP_GREEN),
+        style_message_markup(message)
+    );
 }
 
 pub fn print_ok_bold(message: &str) {
     eprintln!(
         "{} {}",
         SYMBOL_CHECK.custom_color(CTP_GREEN),
-        message.bold()
+        style_message_markup(message).bold()
     );
 }
 
 pub fn print_error(message: &str) {
-    eprintln!("{} {}", SYMBOL_ERROR.custom_color(CTP_RED).bold(), message);
+    eprintln!(
+        "{} {}",
+        SYMBOL_ERROR.custom_color(CTP_RED).bold(),
+        style_message_markup(message)
+    );
 }
 
 pub fn print_warning(message: &str) {
-    eprintln!("{} {}", SYMBOL_WARNING.custom_color(CTP_YELLOW), message);
+    eprintln!(
+        "{} {}",
+        SYMBOL_WARNING.custom_color(CTP_YELLOW),
+        style_message_markup(message)
+    );
 }
 
 #[derive(Debug)]

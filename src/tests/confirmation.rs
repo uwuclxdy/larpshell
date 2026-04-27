@@ -1,7 +1,7 @@
 use crate::confirmation::{
     ConfirmPromptMode, ConfirmResult, KeyEvent, ResponseStyle, confirm_from_reader,
     display_command, display_explanation, display_message, display_response, parse_key_from_reader,
-    style_html_tags,
+    style_html_tags_for_test, style_message_markup_for_test,
 };
 
 #[test]
@@ -42,31 +42,53 @@ fn display_explanation_multiline_returns_line_count() {
 
 #[test]
 fn style_html_tags_converts_bold() {
-    colored::control::set_override(true);
-    let result = style_html_tags("<b>hello</b>");
+    let result = style_html_tags_for_test("<b>hello</b>", true);
     assert_eq!(result, "\x1b[1mhello\x1b[22m");
 }
 
 #[test]
 fn style_html_tags_converts_italic() {
-    colored::control::set_override(true);
-    let result = style_html_tags("<i>hello</i>");
+    let result = style_html_tags_for_test("<i>hello</i>", true);
     assert_eq!(result, "\x1b[3mhello\x1b[23m");
 }
 
 #[test]
 fn style_html_tags_converts_underline() {
-    colored::control::set_override(true);
-    let result = style_html_tags("<u>hello</u>");
+    let result = style_html_tags_for_test("<u>hello</u>", true);
     assert_eq!(result, "\x1b[4mhello\x1b[24m");
 }
 
 #[test]
 fn style_html_tags_strips_when_no_color() {
-    colored::control::set_override(false);
-    let result = style_html_tags("<b>bold</b> and <i>italic</i>");
+    let result = style_html_tags_for_test("<b>bold</b> and <i>italic</i>", false);
     assert_eq!(result, "bold and italic");
-    colored::control::set_override(true);
+}
+
+#[test]
+fn style_message_markup_converts_supported_markdown() {
+    let result = style_message_markup_for_test(
+        "- **bold** `code` *italic* [label](https://example.com)",
+        true,
+    );
+    assert_eq!(
+        result,
+        "\x1b[1mbold\x1b[22m \x1b[7mcode\x1b[27m \x1b[3mitalic\x1b[23m label"
+    );
+}
+
+#[test]
+fn style_message_markup_strips_unsupported_markdown_when_no_color() {
+    let result = style_message_markup_for_test(
+        "> ## heading\n1. [x] **bold** and ~~gone~~ with [label](https://example.com)",
+        false,
+    );
+    assert_eq!(result, "heading\nbold and gone with label");
+}
+
+#[test]
+fn style_message_markup_drops_rules_and_fences() {
+    let result = style_message_markup_for_test("---\n```\nbody\n~~~", false);
+    assert_eq!(result, "\n\nbody\n");
 }
 
 #[test]

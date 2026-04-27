@@ -5,6 +5,7 @@ use serde::Deserialize;
 use tokio::task::JoinHandle;
 
 use crate::common::CTP_PRIMARY;
+use crate::confirmation::style_message_markup;
 
 static UPDATE_RESULT: OnceLock<bool> = OnceLock::new();
 
@@ -83,7 +84,7 @@ pub fn print_if_resolved() {
 fn print_notice() {
     eprintln!(
         "{}",
-        format!("update available{}", update_instruction())
+        style_message_markup(&format!("update available{}", update_instruction()))
             .custom_color(CTP_PRIMARY)
             .bold()
     );

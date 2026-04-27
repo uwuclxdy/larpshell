@@ -5,13 +5,16 @@ use std::process::Command;
 
 use crate::cli::{print_ok, print_warning};
 use crate::common::{CTP_GREEN, CTP_YELLOW, clear_line, show_cursor};
+use crate::confirmation::style_message_markup;
 use crate::error::LarpshellError;
 use crate::shell_integration::remove_shell_integration;
 
 pub fn uninstall_larpshell() -> Result<(), LarpshellError> {
     eprintln!(
         "{}",
-        "uninstalling larpshell...".custom_color(CTP_YELLOW).bold()
+        style_message_markup("uninstalling larpshell...")
+            .custom_color(CTP_YELLOW)
+            .bold()
     );
     eprintln!();
 
@@ -23,11 +26,17 @@ pub fn uninstall_larpshell() -> Result<(), LarpshellError> {
     eprintln!();
     eprintln!(
         "{}",
-        "larpshell successfully uninstalled."
+        style_message_markup("larpshell successfully uninstalled.")
             .custom_color(CTP_GREEN)
             .bold()
     );
-    eprintln!("{}", "please restart your shell or run 'source ~/.bashrc' (or 'source ~/.config/fish/config.fish' for fish).".custom_color(CTP_YELLOW));
+    eprintln!(
+        "{}",
+        style_message_markup(
+            "please restart your shell or run 'source ~/.bashrc' (or 'source ~/.config/fish/config.fish' for fish).",
+        )
+        .custom_color(CTP_YELLOW)
+    );
 
     Ok(())
 }
@@ -35,7 +44,10 @@ pub fn uninstall_larpshell() -> Result<(), LarpshellError> {
 fn handle_shell_integration() {
     match remove_shell_integration() {
         Ok(true) => print_ok("removed shell integration"),
-        Ok(false) => eprintln!("{}", "  no shell integration found".dimmed()),
+        Ok(false) => eprintln!(
+            "{}",
+            style_message_markup("  no shell integration found").dimmed()
+        ),
         Err(e) => print_warning(&format!("failed to remove shell integration: {e}")),
     }
 }
@@ -52,7 +64,10 @@ fn uninstall_cargo_crate() -> Result<(), LarpshellError> {
         if stderr.contains("package 'larpshell' is not installed")
             || stderr.contains("not installed")
         {
-            eprintln!("{}", "  cargo crate not installed".dimmed());
+            eprintln!(
+                "{}",
+                style_message_markup("  cargo crate not installed").dimmed()
+            );
         } else {
             let trimmed = stderr.trim();
             print_warning(&format!("failed to uninstall: {trimmed}"));
@@ -81,7 +96,10 @@ fn remove_config_optional() -> Result<(), LarpshellError> {
             fs::remove_dir_all(&config_dir)?;
             print_ok("removed configuration");
         } else {
-            eprintln!("{}", "  no configuration found".dimmed());
+            eprintln!(
+                "{}",
+                style_message_markup("  no configuration found").dimmed()
+            );
         }
     }
     Ok(())
@@ -103,7 +121,10 @@ fn remove_repo_optional() -> Result<(), LarpshellError> {
             clear_line();
 
             if remove_repo {
-                eprintln!("{}", "  removing directory...".dimmed());
+                eprintln!(
+                    "{}",
+                    style_message_markup("  removing directory...").dimmed()
+                );
                 let parent = current_dir.parent().ok_or_else(|| {
                     LarpshellError::ConfigError("cannot remove root directory".to_string())
                 })?;

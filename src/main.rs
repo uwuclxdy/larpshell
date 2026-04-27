@@ -27,10 +27,11 @@ use colored::Colorize;
 #[cfg(unix)]
 use common::setup_terminal;
 use common::{
-    CTP_BLUE, CTP_OVERLAY0, CTP_YELLOW, EXIT_SIGINT, clear_line, eprint_flush, exit_with_code,
-    hide_cursor, show_cursor,
+    CTP_BLUE, CTP_OVERLAY0, EXIT_SIGINT, clear_line, eprint_flush, exit_with_code, hide_cursor,
+    show_cursor,
 };
 use config::{AgentMode, Config, interactive_setup, load_config};
+use confirmation::style_message_markup;
 use confirmation::{
     ConfirmResult, ResponseStyle, confirm_execution, confirm_with_explain, display_explanation,
     display_response, edit_command,
@@ -175,9 +176,8 @@ fn do_nlsh_rs_migration() {
 
 fn try_auto_install_shell() {
     if matches!(auto_setup_shell_function(), Ok(true)) {
-        eprintln!(
-            "{}",
-            "restart shell or run 'source ~/.bashrc' ('source ~/.config/fish/config.fish' for fish).".custom_color(CTP_YELLOW)
+        print_warning(
+            "restart shell or run 'source ~/.bashrc' ('source ~/.config/fish/config.fish' for fish).",
         );
         exit_with_code(0);
     }
@@ -370,7 +370,8 @@ impl Runtime {
             Err(LarpshellError::IoError(error)) if error.kind() == std::io::ErrorKind::NotFound => {
                 eprintln!(
                     "{}",
-                    "run 'larpshell api' to set up your preferred provider.".custom_color(CTP_BLUE)
+                    style_message_markup("run 'larpshell api' to set up your preferred provider.")
+                        .custom_color(CTP_BLUE)
                 );
                 return Err(LarpshellError::NoProviderConfigured);
             }
@@ -461,7 +462,7 @@ fn handle_history_subcommand(enable: Option<bool>) -> Result<(), LarpshellError>
         } else {
             "disabled"
         };
-        println!("command history is {status}.");
+        cli::print_ok(&format!("command history is {status}."));
     }
     Ok(())
 }
@@ -478,7 +479,7 @@ fn handle_agent_subcommand(mode: Option<AgentMode>) -> Result<(), LarpshellError
             }
             Err(error) => Err(error)?,
         };
-        println!("{}", agent_mode_status_message(mode));
+        cli::print_ok(agent_mode_status_message(mode));
     }
     Ok(())
 }

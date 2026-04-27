@@ -4,8 +4,11 @@ use serde::{Deserialize, Deserializer, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
-use crate::cli::{print_ok_bold, prompt_input, prompt_input_with_default, prompt_select};
-use crate::common::{CTP_GREEN, CTP_RED, clear_line};
+use crate::cli::{
+    print_error, print_ok_bold, prompt_input, prompt_input_with_default, prompt_select,
+};
+use crate::common::{CTP_GREEN, clear_line};
+use crate::confirmation::style_message_markup;
 use crate::error::LarpshellError;
 mod migration;
 pub use migration::migrate_from_nlsh_rs;
@@ -459,24 +462,48 @@ fn apply_provider_config(providers: &mut MultiProviderConfig, config: &ProviderC
 fn display_config_summary(config: &Config, provider_name: &str) -> Result<(), LarpshellError> {
     print_ok_bold("Configuration saved!");
     eprintln!();
-    eprintln!("Provider: {provider_name}");
+    eprintln!(
+        "{}",
+        style_message_markup(&format!("Provider: {provider_name}"))
+    );
 
     let provider_config = config.provider_config()?;
     match &provider_config.config {
         ProviderSpecificConfig::Gemini { gemini } => {
-            eprintln!("Model: {}", gemini.model);
+            eprintln!(
+                "{}",
+                style_message_markup(&format!("Model: {}", gemini.model))
+            );
         }
         ProviderSpecificConfig::Ollama { ollama } => {
-            eprintln!("Model: {}", ollama.model);
-            eprintln!("Base URL: {}", ollama.base_url);
+            eprintln!(
+                "{}",
+                style_message_markup(&format!("Model: {}", ollama.model))
+            );
+            eprintln!(
+                "{}",
+                style_message_markup(&format!("Base URL: {}", ollama.base_url))
+            );
         }
         ProviderSpecificConfig::OpenRouter { openrouter } => {
-            eprintln!("Model: {}", openrouter.model);
-            eprintln!("Base URL: {}", openrouter.base_url);
+            eprintln!(
+                "{}",
+                style_message_markup(&format!("Model: {}", openrouter.model))
+            );
+            eprintln!(
+                "{}",
+                style_message_markup(&format!("Base URL: {}", openrouter.base_url))
+            );
         }
         ProviderSpecificConfig::OpenAI { openai } => {
-            eprintln!("Model: {}", openai.model);
-            eprintln!("Base URL: {}", openai.base_url);
+            eprintln!(
+                "{}",
+                style_message_markup(&format!("Model: {}", openai.model))
+            );
+            eprintln!(
+                "{}",
+                style_message_markup(&format!("Base URL: {}", openai.base_url))
+            );
         }
     }
 
@@ -585,6 +612,6 @@ fn prompt_model_name(default: Option<&str>) -> Result<String, LarpshellError> {
         if !model.trim().is_empty() {
             return Ok(model);
         }
-        eprintln!("{}", "Model name cannot be empty".custom_color(CTP_RED));
+        print_error("Model name cannot be empty");
     }
 }

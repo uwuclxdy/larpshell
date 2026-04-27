@@ -165,9 +165,10 @@ pub fn display_message(message: &str) -> usize {
 }
 
 fn display_bulleted(text: &str, prefix_color: colored::CustomColor) -> usize {
+    let styled = style_message_markup(text);
     let width = terminal_width();
     let mut visual = 0;
-    for (index, line) in text.lines().enumerate() {
+    for (index, line) in styled.lines().enumerate() {
         let prefix = if index == 0 { "● " } else { "" };
         visual += count_visual_lines(&format!("{prefix}{line}"), width);
         eprintln!(
@@ -177,6 +178,230 @@ fn display_bulleted(text: &str, prefix_color: colored::CustomColor) -> usize {
         );
     }
     visual
+}
+
+pub(crate) fn style_message_markup(text: &str) -> String {
+    style_message_markup_with_color(text, colored::control::SHOULD_COLORIZE.should_colorize())
+}
+
+fn style_message_markup_with_color(text: &str, use_color: bool) -> String {
+    let mut styled = String::new();
+
+    for (index, line) in text.lines().enumerate() {
+        if index > 0 {
+            styled.push('\n');
+        }
+        styled.push_str(&style_message_line(line, use_color));
+    }
+
+    styled
+}
+
+fn style_message_line(line: &str, use_color: bool) -> String {
+    let stripped = strip_markdown_prefixes(line);
+    let without_links = strip_markdown_links(stripped);
+
+    if use_color {
+        let styled = apply_surrounded_style(&without_links, "`", "\x1b[7m", "\x1b[27m");
+        let styled = apply_surrounded_style(&styled, "**", "\x1b[1m", "\x1b[22m");
+        let styled = apply_surrounded_style(&styled, "__", "\x1b[1m", "\x1b[22m");
+        let styled = apply_surrounded_style(&styled, "*", "\x1b[3m", "\x1b[23m");
+        let styled = apply_surrounded_style(&styled, "_", "\x1b[3m", "\x1b[23m");
+        apply_surrounded_style(&styled, "~~", "", "")
+    } else {
+        let styled = strip_surrounded_markers(&without_links, "`");
+        let styled = strip_surrounded_markers(&styled, "**");
+        let styled = strip_surrounded_markers(&styled, "__");
+        let styled = strip_surrounded_markers(&styled, "*");
+        let styled = strip_surrounded_markers(&styled, "_");
+        strip_surrounded_markers(&styled, "~~")
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn style_message_markup_for_test(text: &str, use_color: bool) -> String {
+    style_message_markup_with_color(text, use_color)
+}
+
+#[cfg(test)]
+pub(crate) fn style_html_tags_for_test(text: &str, use_color: bool) -> String {
+    style_html_tags_with_color(text, use_color)
+}
+
+fn style_html_tags_with_color(text: &str, use_color: bool) -> String {
+    if use_color {
+        text.replace("<b>", "\x1b[1m")
+            .replace("</b>", "\x1b[22m")
+            .replace("<i>", "\x1b[3m")
+            .replace("</i>", "\x1b[23m")
+            .replace("<u>", "\x1b[4m")
+            .replace("</u>", "\x1b[24m")
+    } else {
+        text.replace("<b>", "")
+            .replace("</b>", "")
+            .replace("<i>", "")
+            .replace("</i>", "")
+            .replace("<u>", "")
+            .replace("</u>", "")
+    }
+}
+
+pub fn style_html_tags(text: &str) -> String {
+    style_html_tags_with_color(text, colored::control::SHOULD_COLORIZE.should_colorize())
+}
+
+fn strip_markdown_prefixes(line: &str) -> &str {
+    let mut rest = line.trim_start();
+
+    if rest.starts_with("```") || rest.starts_with("~~~") {
+        return "";
+    }
+
+    if rest.len() >= 3 && rest.chars().all(|ch| matches!(ch, '-' | '*' | '_')) {
+        return "";
+    }
+
+    while let Some(stripped) = rest.strip_prefix('>') {
+        rest = stripped.trim_start();
+    }
+
+    let heading_len = rest.bytes().take_while(|&byte| byte == b'#').count();
+    if heading_len > 0 {
+        let heading_rest = &rest[heading_len..];
+        if let Some(stripped) = heading_rest.strip_prefix(' ') {
+            rest = stripped.trim_start();
+        }
+    }
+
+    if let Some(stripped) = rest
+        .strip_prefix("- ")
+        .or_else(|| rest.strip_prefix("* "))
+        .or_else(|| rest.strip_prefix("+ "))
+    {
+        rest = stripped;
+    }
+
+    rest = strip_ordered_list_marker(rest);
+
+    if let Some(stripped) = rest
+        .strip_prefix("[ ] ")
+        .or_else(|| rest.strip_prefix("[x] "))
+        .or_else(|| rest.strip_prefix("[X] "))
+    {
+        rest = stripped;
+    }
+
+    rest
+}
+
+fn strip_ordered_list_marker(line: &str) -> &str {
+    let digit_count = line
+        .bytes()
+        .take_while(|byte| byte.is_ascii_digit())
+        .count();
+
+    if digit_count == 0 || line.len() <= digit_count + 1 {
+        return line;
+    }
+
+    let marker = line.as_bytes()[digit_count];
+    let separator = line.as_bytes()[digit_count + 1];
+
+    if matches!(marker, b'.' | b')') && separator == b' ' {
+        &line[digit_count + 2..]
+    } else {
+        line
+    }
+}
+
+fn strip_markdown_links(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut stripped = String::new();
+    let mut index = 0;
+
+    while index < bytes.len() {
+        if bytes[index] == b'!'
+            && index + 1 < bytes.len()
+            && bytes[index + 1] == b'['
+            && let Some((label, next_index)) = parse_markdown_link(text, index + 1)
+        {
+            stripped.push_str(label);
+            index = next_index;
+            continue;
+        }
+
+        if bytes[index] == b'['
+            && let Some((label, next_index)) = parse_markdown_link(text, index)
+        {
+            stripped.push_str(label);
+            index = next_index;
+            continue;
+        }
+
+        stripped.push(bytes[index] as char);
+        index += 1;
+    }
+
+    stripped
+}
+
+fn parse_markdown_link(text: &str, bracket_index: usize) -> Option<(&str, usize)> {
+    let bytes = text.as_bytes();
+    let label_start = bracket_index + 1;
+    let label_end = bytes[label_start..].iter().position(|&byte| byte == b']')? + label_start;
+    let paren_start = label_end + 1;
+
+    if bytes.get(paren_start) != Some(&b'(') {
+        return None;
+    }
+
+    let paren_end = bytes[paren_start + 1..]
+        .iter()
+        .position(|&byte| byte == b')')?
+        + paren_start
+        + 1;
+
+    Some((&text[label_start..label_end], paren_end + 1))
+}
+
+fn apply_surrounded_style(text: &str, delimiter: &str, open: &str, close: &str) -> String {
+    let mut styled = String::new();
+    let mut rest = text;
+
+    while let Some(start) = rest.find(delimiter) {
+        let (before, after_start) = rest.split_at(start);
+        styled.push_str(before);
+
+        let after_start = &after_start[delimiter.len()..];
+        let Some(end) = after_start.find(delimiter) else {
+            styled.push_str(delimiter);
+            styled.push_str(after_start);
+            return styled;
+        };
+
+        let (inner, after_end) = after_start.split_at(end);
+        if inner.is_empty()
+            || inner.starts_with(char::is_whitespace)
+            || inner.ends_with(char::is_whitespace)
+        {
+            styled.push_str(delimiter);
+            styled.push_str(inner);
+            styled.push_str(delimiter);
+        } else {
+            styled.push_str(open);
+            styled.push_str(inner);
+            styled.push_str(close);
+        }
+
+        rest = &after_end[delimiter.len()..];
+    }
+
+    styled.push_str(rest);
+    styled
+}
+
+fn strip_surrounded_markers(text: &str, delimiter: &str) -> String {
+    apply_surrounded_style(text, delimiter, "", "")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -218,24 +443,6 @@ pub fn display_explanation(explanation: &str) -> usize {
         format!("{rest}\n{tail}")
     };
     display_bulleted(&body, safety_color(level))
-}
-
-pub fn style_html_tags(text: &str) -> String {
-    if colored::control::SHOULD_COLORIZE.should_colorize() {
-        text.replace("<b>", "\x1b[1m")
-            .replace("</b>", "\x1b[22m")
-            .replace("<i>", "\x1b[3m")
-            .replace("</i>", "\x1b[23m")
-            .replace("<u>", "\x1b[4m")
-            .replace("</u>", "\x1b[24m")
-    } else {
-        text.replace("<b>", "")
-            .replace("</b>", "")
-            .replace("<i>", "")
-            .replace("</i>", "")
-            .replace("<u>", "")
-            .replace("</u>", "")
-    }
 }
 
 pub fn confirm_from_reader(

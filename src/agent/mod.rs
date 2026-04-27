@@ -2,7 +2,7 @@ pub mod builtins;
 pub mod mcp;
 pub mod tools;
 
-use colored::{ColoredString, Colorize};
+use colored::Colorize;
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -15,6 +15,7 @@ use crate::common::{
 use crate::config::{
     AgentMode, Config, load_agent_prompt, load_agent_safe_prompt, load_sys_prompt,
 };
+use crate::confirmation::style_message_markup;
 use crate::error::LarpshellError;
 use crate::prompt::{
     DEFAULT_AGENT_PROMPT, DEFAULT_AGENT_SAFE_PROMPT, DEFAULT_PROMPT_TEMPLATE, create_system_prompt,
@@ -390,7 +391,7 @@ fn expanded_output_line_string(line: &str, is_first: bool) -> String {
     format!(
         "{}{}",
         prefix.custom_color(CTP_OVERLAY0),
-        line.custom_color(CTP_OVERLAY0)
+        style_message_markup(line).custom_color(CTP_OVERLAY0)
     )
 }
 
@@ -398,13 +399,18 @@ fn error_line_string(msg: &str) -> String {
     format!(
         "  {} {}",
         "error".custom_color(CTP_OVERLAY0),
-        msg.custom_color(CTP_RED)
+        style_message_markup(msg).custom_color(CTP_RED)
     )
 }
 
 fn tip_line_string(msg: &str) -> Option<String> {
-    command_not_allowed_tip(msg)
-        .map(|tip| format!("  {} {}", "tip:".custom_color(CTP_OVERLAY0).italic(), tip))
+    command_not_allowed_tip(msg).map(|tip| {
+        format!(
+            "  {} {}",
+            "tip:".custom_color(CTP_OVERLAY0).italic(),
+            style_message_markup(&tip)
+        )
+    })
 }
 
 fn more_lines_indicator(hidden: usize) -> String {
@@ -684,11 +690,10 @@ fn display_tool_result(result: &str) {
     render_success_inline(result, EXPANDED.load(Ordering::Relaxed), cap);
 }
 
-fn command_not_allowed_tip(error: &str) -> Option<ColoredString> {
-    let text = format!("run {} to enable all commands", "/agent on".bold());
+fn command_not_allowed_tip(error: &str) -> Option<String> {
     error
         .starts_with("command not allowed:")
-        .then(|| text.italic().custom_color(CTP_OVERLAY0))
+        .then(|| "run **/agent on** to enable all commands".to_string())
 }
 
 fn display_tool_error(error: &str) {
@@ -1223,7 +1228,6 @@ mod tests {
 
         fn plain_tip(error: &str) -> Option<String> {
             command_not_allowed_tip(error)
-                .map(|tip| String::from_utf8_lossy(&strip_ansi_escapes::strip(&*tip)).into_owned())
         }
 
         // Test run_command with simple command
@@ -1268,7 +1272,7 @@ mod tests {
         assert_eq!(preview, "unknown_tool with param1: value1, param2: value2");
 
         let tip = plain_tip("command not allowed: rm").unwrap();
-        assert!(tip.contains("run /agent on to enable all commands"));
+        assert!(tip.contains("run **/agent on** to enable all commands"));
 
         assert!(plain_tip("dangerous argument detected: --force").is_none());
     }
