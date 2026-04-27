@@ -1,6 +1,6 @@
 [package]
 name = "larpshell"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 license = "GPL-3.0-or-later"
 description = "Ctrl+C then Ctrl+V is simply too much work. Just let an LLM rule your terminal!!"
