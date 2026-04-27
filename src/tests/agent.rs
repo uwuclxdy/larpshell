@@ -259,6 +259,35 @@ fn agent_slash_command_parsed_in_interactive() {
 }
 
 #[test]
+fn agent_multiline_message_does_not_indent_continuation_lines() {
+    let home = temp_home("agent_multiline_message");
+    let port = mock_ollama(&["MESSAGE: package needed by:
+larpshell
+COMMAND: echo done"]);
+    let config_path = home.join("config").join("larpshell").join("config.toml");
+    fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+    fs::write(
+        &config_path,
+        format!(
+            "provider = \"ollama\"\nagent = \"safe\"\n\n[providers.ollama]\nbase_url = \"http://127.0.0.1:{port}\"\nmodel = \"test\"\n"
+        ),
+    )
+    .unwrap();
+
+    let out = run_with_stdin(&home, &[], b"install package\n");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "stderr: {stderr}");
+    assert!(
+        stderr.contains("● package needed by:\nlarpshell"),
+        "expected multiline message without indent; stderr: {stderr}"
+    );
+    assert!(
+        !stderr.contains("● package needed by:\n  larpshell"),
+        "message continuation line should not be indented; stderr: {stderr}"
+    );
+}
+
+#[test]
 fn agent_off_by_default_in_config() {
     let home = temp_home("agent_default");
     let port = mock_ollama(&[]);

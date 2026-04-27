@@ -682,6 +682,42 @@ async fn process_command_agent(
     tool_registry: &ToolRegistry,
 ) -> Result<Option<String>, LarpshellError> {
     let response = agent::run_agent_loop(user_input, provider, config, tool_registry).await?;
+    let message = response
+        .message
+        .as_deref()
+        .map(str::trim)
+        .filter(|msg| !msg.is_empty());
+    let command = response
+        .command
+        .as_deref()
+        .map(str::trim)
+        .filter(|cmd| !cmd.is_empty());
+
+    if let Some(message) = message {
+        display_response(message, ResponseStyle::Message);
+        if let Some(command) = command {
+            return confirm_loop(
+                command.to_string(),
+                user_input,
+                provider,
+                &mode,
+                ResponseStyle::Command,
+            )
+            .await;
+        }
+        return Ok(None);
+    }
+
+    if let Some(command) = command {
+        return confirm_loop(
+            command.to_string(),
+            user_input,
+            provider,
+            &mode,
+            ResponseStyle::Command,
+        )
+        .await;
+    }
 
     match response.kind {
         agent::FinalResponseKind::Command => {

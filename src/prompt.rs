@@ -59,25 +59,93 @@ fn strip_fence(text: &str) -> &str {
     after_language.trim_end_matches("```").trim()
 }
 
-pub fn prefixed_payload<'a>(text: &'a str, prefix: &str) -> Option<&'a str> {
-    for line in strip_fence(text).lines() {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedLabeledResponse {
+    pub message: Option<String>,
+    pub command: Option<String>,
+    pub has_labels: bool,
+}
+
+pub fn parse_labeled_response(text: &str) -> ParsedLabeledResponse {
+    let stripped = strip_fence(text);
+    let mut message_parts = Vec::new();
+    let mut command_parts = Vec::new();
+    let mut current_label: Option<&str> = None;
+    let mut current_lines = Vec::new();
+    let mut has_labels = false;
+
+    let flush_current = |label: Option<&str>,
+                         lines: &mut Vec<&str>,
+                         message_parts: &mut Vec<String>,
+                         command_parts: &mut Vec<String>| {
+        if let Some(label) = label {
+            let block = lines.join("\n").trim().to_string();
+            if !block.is_empty() {
+                match label {
+                    "MESSAGE:" => message_parts.push(block),
+                    "COMMAND:" => command_parts.push(block),
+                    _ => {}
+                }
+            }
+            lines.clear();
+        }
+    };
+
+    for line in stripped.lines() {
         let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix(prefix) {
-            return Some(rest.trim());
+        let next_label = if let Some(rest) = trimmed.strip_prefix("MESSAGE:") {
+            Some(("MESSAGE:", rest.trim()))
+        } else {
+            trimmed
+                .strip_prefix("COMMAND:")
+                .map(|rest| ("COMMAND:", rest.trim()))
+        };
+
+        if let Some((label, first_line)) = next_label {
+            has_labels = true;
+            flush_current(
+                current_label,
+                &mut current_lines,
+                &mut message_parts,
+                &mut command_parts,
+            );
+            current_label = Some(label);
+            current_lines.push(first_line);
+            continue;
+        }
+
+        if current_label.is_some() {
+            current_lines.push(trimmed);
         }
     }
-    None
+
+    flush_current(
+        current_label,
+        &mut current_lines,
+        &mut message_parts,
+        &mut command_parts,
+    );
+
+    let message = (!message_parts.is_empty()).then(|| message_parts.join("\n"));
+    let command = (!command_parts.is_empty()).then(|| command_parts.join("\n"));
+
+    ParsedLabeledResponse {
+        message,
+        command,
+        has_labels,
+    }
 }
 
 fn normalize_model_output(text: &str) -> String {
     let stripped = strip_fence(text);
+    let parsed = parse_labeled_response(stripped);
 
-    if let Some(command) = prefixed_payload(stripped, "COMMAND:") {
-        return command.to_string();
+    if let Some(command) = parsed.command {
+        return command;
     }
 
-    if let Some(message) = prefixed_payload(stripped, "MESSAGE:") {
-        return message.to_string();
+    if let Some(message) = parsed.message {
+        return message;
     }
 
     stripped.trim().to_string()
@@ -235,5 +303,65 @@ mod tests {
     fn clean_explanation_removes_repeated_command_inside_fenced_block() {
         let result = clean_explanation("```\nfree -h\nShows memory usage.\n```", "free -h");
         assert_eq!(result, "Shows memory usage.");
+    }
+
+    #[test]
+    fn parse_labeled_response_preserves_multiline_message_block() {
+        let parsed = parse_labeled_response("MESSAGE: first line\nsecond line\nthird line");
+        assert_eq!(
+            parsed,
+            ParsedLabeledResponse {
+                message: Some("first line\nsecond line\nthird line".to_string()),
+                command: None,
+                has_labels: true,
+            }
+        );
+    }
+
+    #[test]
+    fn parse_labeled_response_extracts_message_and_command_blocks() {
+        let parsed = parse_labeled_response(
+            "MESSAGE: package needed by:\nfoo\nbar\nCOMMAND: sudo pacman -S webkit2gtk-4.1\necho done",
+        );
+        assert_eq!(
+            parsed,
+            ParsedLabeledResponse {
+                message: Some("package needed by:\nfoo\nbar".to_string()),
+                command: Some("sudo pacman -S webkit2gtk-4.1\necho done".to_string()),
+                has_labels: true,
+            }
+        );
+    }
+
+    #[test]
+    fn parse_labeled_response_trims_continuation_line_indent() {
+        let parsed = parse_labeled_response("COMMAND: echo hello\n  echo world\n  pwd");
+        assert_eq!(
+            parsed,
+            ParsedLabeledResponse {
+                message: None,
+                command: Some("echo hello\necho world\npwd".to_string()),
+                has_labels: true,
+            }
+        );
+    }
+
+    #[test]
+    fn parse_labeled_response_appends_repeated_message_blocks() {
+        let parsed = parse_labeled_response("MESSAGE: first\nMESSAGE: second");
+        assert_eq!(
+            parsed,
+            ParsedLabeledResponse {
+                message: Some("first\nsecond".to_string()),
+                command: None,
+                has_labels: true,
+            }
+        );
+    }
+
+    #[test]
+    fn clean_response_prefers_command_when_both_labels_exist() {
+        let result = clean_response("MESSAGE: note\nCOMMAND: echo hello\necho world");
+        assert_eq!(result, "echo hello\necho world");
     }
 }

@@ -18,7 +18,7 @@ use crate::config::{
 use crate::error::LarpshellError;
 use crate::prompt::{
     DEFAULT_AGENT_PROMPT, DEFAULT_AGENT_SAFE_PROMPT, DEFAULT_PROMPT_TEMPLATE, create_system_prompt,
-    validate_sys_prompt,
+    parse_labeled_response, validate_sys_prompt,
 };
 use crate::providers::{AIProvider, ChatMessage, ChatResponse, ToolCall};
 use tools::ToolRegistry;
@@ -35,6 +35,8 @@ pub enum FinalResponseKind {
 pub struct FinalResponse {
     pub kind: FinalResponseKind,
     pub content: String,
+    pub message: Option<String>,
+    pub command: Option<String>,
 }
 
 static EXPANDED: AtomicBool = AtomicBool::new(false);
@@ -298,24 +300,34 @@ fn show_next_iteration_prompt(iteration: usize) {
 
 fn parse_final_response(text: &str) -> FinalResponse {
     let trimmed = text.trim();
+    let parsed = parse_labeled_response(trimmed);
 
-    if let Some(command) = crate::prompt::prefixed_payload(trimmed, "COMMAND:") {
-        return FinalResponse {
-            kind: FinalResponseKind::Command,
-            content: command.to_string(),
-        };
+    if parsed.has_labels {
+        if let Some(command) = parsed.command {
+            return FinalResponse {
+                kind: FinalResponseKind::Command,
+                content: command.clone(),
+                message: parsed.message,
+                command: Some(command),
+            };
+        }
+
+        if let Some(message) = parsed.message {
+            return FinalResponse {
+                kind: FinalResponseKind::Message,
+                content: message.clone(),
+                message: Some(message),
+                command: None,
+            };
+        }
     }
 
-    if let Some(message) = crate::prompt::prefixed_payload(trimmed, "MESSAGE:") {
-        return FinalResponse {
-            kind: FinalResponseKind::Message,
-            content: message.to_string(),
-        };
-    }
-
+    let content = crate::prompt::clean_response(trimmed);
     FinalResponse {
         kind: FinalResponseKind::Message,
-        content: crate::prompt::clean_response(trimmed),
+        message: Some(content.clone()),
+        content,
+        command: None,
     }
 }
 
@@ -870,6 +882,8 @@ mod tests {
             FinalResponse {
                 kind: FinalResponseKind::Command,
                 content: "ls -la".to_string(),
+                message: None,
+                command: Some("ls -la".to_string()),
             }
         );
     }
@@ -896,6 +910,93 @@ mod tests {
             FinalResponse {
                 kind: FinalResponseKind::Message,
                 content: "no command needed".to_string(),
+                message: Some("no command needed".to_string()),
+                command: None,
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn run_agent_loop_returns_message_and_command_from_single_response() {
+        let provider = MockProvider::new(vec![ChatResponse::Message(
+            "MESSAGE: package needed by:\nlarpshell\nCOMMAND: sudo pacman -S webkit2gtk-4.1"
+                .to_string(),
+        )]);
+        let tool_registry = ToolRegistry::with_builtins(AgentMode::Safe);
+
+        let response = run_agent_loop_with_confirm(
+            "install package",
+            &provider,
+            &test_config(),
+            &tool_registry,
+            |_| ToolConfirmResult::Allow,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            response,
+            FinalResponse {
+                kind: FinalResponseKind::Command,
+                content: "sudo pacman -S webkit2gtk-4.1".to_string(),
+                message: Some("package needed by:\nlarpshell".to_string()),
+                command: Some("sudo pacman -S webkit2gtk-4.1".to_string()),
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn run_agent_loop_preserves_multiline_command_payload() {
+        let provider = MockProvider::new(vec![ChatResponse::Message(
+            "COMMAND: echo one\necho two".to_string(),
+        )]);
+        let tool_registry = ToolRegistry::with_builtins(AgentMode::Safe);
+
+        let response = run_agent_loop_with_confirm(
+            "echo twice",
+            &provider,
+            &test_config(),
+            &tool_registry,
+            |_| ToolConfirmResult::Allow,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            response,
+            FinalResponse {
+                kind: FinalResponseKind::Command,
+                content: "echo one\necho two".to_string(),
+                message: None,
+                command: Some("echo one\necho two".to_string()),
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn run_agent_loop_preserves_multiline_message_payload() {
+        let provider = MockProvider::new(vec![ChatResponse::Message(
+            "MESSAGE: first line\nsecond line".to_string(),
+        )]);
+        let tool_registry = ToolRegistry::with_builtins(AgentMode::Safe);
+
+        let response = run_agent_loop_with_confirm(
+            "describe thing",
+            &provider,
+            &test_config(),
+            &tool_registry,
+            |_| ToolConfirmResult::Allow,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            response,
+            FinalResponse {
+                kind: FinalResponseKind::Message,
+                content: "first line\nsecond line".to_string(),
+                message: Some("first line\nsecond line".to_string()),
+                command: None,
             }
         );
     }
@@ -933,6 +1034,8 @@ mod tests {
             FinalResponse {
                 kind: FinalResponseKind::Command,
                 content: "cat hello.txt".to_string(),
+                message: None,
+                command: Some("cat hello.txt".to_string()),
             }
         );
 
@@ -999,32 +1102,114 @@ mod tests {
             FinalResponse {
                 kind: FinalResponseKind::Message,
                 content: "here is what I found".to_string(),
+                message: Some("here is what I found".to_string()),
+                command: None,
             }
         );
     }
 
     #[test]
-    fn parse_final_response_extracts_prefixed_line_from_fenced_block() {
-        let response = parse_final_response("```\nMESSAGE: no command needed\n```");
+    fn parse_final_response_extracts_multiline_message_from_fenced_block() {
+        let response = parse_final_response("```\nMESSAGE: no command needed\nsecond line\n```");
         assert_eq!(
             response,
             FinalResponse {
                 kind: FinalResponseKind::Message,
-                content: "no command needed".to_string(),
+                content: "no command needed\nsecond line".to_string(),
+                message: Some("no command needed\nsecond line".to_string()),
+                command: None,
             }
         );
     }
 
     #[test]
-    fn parse_final_response_extracts_prefixed_line_after_leading_prose() {
-        let response = parse_final_response("Done.\nCOMMAND: ls -la");
+    fn parse_final_response_extracts_multiline_command_after_leading_prose() {
+        let response = parse_final_response("Done.\nCOMMAND: ls -la\npwd");
+        assert_eq!(
+            response,
+            FinalResponse {
+                kind: FinalResponseKind::Command,
+                content: "ls -la\npwd".to_string(),
+                message: None,
+                command: Some("ls -la\npwd".to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_final_response_prefers_command_when_message_and_command_exist() {
+        let response = parse_final_response("MESSAGE: note\nCOMMAND: ls -la");
         assert_eq!(
             response,
             FinalResponse {
                 kind: FinalResponseKind::Command,
                 content: "ls -la".to_string(),
+                message: Some("note".to_string()),
+                command: Some("ls -la".to_string()),
             }
         );
+    }
+
+    #[test]
+    fn parse_final_response_appends_repeated_message_blocks() {
+        let response = parse_final_response("MESSAGE: first\nMESSAGE: second");
+        assert_eq!(
+            response,
+            FinalResponse {
+                kind: FinalResponseKind::Message,
+                content: "first\nsecond".to_string(),
+                message: Some("first\nsecond".to_string()),
+                command: None,
+            }
+        );
+    }
+
+    #[test]
+    fn parse_final_response_parses_multiline_command_prefix() {
+        let response = parse_final_response("  COMMAND:   echo hello\n  echo world  ");
+
+        assert!(matches!(response.kind, FinalResponseKind::Command));
+        assert_eq!(response.content, "echo hello\necho world");
+    }
+
+    #[test]
+    fn parse_final_response_parses_multiline_message_prefix() {
+        let response = parse_final_response("  MESSAGE:   done\nnext step  ");
+
+        assert!(matches!(response.kind, FinalResponseKind::Message));
+        assert_eq!(response.content, "done\nnext step");
+    }
+
+    #[test]
+    fn parse_final_response_defaults_to_message_without_prefix() {
+        let response = parse_final_response("  ls -la  ");
+
+        assert!(matches!(response.kind, FinalResponseKind::Message));
+        assert_eq!(response.content, "ls -la");
+    }
+
+    #[test]
+    fn parse_final_response_parses_command_prefix() {
+        let response = parse_final_response("  COMMAND:   echo hello  ");
+
+        assert!(matches!(response.kind, FinalResponseKind::Command));
+        assert_eq!(response.content, "echo hello");
+    }
+
+    #[test]
+    fn parse_final_response_parses_message_prefix() {
+        let response = parse_final_response("  MESSAGE:   done  ");
+
+        assert!(matches!(response.kind, FinalResponseKind::Message));
+        assert_eq!(response.content, "done");
+    }
+
+    #[test]
+    fn parse_final_response_defaults_to_message_without_prefix_again() {
+        let response = parse_final_response("  ls -la  ");
+
+        assert!(matches!(response.kind, FinalResponseKind::Message));
+        assert_eq!(response.content, "ls -la");
     }
 
     #[test]
@@ -1086,29 +1271,5 @@ mod tests {
         assert!(tip.contains("run /agent on to enable all commands"));
 
         assert!(plain_tip("dangerous argument detected: --force").is_none());
-    }
-
-    #[test]
-    fn parse_final_response_parses_command_prefix() {
-        let response = parse_final_response("  COMMAND:   echo hello  ");
-
-        assert!(matches!(response.kind, FinalResponseKind::Command));
-        assert_eq!(response.content, "echo hello");
-    }
-
-    #[test]
-    fn parse_final_response_parses_message_prefix() {
-        let response = parse_final_response("  MESSAGE:   done  ");
-
-        assert!(matches!(response.kind, FinalResponseKind::Message));
-        assert_eq!(response.content, "done");
-    }
-
-    #[test]
-    fn parse_final_response_defaults_to_message_without_prefix() {
-        let response = parse_final_response("  ls -la  ");
-
-        assert!(matches!(response.kind, FinalResponseKind::Message));
-        assert_eq!(response.content, "ls -la");
     }
 }

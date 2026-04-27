@@ -127,8 +127,18 @@ fn mock_ollama(responses: &[&str]) -> u16 {
                 break;
             };
             let mut buf = vec![0u8; 8192];
-            let _ = stream.read(&mut buf);
-            let body = format!(r#"{{"response":"{text}"}}"#);
+            let read = stream.read(&mut buf).unwrap_or(0);
+            let request = String::from_utf8_lossy(&buf[..read]);
+            let body = if request.starts_with("POST /api/chat ") {
+                serde_json::json!({
+                    "message": {
+                        "content": text,
+                    }
+                })
+                .to_string()
+            } else {
+                serde_json::json!({ "response": text }).to_string()
+            };
             let http = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                 body.len(),
