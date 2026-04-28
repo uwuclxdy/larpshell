@@ -1238,7 +1238,8 @@ mod tests {
         ];
         let tool_registry = ToolRegistry::with_builtins(AgentMode::Safe);
         let mut messages = vec![ChatMessage::user("show me files")];
-        let mut confirmations = vec![ToolConfirmResult::Allow, ToolConfirmResult::Cancel].into_iter();
+        let mut confirmations =
+            vec![ToolConfirmResult::Allow, ToolConfirmResult::Cancel].into_iter();
 
         let error = handle_tool_calls(&tool_calls, &tool_registry, &mut messages, &mut |_| {
             confirmations.next().unwrap()

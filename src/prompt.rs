@@ -57,9 +57,7 @@ fn strip_fence(text: &str) -> &str {
     let rest = rest.strip_prefix("sh").unwrap_or(rest);
     let rest = rest.strip_prefix('\n').unwrap_or(rest);
 
-    rest.strip_suffix("```")
-        .unwrap_or(rest)
-        .trim()
+    rest.strip_suffix("```").unwrap_or(rest).trim()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
