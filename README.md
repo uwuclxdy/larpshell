@@ -1,6 +1,8 @@
-# larpshell
+# larpshell - use terminal with natural language
 
-Use terminal with natural language.
+<img src="media/larplarplarpsahur.png" alt="larpshell" style="width:230px;float:right;margin-left:1rem;object-fit:contain" />
+
+Why learn shell commands when you can just larp ts? Takuji and larptok approved.
 
 [![Crates.io](https://img.shields.io/crates/v/larpshell)](https://crates.io/crates/larpshell)
 [![Release](https://github.com/uwuclxdy/larpshell/actions/workflows/release.yml/badge.svg)](https://github.com/uwuclxdy/larpshell/actions/workflows/release.yml)
@@ -12,23 +14,34 @@ Use terminal with natural language.
 
 ## Usage Demo
 
-[![asciicast](https://asciinema.org/a/z2Q3GNeVJubnNx0M.svg)](https://asciinema.org/a/z2Q3GNeVJubnNx0M)
+![asciicast](media/larp.gif)
 
 >[!IMPORTANT]
-> **Always review generated commands before running them!** larpshell makes this easy with editing and explanation features, but you own what executes on your machine.
+> Review every generated command before you run it. `larpshell` asks first, but the command still executes on your machine.
 
-## Requirements
+## What it does
+
+- one-shot mode: `larpshell show disk usage`
+- REPL mode: `larpshell`
+- stdin mode: `echo "show disk usage" | larpshell`
+- command explanation: `larpshell explain df -h`
+- editable prompts for generation, explanation, and agent mode
+- optional agent mode with built-in tools and MCP servers
+
+## Install
+
+### Requirements
 
 [Rust Language](https://www.rust-lang.org/tools/install)
 
-## Installation
-
 From crates.io (**recommended**):
+
 ```bash
 cargo install larpshell
 ```
 
 From source:
+
 ```bash
 curl -sSL https://raw.githubusercontent.com/uwuclxdy/larpshell/mommy/install.sh | sh
 ```
@@ -41,19 +54,19 @@ From [AUR](https://aur.archlinux.org/packages/larpshell) (bin; latest release, n
 
 From [AUR](https://aur.archlinux.org/packages/larpshell-git) (git; latest commit): `yay -S larpshell-git`
 
-## Setup
+## Configure a provider
 
-Configure your AI provider:
+Run:
 
 ```bash
 larpshell api
 ```
 
-Pick a provider and enter credentials. Config is saved in `~/.config/larpshell/config.toml`.
+`larpshell` stores config in `~/.config/larpshell/config.toml`.
 
 ### Supported providers
 
-| *Provider* | *About* |
+| *Provider* | *Notes* |
 |----------|-------|
 | **Gemini** | Free API key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
 | **OpenRouter** | Free models available with `openrouter/auto` (default, [free models list](https://openrouter.ai/models?q=free)) |
@@ -62,18 +75,18 @@ Pick a provider and enter credentials. Config is saved in `~/.config/larpshell/c
 
 ## Usage
 
-### Single command
+### One-shot
 
-```
+```text
 $ larpshell show disk usage
 > df -h
 Run this?
 [Y/Enter] to execute, [E] to explain, [Arrow Up] to edit, [N] to cancel
 ```
 
-### Interactive mode
+### Interactive REPL
 
-```
+```text
 $ larpshell
 larpshell> show disk usage
 > df -h
@@ -81,9 +94,17 @@ Run this?
 [Y/Enter] to execute, [E] to explain, [Arrow Up] to edit, [N] to cancel
 ```
 
+### Stdin / pipe
+
+```bash
+echo "show disk usage" | larpshell
+```
+
+If piped input starts with `/`, `larpshell` treats it as a slash command.
+
 ### Explain a command
 
-```
+```text
 $ larpshell explain df -h
 > df -h
 ✅ Displays free disk space of mounted filesystems in a human readable format.
@@ -93,26 +114,32 @@ Run this?
 
 ### Edit before running
 
-Press Arrow Up at the confirmation prompt. Full cursor control with left/right, home/end, backspace/delete.
+Press Arrow Up at the confirmation prompt to resend the generated command into the input editor.
 
-```
-> df -h --total▉
-[Enter] to confirm, [Ctrl+C] to quit
-```
+## Agent mode
 
-### Agent mode
+Agent mode lets the model gather context before it returns a final command.
 
-Let the LLM gather context before producing a command. It can call built-in tools (`read_file`, `list_files`, `search_files`, `run_command`) and any [MCP](https://modelcontextprotocol.io) servers you configure. Every tool call asks for confirmation before it runs.
+Built-in tools:
 
-Toggle it on:
+- `read_file`
+- `list_files`
+- `search_files`
+- `run_command`
 
-```bash
-larpshell agent on    # or `/agent` in the REPL
-```
+Every tool call asks for confirmation before it runs.
 
-Then ask as usual:
+Modes:
 
-```
+- `larpshell agent off` disables agent mode
+- `larpshell agent safe` enables restricted tools
+- `larpshell agent on` enables unrestricted agent tools
+
+Safe mode keeps `run_command` on a read-only allowlist and blocks dangerous flags, shell metacharacters, and mutating git subcommands.
+
+Example:
+
+```text
 $ larpshell what's the largest file in this repo
   tool Allow listing files in .?
   result (14 lines)
@@ -123,7 +150,9 @@ Run this?
 [Y/Enter] to execute, [E] to explain, [Arrow Up] to edit, [N] to cancel
 ```
 
-MCP servers go in `~/.config/larpshell/mcp.json` using the standard `mcpServers` format:
+### MCP servers
+
+`larpshell` loads MCP servers from `~/.config/larpshell/mcp.json`.
 
 ```json
 {
@@ -136,23 +165,47 @@ MCP servers go in `~/.config/larpshell/mcp.json` using the standard `mcpServers`
 }
 ```
 
-### Subcommands
+## Slash commands
 
-| Command | Description |
-|---------|-------------|
-| `larpshell api` | Configure AI provider |
-| `larpshell agent [on\|off]` | Toggle agent mode (tools + MCP) |
-| `larpshell explain <cmd>` | Explain a command with safety rating |
-| `larpshell prompt [system\|explain] [show\|edit]` | View or edit prompt templates |
-| `larpshell uninstall` | Remove larpshell |
-| `larpshell --help` | Show help |
+Interactive mode supports:
 
-## How it works
+- `/api`
+- `/agent [off|safe|on]`
+- `/explain <command>`
+- `/history [on|off]`
+- `/prompt [system|explain|agent|agent-safe] [show|edit|reset]`
+- `/help`
+- `/quit`
+- `/uninstall`
 
-1. You describe what you want in plain language
-2. An AI provider translates your request into a shell command
-3. You review the command, edit it if needed, or ask for an explanation
-4. Press Enter to run it in your shell
+In the REPL, `! <command>` runs a shell command directly.
+
+## Prompt files and history
+
+`larpshell` stores prompt templates in `~/.config/larpshell/`:
+
+- `sys-prompt.md`
+- `explain-prompt.md`
+- `agent-prompt.md`
+- `agent-safe-prompt.md`
+
+Use the CLI or slash commands to show, edit, or reset them.
+
+Prompt history is on by default. Toggle it with `larpshell history on|off` or `/history on|off`.
+
+## Shell integration
+
+On the first interactive run without a subcommand, `larpshell` tries to install shell integration automatically.
+
+Current support:
+
+- bash function in `~/.bashrc`
+- fish function in `~/.config/fish/functions/larpshell.fish`
+- bash, zsh, and fish completions
+
+If setup changes your shell files, restart your shell or source the updated config.
+
+The test suite builds the binary and runs it against mock provider servers. It does not need real provider credentials.
 
 ## License
 
