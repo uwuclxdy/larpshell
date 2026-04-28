@@ -1,6 +1,6 @@
 # larpshell - use terminal with natural language
 
-<img src="media/larplarplarpsahur.png" alt="larpshell" style="width:230px;float:right;margin-left:1rem;object-fit:contain" />
+<img src="media/larplarplarpsahur.png" alt="larpshell" align="right" width="260" />
 
 Why learn shell commands when you can just larp ts? Takuji and larptok approved.
 
