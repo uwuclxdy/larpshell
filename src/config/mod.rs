@@ -68,6 +68,8 @@ pub struct Config {
     pub providers: MultiProviderConfig,
     #[serde(default, deserialize_with = "deserialize_agent_mode")]
     pub agent: AgentMode,
+    #[serde(default = "default_verbose_tool_output")]
+    pub verbose_tool_output: bool,
 }
 
 impl Config {
@@ -291,11 +293,16 @@ pub fn set_history_enabled(enabled: bool) -> Result<(), LarpshellError> {
     Ok(())
 }
 
+const fn default_verbose_tool_output() -> bool {
+    true
+}
+
 fn default_config() -> Config {
     Config {
         active_provider: ActiveProvider::Ollama,
         providers: MultiProviderConfig::default(),
         agent: AgentMode::Off,
+        verbose_tool_output: default_verbose_tool_output(),
     }
 }
 
@@ -312,6 +319,13 @@ fn load_config_or_default() -> Result<Config, LarpshellError> {
 pub fn set_agent_mode(mode: AgentMode) -> Result<(), LarpshellError> {
     let mut config = load_config_or_default()?;
     config.agent = mode;
+    save_config(&config)?;
+    Ok(())
+}
+
+pub fn set_verbose_tool_output(enabled: bool) -> Result<(), LarpshellError> {
+    let mut config = load_config_or_default()?;
+    config.verbose_tool_output = enabled;
     save_config(&config)?;
     Ok(())
 }
@@ -378,6 +392,9 @@ pub fn interactive_setup() -> Result<(), LarpshellError> {
         active_provider,
         providers: multi_providers,
         agent: existing_config.as_ref().map_or(AgentMode::Off, |c| c.agent),
+        verbose_tool_output: existing_config
+            .as_ref()
+            .map_or(true, |c| c.verbose_tool_output),
     };
 
     save_config(&config)?;

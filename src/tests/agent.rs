@@ -242,6 +242,55 @@ fn history_status_commands_still_work_with_shell_bootstrap_home() {
 }
 
 #[test]
+fn tool_output_subcommand_updates_config() {
+    let home = temp_home("tool_output_control");
+    let port = mock_ollama(&[]);
+    write_ollama_config(&home, port);
+
+    let config_path = home.join("config").join("larpshell").join("config.toml");
+
+    let out = run(&home, &["verbose", "off"]);
+    assert_success(&out);
+    assert_file_contains(&config_path, "verbose_tool_output = false");
+
+    let out = run(&home, &["verbose", "on"]);
+    assert_success(&out);
+    assert_file_contains(&config_path, "verbose_tool_output = true");
+}
+
+#[test]
+fn verbose_slash_command_takes_effect_immediately() {
+    let home = temp_home("verbose_slash");
+    let port = mock_ollama(&[
+        r#"CHAT_JSON:{"message":{"content":"","tool_calls":[{"function":{"name":"search_files","arguments":{"pattern":"Cargo","directory_path":"."}}}]}}"#,
+        "MESSAGE: done",
+    ]);
+    write_ollama_config(&home, port);
+
+    let out = run_with_stdin_interactive(
+        &home,
+        &[],
+        b"/agent safe\n/verbose off\nfind Cargo\n/quit\n",
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("verbose tool output: off"),
+        "expected verbose off message; stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("result ("),
+        "expected tool summary; stderr: {stderr}"
+    );
+    assert!(
+        !stderr.contains("Cargo.toml"),
+        "verbose output should not show result lines after /verbose off; stderr: {stderr}"
+    );
+
+    let config_path = home.join("config").join("larpshell").join("config.toml");
+    assert_file_contains(&config_path, "verbose_tool_output = false");
+}
+
+#[test]
 fn agent_slash_command_parsed_in_interactive() {
     let home = temp_home("agent_slash");
     let port = mock_ollama(&[]);

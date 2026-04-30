@@ -129,7 +129,9 @@ fn mock_ollama(responses: &[&str]) -> u16 {
             let mut buf = vec![0u8; 8192];
             let read = stream.read(&mut buf).unwrap_or(0);
             let request = String::from_utf8_lossy(&buf[..read]);
-            let body = if request.starts_with("POST /api/chat ") {
+            let body = if let Some(raw_json) = text.strip_prefix("CHAT_JSON:") {
+                raw_json.to_string()
+            } else if request.starts_with("POST /api/chat ") {
                 serde_json::json!({
                     "message": {
                         "content": text,
@@ -390,6 +392,7 @@ model = "test"
 "#;
     let config: Config = from_str(config_toml).expect("should parse without agent field");
     assert_eq!(config.agent, AgentMode::Off);
+    assert!(config.verbose_tool_output);
 }
 
 #[test]
@@ -416,6 +419,20 @@ fn agent_field_parses_legacy_bool_values() {
         let config: Config = from_str(&config_toml).expect("should parse legacy bool agent");
         assert_eq!(config.agent, expected);
     }
+}
+
+#[test]
+fn verbose_tool_output_field_parses_false() {
+    let config_toml = r#"
+provider = "ollama"
+verbose_tool_output = false
+
+[providers.ollama]
+base_url = "http://localhost:11434"
+model = "test"
+"#;
+    let config: Config = from_str(config_toml).expect("should parse verbose tool output");
+    assert!(!config.verbose_tool_output);
 }
 
 #[test]

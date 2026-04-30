@@ -151,10 +151,14 @@ fn format_tool_preview(
     }
 }
 
-fn execute_tool_call(tool_registry: &ToolRegistry, tool_call: &ToolCall) -> String {
+fn execute_tool_call(
+    tool_registry: &ToolRegistry,
+    tool_call: &ToolCall,
+    verbose_tool_output: bool,
+) -> String {
     let result = tool_registry.execute(&tool_call.name, tool_call.arguments.clone());
     match &result {
-        Ok(output) => display_tool_result(output),
+        Ok(output) => display_tool_result(output, verbose_tool_output),
         Err(error) => display_tool_error(error),
     }
 
@@ -208,6 +212,7 @@ fn handle_tool_calls<F>(
     tool_calls: &[ToolCall],
     tool_registry: &ToolRegistry,
     messages: &mut Vec<ChatMessage>,
+    verbose_tool_output: bool,
     confirm_tool: &mut F,
 ) -> Result<(), LarpshellError>
 where
@@ -223,7 +228,7 @@ where
 
         match confirm_tool(tool_call) {
             ToolConfirmResult::Allow => {
-                let result_text = execute_tool_call(tool_registry, tool_call);
+                let result_text = execute_tool_call(tool_registry, tool_call, verbose_tool_output);
                 pending_messages.push(ChatMessage::tool_result(&tool_call.id, result_text));
             }
             ToolConfirmResult::Deny => {
@@ -286,6 +291,7 @@ fn handle_agent_response<F>(
     response: ChatResponse,
     tool_registry: &ToolRegistry,
     messages: &mut Vec<ChatMessage>,
+    verbose_tool_output: bool,
     confirm_tool: &mut F,
 ) -> Result<Option<FinalResponse>, LarpshellError>
 where
@@ -294,7 +300,13 @@ where
     match response {
         ChatResponse::Message(text) => Ok(Some(parse_final_response(&text))),
         ChatResponse::ToolCalls(tool_calls) => {
-            handle_tool_calls(&tool_calls, tool_registry, messages, confirm_tool)?;
+            handle_tool_calls(
+                &tool_calls,
+                tool_registry,
+                messages,
+                verbose_tool_output,
+                confirm_tool,
+            )?;
             Ok(None)
         }
     }
@@ -372,15 +384,17 @@ fn more_lines_indicator(hidden: usize) -> String {
     )
 }
 
-fn render_success_inline(output: &str) {
+fn render_success_inline(output: &str, verbose_tool_output: bool) {
     eprintln!("{}", success_summary_string(output));
-    let total = output.lines().count();
-    let shown = total.min(TOOL_OUTPUT_LINE_CAP);
-    for (i, line) in output.lines().take(shown).enumerate() {
-        eprintln!("{}", expanded_output_line_string(line, i == 0));
-    }
-    if total > shown {
-        eprintln!("{}", more_lines_indicator(total - shown));
+    if verbose_tool_output {
+        let total = output.lines().count();
+        let shown = total.min(TOOL_OUTPUT_LINE_CAP);
+        for (i, line) in output.lines().take(shown).enumerate() {
+            eprintln!("{}", expanded_output_line_string(line, i == 0));
+        }
+        if total > shown {
+            eprintln!("{}", more_lines_indicator(total - shown));
+        }
     }
     eprintln!();
 }
@@ -483,8 +497,8 @@ fn read_key() -> Key {
     parse_byte(buffer[0])
 }
 
-fn display_tool_result(result: &str) {
-    render_success_inline(result);
+fn display_tool_result(result: &str, verbose_tool_output: bool) {
+    render_success_inline(result, verbose_tool_output);
 }
 
 fn command_not_allowed_tip(error: &str) -> Option<String> {
@@ -512,9 +526,13 @@ where
     for iteration in 0..MAX_AGENT_ITERATIONS {
         let response = next_agent_response(provider, &messages, &tool_definitions).await?;
 
-        if let Some(text) =
-            handle_agent_response(response, tool_registry, &mut messages, &mut confirm_tool)?
-        {
+        if let Some(text) = handle_agent_response(
+            response,
+            tool_registry,
+            &mut messages,
+            config.verbose_tool_output,
+            &mut confirm_tool,
+        )? {
             return Ok(text);
         }
 
@@ -600,6 +618,7 @@ mod tests {
                 ..Default::default()
             },
             agent: AgentMode::Safe,
+            verbose_tool_output: true,
         }
     }
 
@@ -1035,9 +1054,13 @@ mod tests {
         let mut confirmations =
             vec![ToolConfirmResult::Allow, ToolConfirmResult::Cancel].into_iter();
 
-        let error = handle_tool_calls(&tool_calls, &tool_registry, &mut messages, &mut |_| {
-            confirmations.next().unwrap()
-        })
+        let error = handle_tool_calls(
+            &tool_calls,
+            &tool_registry,
+            &mut messages,
+            true,
+            &mut |_| confirmations.next().unwrap(),
+        )
         .unwrap_err();
 
         assert!(matches!(error, LarpshellError::Cancelled));

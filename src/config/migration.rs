@@ -56,6 +56,7 @@ impl Migrator for ConfigMigrator {
             active_provider,
             providers: old_config.providers,
             agent: AgentMode::Safe,
+            verbose_tool_output: true,
         };
 
         let new_content = toml::to_string_pretty(&new_config)?;

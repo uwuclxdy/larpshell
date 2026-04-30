@@ -57,6 +57,17 @@ static HISTORY_TOGGLES: &[ArgChoice] = &[
     },
 ];
 
+static TOOL_OUTPUT_TOGGLES: &[ArgChoice] = &[
+    ArgChoice {
+        value: "on",
+        description: "show expanded agent tool output",
+    },
+    ArgChoice {
+        value: "off",
+        description: "show tool output summaries only",
+    },
+];
+
 static AGENT_TOGGLES: &[ArgChoice] = &[
     ArgChoice {
         value: "off",
@@ -88,6 +99,10 @@ pub const COMMANDS: &[SlashCommand] = &[
     SlashCommand {
         name: "history",
         description: "enable or disable prompt history",
+    },
+    SlashCommand {
+        name: "verbose",
+        description: "enable or disable verbose agent tool output",
     },
     SlashCommand {
         name: "prompt",
@@ -129,6 +144,10 @@ pub fn arg_completions(line: &str) -> Option<(usize, Vec<&'static ArgChoice>)> {
     let pool: &[ArgChoice] = match cmd {
         "/history" => match prior_args.len() {
             0 => HISTORY_TOGGLES,
+            _ => return None,
+        },
+        "/verbose" => match prior_args.len() {
+            0 => TOOL_OUTPUT_TOGGLES,
             _ => return None,
         },
         "/agent" => match prior_args.len() {
@@ -179,6 +198,9 @@ pub enum SlashCmd {
     History {
         enable: Option<bool>,
     },
+    Verbose {
+        enable: Option<bool>,
+    },
     Prompt {
         kind: PromptKind,
         action: PromptAction,
@@ -207,14 +229,15 @@ fn parse_agent_mode_strict(
     }
 }
 
-fn parse_history_toggle_strict(
+fn parse_bool_toggle_strict(
+    command: &'static str,
     arg: Option<&str>,
 ) -> Result<Option<bool>, (&'static str, &'static str)> {
     match arg {
         None => Ok(None),
         Some("on") => Ok(Some(true)),
         Some("off") => Ok(Some(false)),
-        Some(_) => Err(("history", "on or off")),
+        Some(_) => Err((command, "on or off")),
     }
 }
 
@@ -249,8 +272,15 @@ pub fn parse(input: &str) -> SlashCmd {
         Some("/uninstall") => SlashCmd::Uninstall,
         Some("/help") => SlashCmd::Help,
         Some("/quit") => SlashCmd::Quit,
-        Some("/history") => match parse_history_toggle_strict(parts.next()) {
+        Some("/history") => match parse_bool_toggle_strict("history", parts.next()) {
             Ok(enable) => SlashCmd::History { enable },
+            Err((cmd, expected)) => SlashCmd::InvalidArgs {
+                command: cmd,
+                expected,
+            },
+        },
+        Some("/verbose") => match parse_bool_toggle_strict("verbose", parts.next()) {
+            Ok(enable) => SlashCmd::Verbose { enable },
             Err((cmd, expected)) => SlashCmd::InvalidArgs {
                 command: cmd,
                 expected,
@@ -386,6 +416,22 @@ mod tests {
     }
 
     #[test]
+    fn parse_tool_output_off() {
+        match parse("/verbose off") {
+            SlashCmd::Verbose { enable } => assert_eq!(enable, Some(false)),
+            _ => panic!("expected Verbose"),
+        }
+    }
+
+    #[test]
+    fn parse_tool_output_no_arg_shows_status() {
+        match parse("/verbose") {
+            SlashCmd::Verbose { enable } => assert_eq!(enable, None),
+            _ => panic!("expected Verbose"),
+        }
+    }
+
+    #[test]
     fn arg_completions_agent_returns_toggles() {
         let (start, candidates) = arg_completions("/agent ").unwrap();
         assert_eq!(start, 7);
@@ -398,6 +444,14 @@ mod tests {
         let results = filter("/a");
         let names: Vec<_> = results.iter().map(|command| command.name).collect();
         assert!(names.contains(&"agent"), "filter /a should include agent");
+    }
+
+    #[test]
+    fn arg_completions_tool_output_returns_toggles() {
+        let (start, candidates) = arg_completions("/verbose ").unwrap();
+        assert_eq!(start, 9);
+        let values: Vec<_> = candidates.iter().map(|candidate| candidate.value).collect();
+        assert_eq!(values, ["on", "off"]);
     }
 
     #[test]

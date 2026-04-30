@@ -61,6 +61,9 @@ pub enum Subcommands {
     History {
         enable: Option<bool>,
     },
+    Verbose {
+        enable: Option<bool>,
+    },
     Prompt {
         kind: PromptKind,
         action: PromptAction,
@@ -116,7 +119,12 @@ pub fn parse_cli_args() -> CliArgs {
         /// Enable or disable command history logging
         History {
             #[arg(value_enum)]
-            toggle: Option<ClapHistoryToggle>,
+            toggle: Option<ClapBoolToggle>,
+        },
+        /// Enable or disable verbose agent tool output
+        Verbose {
+            #[arg(value_enum)]
+            toggle: Option<ClapBoolToggle>,
         },
         /// View or edit system prompts
         Prompt {
@@ -135,7 +143,7 @@ pub fn parse_cli_args() -> CliArgs {
     }
 
     #[derive(clap::ValueEnum, Clone)]
-    enum ClapHistoryToggle {
+    enum ClapBoolToggle {
         On,
         Off,
     }
@@ -168,7 +176,10 @@ pub fn parse_cli_args() -> CliArgs {
         Some(Commands::Api) => Some(Subcommands::Api),
         Some(Commands::Uninstall) => Some(Subcommands::Uninstall),
         Some(Commands::History { toggle }) => Some(Subcommands::History {
-            enable: toggle.map(|t| matches!(t, ClapHistoryToggle::On)),
+            enable: toggle.map(|toggle| matches!(toggle, ClapBoolToggle::On)),
+        }),
+        Some(Commands::Verbose { toggle }) => Some(Subcommands::Verbose {
+            enable: toggle.map(|toggle| matches!(toggle, ClapBoolToggle::On)),
         }),
         Some(Commands::Prompt { kind, action }) => Some(Subcommands::Prompt {
             kind: match kind {

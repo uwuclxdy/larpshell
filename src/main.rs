@@ -333,6 +333,12 @@ async fn dispatch_slash_command(
         }
         SlashCmd::Uninstall => uninstall_larpshell()?,
         SlashCmd::History { enable } => handle_history_subcommand(enable)?,
+        SlashCmd::Verbose { enable } => {
+            handle_tool_output_subcommand(enable)?;
+            if command_mode == CommandMode::Interactive {
+                runtime.reload_config()?;
+            }
+        }
         SlashCmd::Prompt { kind, action } => handle_prompt_subcommand(&kind, &action)?,
         SlashCmd::Explain { args } => {
             handle_explain_subcommand(args, runtime.provider.as_ref()).await?;
@@ -355,6 +361,7 @@ fn dispatch_provider_less_subcommand(sub: &cli::Subcommands) -> Result<(), Larps
         cli::Subcommands::Api => interactive_setup(),
         cli::Subcommands::Uninstall => uninstall_larpshell(),
         cli::Subcommands::History { enable } => handle_history_subcommand(*enable),
+        cli::Subcommands::Verbose { enable } => handle_tool_output_subcommand(*enable),
         cli::Subcommands::Agent { mode } => handle_agent_subcommand(*mode),
         cli::Subcommands::Prompt { kind, action } => handle_prompt_subcommand(kind, action),
         cli::Subcommands::Explain { .. } => unreachable!("Explain needs a provider"),
@@ -400,6 +407,11 @@ impl Runtime {
         let config = reload_config()?;
         self.tool_registry = Self::build_registry(config.agent);
         self.config = config;
+        Ok(())
+    }
+
+    fn reload_config(&mut self) -> Result<(), LarpshellError> {
+        self.config = reload_config()?;
         Ok(())
     }
 
@@ -465,6 +477,31 @@ fn handle_history_subcommand(enable: Option<bool>) -> Result<(), LarpshellError>
         cli::print_ok(&format!("command history is {status}."));
     }
     Ok(())
+}
+
+fn handle_tool_output_subcommand(enable: Option<bool>) -> Result<(), LarpshellError> {
+    if let Some(enabled) = enable {
+        config::set_verbose_tool_output(enabled)?;
+        cli::print_ok(tool_output_status_message(enabled));
+    } else {
+        let enabled = match config::load_config() {
+            Ok(config) => config.verbose_tool_output,
+            Err(LarpshellError::IoError(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+                true
+            }
+            Err(error) => Err(error)?,
+        };
+        cli::print_ok(tool_output_status_message(enabled));
+    }
+    Ok(())
+}
+
+const fn tool_output_status_message(enabled: bool) -> &'static str {
+    if enabled {
+        "verbose tool output: on"
+    } else {
+        "verbose tool output: off"
+    }
 }
 
 fn handle_agent_subcommand(mode: Option<AgentMode>) -> Result<(), LarpshellError> {
