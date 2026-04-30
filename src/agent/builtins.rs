@@ -1,17 +1,17 @@
 use crate::config::AgentMode;
 use crate::providers::ToolDefinition;
+use grep_regex::RegexMatcherBuilder;
+use grep_searcher::{SearcherBuilder, Sink, SinkMatch};
+use ignore::WalkBuilder;
 use std::fs;
-use std::path::Path;
+use std::io;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use super::tools::{RegisteredTool, ToolRegistry};
 
 const MAX_FILE_SIZE: usize = 100 * 1024;
 const MAX_SEARCH_MATCHES: usize = 50;
-const TEXT_EXTENSIONS: &[&str] = &[
-    "rs", "toml", "json", "yaml", "yml", "md", "txt", "sh", "py", "js", "ts", "html", "css", "c",
-    "h", "cpp", "go", "java", "rb", "conf", "cfg", "ini", "xml", "csv", "sql", "lua", "zig", "nix",
-];
 const SAFE_COMMANDS: &[&str] = &[
     "ls",
     "cat",
@@ -231,8 +231,39 @@ fn execute_search_files(pattern: &str, directory_path: &str) -> Result<String, S
         return Err(format!("not a directory: {expanded}"));
     }
 
-    let mut matches = Vec::new();
-    search_recursive(path, pattern, &mut matches);
+    let matcher = RegexMatcherBuilder::new()
+        .fixed_strings(true)
+        .build(pattern)
+        .map_err(|error| format!("invalid pattern: {error}"))?;
+
+    let walker = WalkBuilder::new(path)
+        .hidden(true)
+        .standard_filters(true)
+        .build();
+
+    let mut searcher = SearcherBuilder::new().line_number(true).build();
+    let mut matches: Vec<String> = Vec::new();
+
+    for entry in walker.flatten() {
+        if matches.len() >= MAX_SEARCH_MATCHES {
+            break;
+        }
+
+        let entry_path = entry.path();
+        let is_file = entry
+            .file_type()
+            .is_some_and(|file_type| file_type.is_file());
+        if !is_file {
+            continue;
+        }
+
+        let mut sink = MatchSink {
+            path: entry_path.to_path_buf(),
+            matches: &mut matches,
+        };
+
+        let _ = searcher.search_path(&matcher, entry_path, &mut sink);
+    }
 
     if matches.is_empty() {
         return Ok(format!("no matches found for '{pattern}'"));
@@ -240,6 +271,32 @@ fn execute_search_files(pattern: &str, directory_path: &str) -> Result<String, S
 
     append_search_summary(&mut matches);
     Ok(matches.join("\n"))
+}
+
+struct MatchSink<'a> {
+    path: PathBuf,
+    matches: &'a mut Vec<String>,
+}
+
+impl Sink for MatchSink<'_> {
+    type Error = io::Error;
+
+    fn matched(
+        &mut self,
+        _searcher: &grep_searcher::Searcher,
+        mat: &SinkMatch<'_>,
+    ) -> Result<bool, io::Error> {
+        if self.matches.len() >= MAX_SEARCH_MATCHES {
+            return Ok(false);
+        }
+
+        let line_number = mat.line_number().unwrap_or(0);
+        let line = String::from_utf8_lossy(mat.bytes());
+        let line = line.trim_end();
+        self.matches
+            .push(format!("{}:{line_number}:{line}", self.path.display()));
+        Ok(true)
+    }
 }
 
 fn append_search_summary(matches: &mut Vec<String>) {
@@ -250,62 +307,6 @@ fn append_search_summary(matches: &mut Vec<String>) {
             "\n[showing {MAX_SEARCH_MATCHES} of {total} matches]"
         ));
     }
-}
-
-fn search_recursive(dir: &Path, pattern: &str, matches: &mut Vec<String>) {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return;
-    };
-
-    for entry in entries.flatten() {
-        if reached_search_limit(matches) {
-            return;
-        }
-
-        let path = entry.path();
-        if path.is_dir() {
-            if should_skip_directory(&entry) {
-                continue;
-            }
-            search_recursive(&path, pattern, matches);
-        } else if path.is_file() && is_text_file(&path) {
-            search_file(&path, pattern, matches);
-        }
-    }
-}
-
-const fn reached_search_limit(matches: &[String]) -> bool {
-    matches.len() >= MAX_SEARCH_MATCHES
-}
-
-fn should_skip_directory(entry: &fs::DirEntry) -> bool {
-    let name = entry.file_name();
-    let name = name.to_string_lossy();
-    name.starts_with('.') || name == "node_modules" || name == "target"
-}
-
-fn is_text_file(path: &Path) -> bool {
-    let extension = path.extension().and_then(|ext| ext.to_str()).unwrap_or("");
-    extension.is_empty() || TEXT_EXTENSIONS.contains(&extension)
-}
-
-fn search_file(path: &Path, pattern: &str, matches: &mut Vec<String>) {
-    let Ok(content) = fs::read_to_string(path) else {
-        return;
-    };
-
-    for (index, line) in content.lines().enumerate() {
-        if reached_search_limit(matches) {
-            return;
-        }
-        if line.contains(pattern) {
-            matches.push(format_match(path, index + 1, line));
-        }
-    }
-}
-
-fn format_match(path: &Path, line_number: usize, line: &str) -> String {
-    format!("{}:{line_number}:{line}", path.display())
 }
 
 fn run_command_tool(agent_mode: AgentMode) -> RegisteredTool {

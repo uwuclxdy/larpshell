@@ -28,6 +28,9 @@ rustyline = "18.0.0"
 log = "0.4.29"
 unicode-width = "0.2.2"
 strip-ansi-escapes = "0.2.1"
+grep-regex = "0.1.14"
+grep-searcher = "0.1.16"
+ignore = "0.4.25"
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.31.2", features = ["term"] }
