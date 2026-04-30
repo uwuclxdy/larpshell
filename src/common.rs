@@ -202,29 +202,6 @@ pub fn terminal_width() -> usize {
         .unwrap_or(80)
 }
 
-/// gets the terminal height in rows.
-#[cfg(unix)]
-pub fn terminal_height() -> usize {
-    unsafe {
-        let mut ws: libc::winsize = std::mem::zeroed();
-        if libc::ioctl(libc::STDERR_FILENO, libc::TIOCGWINSZ, &mut ws) == 0 && ws.ws_row > 0 {
-            return ws.ws_row as usize;
-        }
-    }
-    24
-}
-
-#[cfg(not(unix))]
-pub fn terminal_height() -> usize {
-    Command::new("tput")
-        .arg("lines")
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .and_then(|s| s.trim().parse().ok())
-        .unwrap_or(24)
-}
-
 /// counts the number of visual lines a string will occupy when printed to terminal.
 pub fn count_visual_lines(text: &str, width: usize) -> usize {
     text.lines()
