@@ -445,12 +445,12 @@ fn build_tool_registry(agent_mode: AgentMode) -> ToolRegistry {
                         for tool in tools {
                             registry.register_mcp_tool(tool);
                         }
+                        registry.add_mcp_client(client);
                     }
                     Err(error) => {
                         print_warning(&format!("MCP server '{}': {error}", mcp_config.name));
                     }
                 }
-                registry.add_mcp_client(client);
             }
             Err(error) => print_warning(&error),
         }
@@ -818,11 +818,8 @@ async fn generate_single_shot(
     #[cfg(unix)]
     let saved_for_ctrlc = saved_echo.clone();
 
-    let cancel_token = CancellationToken::new();
-    let cancel_clone = cancel_token.clone();
     tokio::spawn(async move {
         tokio::signal::ctrl_c().await.ok();
-        cancel_clone.cancel();
         eprintln!();
         #[cfg(unix)]
         if let Some(saved) = saved_for_ctrlc.as_ref() {
