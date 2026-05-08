@@ -84,6 +84,9 @@ const GIT_READ_ONLY_SUBCOMMANDS: &[&str] = &[
 
 pub(crate) fn register_builtins(registry: &mut ToolRegistry, agent_mode: AgentMode) {
     registry.register(read_file_tool());
+    if matches!(agent_mode, AgentMode::On) {
+        registry.register(write_file_tool());
+    }
     registry.register(list_files_tool());
     registry.register(search_files_tool());
     registry.register(run_command_tool(agent_mode));
@@ -134,6 +137,54 @@ fn execute_read_file(file_path: &str) -> Result<String, String> {
 fn truncate_content(content: &str, file_size: u64) -> String {
     let truncated = content.get(..MAX_FILE_SIZE).unwrap_or(content);
     format!("{truncated}\n\n[truncated — file is {file_size} bytes, showing first {MAX_FILE_SIZE}]")
+}
+
+fn write_file_tool() -> RegisteredTool {
+    RegisteredTool::new(
+        ToolDefinition {
+            name: "write_file".to_string(),
+            description: "Write text content to a file, creating parent directories as needed."
+                .to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Absolute or relative path to the file to write"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Text content to write"
+                    }
+                },
+                "required": ["file_path", "content"]
+            }),
+        },
+        Box::new(|args| {
+            let file_path = args["file_path"]
+                .as_str()
+                .ok_or("file_path must be a string")?;
+            let content = args["content"].as_str().ok_or("content must be a string")?;
+            execute_write_file(file_path, content)
+        }),
+    )
+}
+
+fn execute_write_file(file_path: &str, content: &str) -> Result<String, String> {
+    let expanded = expand_tilde(file_path);
+    let path = Path::new(&expanded);
+    if path.is_dir() {
+        return Err(format!("cannot write to directory: {expanded}"));
+    }
+
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        fs::create_dir_all(parent).map_err(|error| format!("cannot create directory: {error}"))?;
+    }
+
+    fs::write(path, content).map_err(|error| format!("cannot write file: {error}"))?;
+    Ok(format!("wrote {} bytes to {expanded}", content.len()))
 }
 
 fn list_files_tool() -> RegisteredTool {
@@ -549,6 +600,37 @@ mod tests {
         let result = execute_read_file(file_path.to_str().unwrap()).unwrap();
 
         assert!(result.contains("[truncated"));
+    }
+
+    #[test]
+    fn write_file_writes_contents() {
+        let dir = test_dir("write");
+        let file_path = dir.join("hello.txt");
+
+        let result = execute_write_file(file_path.to_str().unwrap(), "hello world").unwrap();
+
+        assert!(result.contains("wrote 11 bytes"));
+        assert_eq!(fs::read_to_string(file_path).unwrap(), "hello world");
+    }
+
+    #[test]
+    fn write_file_creates_parent_directories() {
+        let dir = test_dir("write_nested");
+        let file_path = dir.join("nested/hello.txt");
+
+        execute_write_file(file_path.to_str().unwrap(), "hello").unwrap();
+
+        assert_eq!(fs::read_to_string(file_path).unwrap(), "hello");
+    }
+
+    #[test]
+    fn write_file_rejects_directory_path() {
+        let dir = test_dir("write_dir");
+
+        assert_err_contains(
+            execute_write_file(dir.to_str().unwrap(), "hello"),
+            "cannot write to directory",
+        );
     }
 
     #[test]

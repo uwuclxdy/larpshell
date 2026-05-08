@@ -144,17 +144,39 @@ mod tests {
 
         assert_eq!(
             names,
-            vec!["read_file", "list_files", "search_files", "run_command"]
+            vec![
+                "read_file",
+                "write_file",
+                "list_files",
+                "search_files",
+                "run_command"
+            ]
         );
     }
 
     #[test]
-    fn registry_with_builtins_has_four_tools() {
+    fn registry_with_builtins_has_four_safe_tools() {
         let registry = ToolRegistry::with_builtins(AgentMode::Safe);
         assert_eq!(registry.definitions().len(), 4);
         assert_has_tool_names(
             &registry,
             &["read_file", "list_files", "search_files", "run_command"],
+        );
+    }
+
+    #[test]
+    fn registry_with_builtins_has_five_on_tools() {
+        let registry = ToolRegistry::with_builtins(AgentMode::On);
+        assert_eq!(registry.definitions().len(), 5);
+        assert_has_tool_names(
+            &registry,
+            &[
+                "read_file",
+                "write_file",
+                "list_files",
+                "search_files",
+                "run_command",
+            ],
         );
     }
 
