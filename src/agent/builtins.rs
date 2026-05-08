@@ -7,10 +7,12 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Duration;
 
 use super::tools::{RegisteredTool, ToolRegistry};
 
 const MAX_FILE_SIZE: usize = 100 * 1024;
+const MAX_FETCH_SIZE: usize = 100 * 1024;
 const MAX_SEARCH_MATCHES: usize = 50;
 const SAFE_COMMANDS: &[&str] = &[
     "ls",
@@ -90,6 +92,7 @@ pub(crate) fn register_builtins(registry: &mut ToolRegistry, agent_mode: AgentMo
     }
     registry.register(list_files_tool());
     registry.register(search_files_tool());
+    registry.register(fetch_url_tool());
     registry.register(run_command_tool(agent_mode));
 }
 
@@ -427,6 +430,63 @@ fn append_search_summary(matches: &mut Vec<String>) {
     }
 }
 
+fn fetch_url_tool() -> RegisteredTool {
+    RegisteredTool::new(
+        ToolDefinition {
+            name: "fetch_url".to_string(),
+            description: "Fetch text content from an HTTP or HTTPS URL.".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "HTTP or HTTPS URL to fetch"
+                    }
+                },
+                "required": ["url"]
+            }),
+        },
+        Box::new(|args| {
+            let url = args["url"].as_str().ok_or("url must be a string")?;
+            execute_fetch_url(url)
+        }),
+    )
+}
+
+fn execute_fetch_url(url: &str) -> Result<String, String> {
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return Err("url must start with http:// or https://".to_string());
+    }
+
+    let client = reqwest::blocking::Client::builder()
+        .user_agent(concat!("larpshell/", env!("CARGO_PKG_VERSION")))
+        .timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|error| format!("cannot create HTTP client: {error}"))?;
+    let response = client
+        .get(url)
+        .send()
+        .map_err(|error| format!("cannot fetch URL: {error}"))?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("URL returned HTTP {status}"));
+    }
+
+    let content = response
+        .text()
+        .map_err(|error| format!("cannot read response body: {error}"))?;
+    if content.len() > MAX_FETCH_SIZE {
+        let truncated = content.get(..MAX_FETCH_SIZE).unwrap_or(&content);
+        Ok(format!(
+            "{truncated}\n\n[truncated — response is {} bytes, showing first {}]",
+            content.len(),
+            MAX_FETCH_SIZE
+        ))
+    } else {
+        Ok(content)
+    }
+}
+
 fn run_command_tool(agent_mode: AgentMode) -> RegisteredTool {
     RegisteredTool::new(
         ToolDefinition {
@@ -623,6 +683,9 @@ fn expand_tilde(path: &str) -> String {
 mod tests {
     use super::*;
     use std::fs;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
 
     fn test_dir(name: &str) -> std::path::PathBuf {
         let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -639,6 +702,25 @@ mod tests {
 
     fn assert_err_contains(result: Result<String, String>, expected: &str) {
         assert!(result.unwrap_err().contains(expected));
+    }
+
+    fn test_http_server(response: &'static str) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buffer = [0; 1024];
+            let _ = stream.read(&mut buffer);
+            stream.write_all(response.as_bytes()).unwrap();
+        });
+        url
+    }
+
+    fn http_response(status: &str, body: &str) -> String {
+        format!(
+            "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
     }
 
     #[test]
@@ -790,6 +872,45 @@ mod tests {
         let result = execute_search_files("nonexistent_pattern", dir.to_str().unwrap()).unwrap();
 
         assert!(result.contains("no matches found"));
+    }
+
+    #[test]
+    fn fetch_url_returns_response_body() {
+        let url = test_http_server(Box::leak(
+            http_response("200 OK", "hello from server").into_boxed_str(),
+        ));
+
+        let result = execute_fetch_url(&url).unwrap();
+
+        assert_eq!(result, "hello from server");
+    }
+
+    #[test]
+    fn fetch_url_rejects_non_http_urls() {
+        assert_err_contains(
+            execute_fetch_url("file:///etc/passwd"),
+            "url must start with http:// or https://",
+        );
+    }
+
+    #[test]
+    fn fetch_url_rejects_error_statuses() {
+        let url = test_http_server(Box::leak(
+            http_response("404 Not Found", "nope").into_boxed_str(),
+        ));
+
+        assert_err_contains(execute_fetch_url(&url), "URL returned HTTP 404 Not Found");
+    }
+
+    #[test]
+    fn fetch_url_truncates_large_responses() {
+        let body = "x".repeat(MAX_FETCH_SIZE + 1000);
+        let response = http_response("200 OK", &body);
+        let url = test_http_server(Box::leak(response.into_boxed_str()));
+
+        let result = execute_fetch_url(&url).unwrap();
+
+        assert!(result.contains("[truncated — response is 103400 bytes"));
     }
 
     #[test]

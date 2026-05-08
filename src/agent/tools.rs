@@ -150,25 +150,32 @@ mod tests {
                 "edit_file",
                 "list_files",
                 "search_files",
+                "fetch_url",
                 "run_command"
             ]
         );
     }
 
     #[test]
-    fn registry_with_builtins_has_four_safe_tools() {
+    fn registry_with_builtins_has_five_safe_tools() {
         let registry = ToolRegistry::with_builtins(AgentMode::Safe);
-        assert_eq!(registry.definitions().len(), 4);
+        assert_eq!(registry.definitions().len(), 5);
         assert_has_tool_names(
             &registry,
-            &["read_file", "list_files", "search_files", "run_command"],
+            &[
+                "read_file",
+                "list_files",
+                "search_files",
+                "fetch_url",
+                "run_command",
+            ],
         );
     }
 
     #[test]
-    fn registry_with_builtins_has_six_on_tools() {
+    fn registry_with_builtins_has_seven_on_tools() {
         let registry = ToolRegistry::with_builtins(AgentMode::On);
-        assert_eq!(registry.definitions().len(), 6);
+        assert_eq!(registry.definitions().len(), 7);
         assert_has_tool_names(
             &registry,
             &[
@@ -177,6 +184,7 @@ mod tests {
                 "edit_file",
                 "list_files",
                 "search_files",
+                "fetch_url",
                 "run_command",
             ],
         );
