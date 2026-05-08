@@ -147,6 +147,7 @@ mod tests {
             vec![
                 "read_file",
                 "write_file",
+                "edit_file",
                 "list_files",
                 "search_files",
                 "run_command"
@@ -165,14 +166,15 @@ mod tests {
     }
 
     #[test]
-    fn registry_with_builtins_has_five_on_tools() {
+    fn registry_with_builtins_has_six_on_tools() {
         let registry = ToolRegistry::with_builtins(AgentMode::On);
-        assert_eq!(registry.definitions().len(), 5);
+        assert_eq!(registry.definitions().len(), 6);
         assert_has_tool_names(
             &registry,
             &[
                 "read_file",
                 "write_file",
+                "edit_file",
                 "list_files",
                 "search_files",
                 "run_command",

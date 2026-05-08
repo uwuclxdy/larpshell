@@ -86,6 +86,7 @@ pub(crate) fn register_builtins(registry: &mut ToolRegistry, agent_mode: AgentMo
     registry.register(read_file_tool());
     if matches!(agent_mode, AgentMode::On) {
         registry.register(write_file_tool());
+        registry.register(edit_file_tool());
     }
     registry.register(list_files_tool());
     registry.register(search_files_tool());
@@ -185,6 +186,72 @@ fn execute_write_file(file_path: &str, content: &str) -> Result<String, String> 
 
     fs::write(path, content).map_err(|error| format!("cannot write file: {error}"))?;
     Ok(format!("wrote {} bytes to {expanded}", content.len()))
+}
+
+fn edit_file_tool() -> RegisteredTool {
+    RegisteredTool::new(
+        ToolDefinition {
+            name: "edit_file".to_string(),
+            description: "Replace exactly one occurrence of text in a file.".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Absolute or relative path to the file to edit"
+                    },
+                    "old_text": {
+                        "type": "string",
+                        "description": "Existing text to replace"
+                    },
+                    "new_text": {
+                        "type": "string",
+                        "description": "Replacement text"
+                    }
+                },
+                "required": ["file_path", "old_text", "new_text"]
+            }),
+        },
+        Box::new(|args| {
+            let file_path = args["file_path"]
+                .as_str()
+                .ok_or("file_path must be a string")?;
+            let old_text = args["old_text"]
+                .as_str()
+                .ok_or("old_text must be a string")?;
+            let new_text = args["new_text"]
+                .as_str()
+                .ok_or("new_text must be a string")?;
+            execute_edit_file(file_path, old_text, new_text)
+        }),
+    )
+}
+
+fn execute_edit_file(file_path: &str, old_text: &str, new_text: &str) -> Result<String, String> {
+    if old_text.is_empty() {
+        return Err("old_text must not be empty".to_string());
+    }
+
+    let expanded = expand_tilde(file_path);
+    let path = Path::new(&expanded);
+    if path.is_dir() {
+        return Err(format!("cannot edit directory: {expanded}"));
+    }
+
+    let content = fs::read_to_string(path).map_err(|error| format!("cannot read file: {error}"))?;
+    let matches = content.match_indices(old_text).count();
+    if matches == 0 {
+        return Err("old_text not found".to_string());
+    }
+    if matches > 1 {
+        return Err(format!(
+            "old_text matched {matches} times; provide a unique string"
+        ));
+    }
+
+    let updated = content.replacen(old_text, new_text, 1);
+    fs::write(path, updated).map_err(|error| format!("cannot write file: {error}"))?;
+    Ok(format!("replaced 1 occurrence in {expanded}"))
 }
 
 fn list_files_tool() -> RegisteredTool {
@@ -630,6 +697,54 @@ mod tests {
         assert_err_contains(
             execute_write_file(dir.to_str().unwrap(), "hello"),
             "cannot write to directory",
+        );
+    }
+
+    #[test]
+    fn edit_file_replaces_unique_text() {
+        let dir = test_dir("edit");
+        let file_path = dir.join("hello.txt");
+        fs::write(&file_path, "hello world").unwrap();
+
+        let result = execute_edit_file(file_path.to_str().unwrap(), "world", "there").unwrap();
+
+        assert!(result.contains("replaced 1 occurrence"));
+        assert_eq!(fs::read_to_string(file_path).unwrap(), "hello there");
+    }
+
+    #[test]
+    fn edit_file_rejects_missing_text() {
+        let dir = test_dir("edit_missing");
+        let file_path = dir.join("hello.txt");
+        fs::write(&file_path, "hello world").unwrap();
+
+        assert_err_contains(
+            execute_edit_file(file_path.to_str().unwrap(), "nope", "there"),
+            "old_text not found",
+        );
+    }
+
+    #[test]
+    fn edit_file_rejects_duplicate_text() {
+        let dir = test_dir("edit_duplicate");
+        let file_path = dir.join("hello.txt");
+        fs::write(&file_path, "hello hello").unwrap();
+
+        assert_err_contains(
+            execute_edit_file(file_path.to_str().unwrap(), "hello", "hi"),
+            "old_text matched 2 times",
+        );
+    }
+
+    #[test]
+    fn edit_file_rejects_empty_old_text() {
+        let dir = test_dir("edit_empty");
+        let file_path = dir.join("hello.txt");
+        fs::write(&file_path, "hello").unwrap();
+
+        assert_err_contains(
+            execute_edit_file(file_path.to_str().unwrap(), "", "hi"),
+            "old_text must not be empty",
         );
     }
 
