@@ -136,6 +136,16 @@ fn format_tool_preview(
             "read".custom_color(CTP_BLUE),
             string_argument(arguments, "file_path", "").italic()
         ),
+        "write_file" => format!(
+            "{} {}",
+            "write".custom_color(CTP_BLUE),
+            string_argument(arguments, "file_path", "").italic()
+        ),
+        "edit_file" => format!(
+            "{} {}",
+            "edit".custom_color(CTP_BLUE),
+            string_argument(arguments, "file_path", "").italic()
+        ),
         "list_files" => format!(
             "{} in {}",
             "list files".custom_color(CTP_BLUE),
@@ -146,6 +156,11 @@ fn format_tool_preview(
             "search".custom_color(CTP_BLUE),
             string_argument(arguments, "pattern", "").italic(),
             string_argument(arguments, "directory_path", ".").italic()
+        ),
+        "fetch_url" => format!(
+            "{} {}",
+            "fetch".custom_color(CTP_BLUE),
+            string_argument(arguments, "url", "").italic()
         ),
         _ => generic_tool_preview(tool_name, arguments),
     }
