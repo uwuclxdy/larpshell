@@ -173,8 +173,8 @@ fn execute_tool_call(
 ) -> String {
     let result = tool_registry.execute(&tool_call.name, tool_call.arguments.clone());
     match &result {
-        Ok(output) => display_tool_result(output, verbose_tool_output),
-        Err(error) => display_tool_error(error),
+        Ok(output) => render_success_inline(output, verbose_tool_output),
+        Err(error) => render_error_inline(error),
     }
 
     match result {
@@ -512,18 +512,10 @@ fn read_key() -> Key {
     parse_byte(buffer[0])
 }
 
-fn display_tool_result(result: &str, verbose_tool_output: bool) {
-    render_success_inline(result, verbose_tool_output);
-}
-
 fn command_not_allowed_tip(error: &str) -> Option<String> {
     error
         .starts_with("command not allowed:")
         .then(|| "run **/agent on** to enable all commands".to_string())
-}
-
-fn display_tool_error(error: &str) {
-    render_error_inline(error);
 }
 
 async fn run_agent_loop_with_confirm<F>(
