@@ -10,6 +10,6 @@ fi
 
 cargo install larpshell --force --path .
 
-rm -rf "$TEMP_DIR"
+[ -n "${TEMP_DIR:-}" ] && rm -rf -- "$TEMP_DIR"
 
 larpshell
