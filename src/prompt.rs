@@ -138,8 +138,7 @@ pub fn parse_labeled_response(text: &str) -> ParsedLabeledResponse {
 }
 
 pub fn normalize_model_output(text: &str) -> String {
-    let stripped = strip_fence(text);
-    let parsed = parse_labeled_response(stripped);
+    let parsed = parse_labeled_response(text);
 
     if let Some(command) = parsed.command {
         return command;
@@ -149,7 +148,7 @@ pub fn normalize_model_output(text: &str) -> String {
         return message;
     }
 
-    stripped.trim().to_string()
+    strip_fence(text).trim().to_string()
 }
 
 pub fn clean_explanation(response: &str, command: &str) -> String {
