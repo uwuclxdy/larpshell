@@ -3,7 +3,6 @@ use crate::config::AgentMode;
 
 pub struct SlashCommand {
     pub name: &'static str,
-    #[allow(dead_code)] // used in Task 4: preview drawing
     pub description: &'static str,
 }
 
