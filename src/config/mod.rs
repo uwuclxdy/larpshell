@@ -546,14 +546,10 @@ fn display_config_summary(config: &Config, provider_name: &str) -> Result<(), La
 }
 
 fn configure_gemini(existing: Option<&GeminiConfig>) -> Result<ProviderConfig, LarpshellError> {
-    let api_key = if let Some(e) = existing {
-        prompt_input_with_default("Gemini API key", &e.api_key)?
-    } else {
-        prompt_input("Gemini API key")?
-    };
-
-    let model_default = existing.map_or("gemini-flash-latest", |e| e.model.as_str());
-    let model = prompt_input_with_default("Model name", model_default)?;
+    let api_key = prompt_api_key("Gemini API key", existing.map(|e| e.api_key.as_str()))?;
+    let model = prompt_model_name(
+        existing.map_or(Some("gemini-flash-latest"), |e| Some(e.model.as_str())),
+    )?;
 
     Ok(ProviderConfig {
         provider_type: ActiveProvider::Gemini,
@@ -583,15 +579,11 @@ fn configure_openrouter(
     let url_default = existing.map_or("https://openrouter.ai/api/v1", |e| e.base_url.as_str());
     let base_url = prompt_input_with_default("OpenRouter base URL", url_default)?;
 
-    let api_key = {
-        let mut text =
-            Text::new("OpenRouter API key").with_help_message("Required for OpenRouter requests");
-        if let Some(saved) = existing.and_then(|e| e.api_key.as_deref()) {
-            text = text.with_default(saved);
-        }
-        text.prompt_skippable()
-            .map_err(|e| LarpshellError::ConfigError(e.to_string()))?
-    };
+    let api_key = prompt_optional_api_key(
+        "OpenRouter API key",
+        "Required for OpenRouter requests",
+        existing.and_then(|e| e.api_key.as_deref()),
+    )?;
 
     let model_default = existing.map_or("openrouter/auto", |e| e.model.as_str());
     let model = prompt_input_with_default("Model name", model_default)?;
@@ -612,15 +604,11 @@ fn configure_openai(existing: Option<&OpenAIConfig>) -> Result<ProviderConfig, L
     let url_default = existing.map_or("https://api.openai.com/v1", |e| e.base_url.as_str());
     let base_url = prompt_input_with_default("API base URL", url_default)?;
 
-    let api_key = {
-        let mut text = Text::new("API key (optional for local servers)")
-            .with_help_message("Leave empty for local servers like LM Studio");
-        if let Some(saved) = existing.and_then(|e| e.api_key.as_deref()) {
-            text = text.with_default(saved);
-        }
-        text.prompt_skippable()
-            .map_err(|e| LarpshellError::ConfigError(e.to_string()))?
-    };
+    let api_key = prompt_optional_api_key(
+        "API key (optional for local servers)",
+        "Leave empty for local servers like LM Studio",
+        existing.and_then(|e| e.api_key.as_deref()),
+    )?;
 
     let model = prompt_model_name(existing.map(|e| e.model.as_str()))?;
 
@@ -634,6 +622,46 @@ fn configure_openai(existing: Option<&OpenAIConfig>) -> Result<ProviderConfig, L
             },
         },
     })
+}
+
+/// Prompts for a required API key. When a saved key exists, shows a masked
+/// hint so the secret is not displayed; an empty submit retains the saved key.
+fn prompt_api_key(label: &str, saved: Option<&str>) -> Result<String, LarpshellError> {
+    if let Some(existing) = saved {
+        let input = Text::new(label)
+            .with_help_message("leave blank to keep saved key")
+            .prompt()?;
+        if input.trim().is_empty() {
+            return Ok(existing.to_owned());
+        }
+        Ok(input)
+    } else {
+        Ok(prompt_input(label)?)
+    }
+}
+
+/// Prompts for an optional API key. When a saved key exists, shows a masked
+/// hint; an empty submit retains the saved key. No saved key → empty submits
+/// produce `None`.
+fn prompt_optional_api_key(
+    label: &str,
+    help: &str,
+    saved: Option<&str>,
+) -> Result<Option<String>, LarpshellError> {
+    let mut text = Text::new(label);
+    let help_msg;
+    if saved.is_some() {
+        help_msg = format!("{help} — leave blank to keep saved key");
+        text = text.with_help_message(&help_msg);
+    } else {
+        text = text.with_help_message(help);
+    }
+    let input = text.prompt_skippable()?;
+    match input {
+        Some(ref s) if s.trim().is_empty() => Ok(saved.map(str::to_owned)),
+        None => Ok(saved.map(str::to_owned)),
+        other => Ok(other),
+    }
 }
 
 fn prompt_model_name(default: Option<&str>) -> Result<String, LarpshellError> {
