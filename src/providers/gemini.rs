@@ -108,8 +108,8 @@ impl GeminiProvider {
 
     fn generate_url(&self) -> String {
         format!(
-            "{}/v1beta/models/{}:generateContent?key={}",
-            self.base_url, self.model, self.api_key
+            "{}/v1beta/models/{}:generateContent",
+            self.base_url, self.model
         )
     }
 
@@ -173,10 +173,17 @@ impl GeminiProvider {
             .as_ref()
             .ok_or_else(|| LarpshellError::InvalidResponse("no parts in content".to_string()))?;
 
-        parts
-            .first()
-            .and_then(|part| part.text.clone())
-            .ok_or_else(|| LarpshellError::InvalidResponse("no text in response".to_string()))
+        let text: String = parts
+            .iter()
+            .filter_map(|part| part.text.as_deref())
+            .collect::<Vec<_>>()
+            .join("");
+        if text.is_empty() {
+            return Err(LarpshellError::InvalidResponse(
+                "no text in response".to_string(),
+            ));
+        }
+        Ok(text)
     }
 
     async fn request_generate(
@@ -187,6 +194,7 @@ impl GeminiProvider {
             .base
             .client
             .post(self.generate_url())
+            .header("x-goog-api-key", &self.api_key)
             .json(request_body)
             .send()
             .await
@@ -205,53 +213,51 @@ impl GeminiProvider {
         Self::parse_generate_response(&response_text)
     }
 
-    fn message_content(message: &ChatMessage) -> Content {
+    fn message_content(message: &ChatMessage) -> Result<Content, LarpshellError> {
         let role = match message.role {
             Role::User | Role::Tool => Some("user".to_string()),
             Role::Assistant => Some("model".to_string()),
             Role::System => None,
         };
 
-        let parts = message.tool_calls.as_ref().map_or_else(
-            || {
-                if message.role == Role::Tool {
-                    vec![Part {
-                        text: None,
-                        function_call: None,
-                        function_response: Some(FunctionResponse {
-                            name: message.tool_call_id.clone().unwrap_or_default(),
-                            response: serde_json::json!({
-                                "result": message.content.clone().unwrap_or_default()
-                            }),
-                        }),
-                        thought_signature: None,
-                    }]
-                } else {
-                    vec![Part {
-                        text: message.content.clone(),
-                        function_call: None,
-                        function_response: None,
-                        thought_signature: None,
-                    }]
-                }
-            },
-            |tool_calls| {
-                tool_calls
-                    .iter()
-                    .map(|tool_call| Part {
-                        text: None,
-                        function_call: Some(FunctionCall {
-                            name: tool_call.name.clone(),
-                            args: tool_call.arguments.clone(),
-                        }),
-                        function_response: None,
-                        thought_signature: tool_call.thought_signature.clone(),
-                    })
-                    .collect()
-            },
-        );
+        let parts = if let Some(tool_calls) = message.tool_calls.as_ref() {
+            tool_calls
+                .iter()
+                .map(|tool_call| Part {
+                    text: None,
+                    function_call: Some(FunctionCall {
+                        name: tool_call.name.clone(),
+                        args: tool_call.arguments.clone(),
+                    }),
+                    function_response: None,
+                    thought_signature: tool_call.thought_signature.clone(),
+                })
+                .collect()
+        } else if message.role == Role::Tool {
+            let tool_call_id = message.tool_call_id.as_deref().ok_or_else(|| {
+                LarpshellError::InvalidResponse("tool message is missing tool_call_id".to_string())
+            })?;
+            vec![Part {
+                text: None,
+                function_call: None,
+                function_response: Some(FunctionResponse {
+                    name: tool_call_id.to_string(),
+                    response: serde_json::json!({
+                        "result": message.content.clone().unwrap_or_default()
+                    }),
+                }),
+                thought_signature: None,
+            }]
+        } else {
+            vec![Part {
+                text: message.content.clone(),
+                function_call: None,
+                function_response: None,
+                thought_signature: None,
+            }]
+        };
 
-        Content { role, parts }
+        Ok(Content { role, parts })
     }
 
     fn tool_declarations(tools: &[ToolDefinition]) -> Option<Vec<GeminiToolDeclaration>> {
@@ -313,10 +319,16 @@ impl GeminiProvider {
             return Ok(ChatResponse::ToolCalls(tool_calls));
         }
 
-        let text = parts
-            .first()
-            .and_then(|part| part.text.clone())
-            .ok_or_else(|| LarpshellError::InvalidResponse("no text in response".to_string()))?;
+        let text: String = parts
+            .iter()
+            .filter_map(|part| part.text.as_deref())
+            .collect::<Vec<_>>()
+            .join("");
+        if text.is_empty() {
+            return Err(LarpshellError::InvalidResponse(
+                "no text in response".to_string(),
+            ));
+        }
 
         Ok(ChatResponse::Message(text))
     }
@@ -340,7 +352,7 @@ impl AIProvider for GeminiProvider {
                 .iter()
                 .filter(|message| message.role != Role::System)
                 .map(Self::message_content)
-                .collect(),
+                .collect::<Result<Vec<_>, _>>()?,
             tools: Self::tool_declarations(tools),
         };
 

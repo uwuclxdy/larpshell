@@ -165,19 +165,14 @@ impl OpenAICompatibleProvider {
         messages: &[crate::providers::ChatMessage],
         tools: &[crate::providers::ToolDefinition],
     ) -> Result<crate::providers::ChatResponse, LarpshellError> {
-        use crate::providers::{ChatResponse, Role};
+        use crate::providers::ChatResponse;
 
         let url = self.chat_completions_url();
 
         let request_messages = messages
             .iter()
             .map(|message| RequestMessage {
-                role: match message.role {
-                    Role::System => "system".to_string(),
-                    Role::User => "user".to_string(),
-                    Role::Assistant => "assistant".to_string(),
-                    Role::Tool => "tool".to_string(),
-                },
+                role: message.role.as_str().to_string(),
                 content: message.content.clone(),
                 tool_calls: message.tool_calls.as_ref().map(|tool_calls| {
                     tool_calls
@@ -244,15 +239,20 @@ impl OpenAICompatibleProvider {
                 .iter()
                 .map(|tool_call| {
                     let arguments =
-                        serde_json::from_str(&tool_call.function.arguments).unwrap_or_default();
-                    crate::providers::ToolCall {
+                        serde_json::from_str(&tool_call.function.arguments).map_err(|e| {
+                            LarpshellError::InvalidResponse(format!(
+                                "malformed tool arguments from {}: {e}",
+                                self.provider_slug
+                            ))
+                        })?;
+                    Ok(crate::providers::ToolCall {
                         id: tool_call.id.clone(),
                         name: tool_call.function.name.clone(),
                         arguments,
                         thought_signature: None,
-                    }
+                    })
                 })
-                .collect();
+                .collect::<Result<Vec<_>, LarpshellError>>()?;
             return Ok(ChatResponse::ToolCalls(calls));
         }
 

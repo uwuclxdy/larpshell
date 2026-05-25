@@ -114,19 +114,14 @@ impl AIProvider for OllamaProvider {
         messages: &[crate::providers::ChatMessage],
         tools: &[crate::providers::ToolDefinition],
     ) -> Result<crate::providers::ChatResponse, LarpshellError> {
-        use crate::providers::{ChatResponse, Role};
+        use crate::providers::ChatResponse;
 
         let url = format!("{}/api/chat", self.base_url);
 
         let ollama_messages: Vec<OllamaChatMessage> = messages
             .iter()
             .map(|message| OllamaChatMessage {
-                role: match message.role {
-                    Role::System => "system".to_string(),
-                    Role::User => "user".to_string(),
-                    Role::Assistant => "assistant".to_string(),
-                    Role::Tool => "tool".to_string(),
-                },
+                role: message.role.as_str().to_string(),
                 content: message.content.clone(),
                 tool_calls: message.tool_calls.as_ref().map(|tool_calls| {
                     tool_calls
