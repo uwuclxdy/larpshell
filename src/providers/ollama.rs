@@ -34,7 +34,7 @@ struct OllamaChatRequest {
 
 #[derive(Serialize)]
 struct OllamaChatMessage {
-    role: String,
+    role: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     content: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -121,7 +121,7 @@ impl AIProvider for OllamaProvider {
         let ollama_messages: Vec<OllamaChatMessage> = messages
             .iter()
             .map(|message| OllamaChatMessage {
-                role: message.role.as_str().to_string(),
+                role: message.role.as_str(),
                 content: message.content.clone(),
                 tool_calls: message.tool_calls.as_ref().map(|tool_calls| {
                     tool_calls

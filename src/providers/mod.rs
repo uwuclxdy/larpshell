@@ -108,6 +108,14 @@ pub trait AIProvider: Send + Sync {
     async fn generate(&self, prompt: &str) -> Result<String, LarpshellError>;
     fn name(&self) -> String;
 
+    /// Default implementation of `generate_with_tools` that falls back to single-shot text generation.
+    ///
+    /// **Limitation:** This default is single-shot only. It filters messages to extract only `User`
+    /// and `System` roles, silently discarding all assistant turns, tool calls, and tool results.
+    /// The resulting text is joined and passed to `generate()` without any tool definitions.
+    ///
+    /// Providers that support multi-turn tool use should override this method to preserve
+    /// conversation state and pass tools to their LLM API.
     async fn generate_with_tools(
         &self,
         messages: &[ChatMessage],

@@ -27,7 +27,7 @@ struct ChatRequest {
 
 #[derive(Serialize)]
 struct RequestMessage {
-    role: String,
+    role: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     content: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -153,7 +153,7 @@ impl OpenAICompatibleProvider {
         let request_body = ChatRequest {
             model: self.model.clone(),
             messages: vec![RequestMessage {
-                role: "user".to_string(),
+                role: "user",
                 content: Some(prompt.to_string()),
                 tool_calls: None,
                 tool_call_id: None,
@@ -194,7 +194,7 @@ impl OpenAICompatibleProvider {
         let request_messages = messages
             .iter()
             .map(|message| RequestMessage {
-                role: message.role.as_str().to_string(),
+                role: message.role.as_str(),
                 content: message.content.clone(),
                 tool_calls: message.tool_calls.as_ref().map(|tool_calls| {
                     tool_calls
