@@ -3,6 +3,7 @@ use std::env;
 use std::fs;
 use std::io;
 use std::process::Command;
+use std::sync::LazyLock;
 
 use nix::libc;
 use strip_ansi_escapes::strip;
@@ -68,9 +69,28 @@ pub fn current_directory_display() -> String {
     cwd
 }
 
+static LINUX_INFO: LazyLock<String> = LazyLock::new(|| {
+    let distro = linux_distro();
+    let kernel = kernel_version();
+    format!("linux ({distro}; kernel: {kernel})")
+});
+
+static SHELL_NAME: LazyLock<String> = LazyLock::new(|| {
+    env::var("SHELL")
+        .ok()
+        .and_then(|s| s.split('/').next_back().map(str::to_string))
+        .unwrap_or_else(|| "sh".to_string())
+});
+
+static USERNAME: LazyLock<String> = LazyLock::new(|| {
+    env::var("USER")
+        .or_else(|_| env::var("USERNAME"))
+        .unwrap_or_else(|_| "user".to_string())
+});
+
 pub fn os_name() -> Cow<'static, str> {
     if cfg!(target_os = "linux") {
-        linux_info().into()
+        Cow::Borrowed(LINUX_INFO.as_str())
     } else if cfg!(target_os = "macos") {
         "macOS".into()
     } else if cfg!(windows) {
@@ -81,24 +101,11 @@ pub fn os_name() -> Cow<'static, str> {
 }
 
 pub fn shell_name() -> String {
-    env::var("SHELL")
-        .ok()
-        .and_then(|s| s.split('/').next_back().map(str::to_string))
-        .unwrap_or_else(|| "sh".to_string())
+    SHELL_NAME.as_str().to_string()
 }
 
 pub fn username() -> String {
-    env::var("USER")
-        .or_else(|_| env::var("USERNAME"))
-        .unwrap_or_else(|_| "user".to_string())
-}
-
-/// returns linux distro and kernel version.
-fn linux_info() -> String {
-    let distro = linux_distro();
-    let kernel = kernel_version();
-
-    format!("linux ({distro}; kernel: {kernel})")
+    USERNAME.as_str().to_string()
 }
 
 /// reads /etc/os-release to get the distro name and version.

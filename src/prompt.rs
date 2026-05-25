@@ -67,6 +67,25 @@ pub struct ParsedLabeledResponse {
     pub has_labels: bool,
 }
 
+fn flush_current(
+    label: Option<&str>,
+    lines: &mut Vec<&str>,
+    message_parts: &mut Vec<String>,
+    command_parts: &mut Vec<String>,
+) {
+    if let Some(label) = label {
+        let block = lines.join("\n").trim().to_string();
+        if !block.is_empty() {
+            match label {
+                "MESSAGE:" => message_parts.push(block),
+                "COMMAND:" => command_parts.push(block),
+                _ => {}
+            }
+        }
+        lines.clear();
+    }
+}
+
 pub fn parse_labeled_response(text: &str) -> ParsedLabeledResponse {
     let stripped = strip_fence(text);
     let mut message_parts = Vec::new();
@@ -74,23 +93,6 @@ pub fn parse_labeled_response(text: &str) -> ParsedLabeledResponse {
     let mut current_label: Option<&str> = None;
     let mut current_lines = Vec::new();
     let mut has_labels = false;
-
-    let flush_current = |label: Option<&str>,
-                         lines: &mut Vec<&str>,
-                         message_parts: &mut Vec<String>,
-                         command_parts: &mut Vec<String>| {
-        if let Some(label) = label {
-            let block = lines.join("\n").trim().to_string();
-            if !block.is_empty() {
-                match label {
-                    "MESSAGE:" => message_parts.push(block),
-                    "COMMAND:" => command_parts.push(block),
-                    _ => {}
-                }
-            }
-            lines.clear();
-        }
-    };
 
     for line in stripped.lines() {
         let trimmed = line.trim();
