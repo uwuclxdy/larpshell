@@ -252,7 +252,9 @@ async fn run_repl(runtime: &mut Runtime) -> Result<(), LarpshellError> {
         }
 
         if let Some(cmd) = user_input.strip_prefix("! ") {
-            execute_shell_command(cmd)?;
+            if let Err(error) = execute_shell_command(cmd) {
+                error.print();
+            }
             continue;
         }
         if user_input == "!" {
@@ -328,17 +330,29 @@ async fn dispatch_slash_command(
             }
         }
         SlashCmd::Agent { mode: agent_mode } => {
-            handle_agent_subcommand(agent_mode)?;
-            if command_mode == CommandMode::Interactive {
-                runtime.reload_agent()?;
+            if let Some(mode) = agent_mode {
+                config::set_agent_mode(mode)?;
+                cli::print_ok(agent_mode_status_message(mode));
+                if command_mode == CommandMode::Interactive {
+                    runtime.reload_agent()?;
+                }
+            } else {
+                cli::print_ok(agent_mode_status_message(runtime.config.agent));
             }
         }
         SlashCmd::Uninstall => uninstall_larpshell()?,
         SlashCmd::History { enable } => handle_history_subcommand(enable)?,
         SlashCmd::Verbose { enable } => {
-            handle_tool_output_subcommand(enable)?;
-            if command_mode == CommandMode::Interactive {
-                runtime.reload_config()?;
+            if let Some(enabled) = enable {
+                config::set_verbose_tool_output(enabled)?;
+                cli::print_ok(tool_output_status_message(enabled));
+                if command_mode == CommandMode::Interactive {
+                    runtime.config = reload_config()?;
+                }
+            } else {
+                cli::print_ok(tool_output_status_message(
+                    runtime.config.verbose_tool_output,
+                ));
             }
         }
         SlashCmd::Prompt { kind, action } => handle_prompt_subcommand(&kind, &action)?,
@@ -409,11 +423,6 @@ impl Runtime {
         let config = reload_config()?;
         self.tool_registry = Self::build_registry(config.agent);
         self.config = config;
-        Ok(())
-    }
-
-    fn reload_config(&mut self) -> Result<(), LarpshellError> {
-        self.config = reload_config()?;
         Ok(())
     }
 
@@ -641,14 +650,11 @@ fn edit_prompt(spec: &PromptSpec) -> Result<(), LarpshellError> {
 fn reset_prompt(spec: &PromptSpec) -> Result<(), LarpshellError> {
     let path = (spec.path)()?;
     if path.exists() {
-        let bak = path.with_extension(path.extension().map_or_else(
-            || "bak".to_string(),
-            |ext| {
-                let mut s = ext.to_string_lossy().into_owned();
-                s.push_str(".bak");
-                s
-            },
-        ));
+        let bak_ext = match path.extension() {
+            Some(ext) => format!("{}.bak", ext.to_string_lossy()),
+            None => "bak".to_string(),
+        };
+        let bak = path.with_extension(bak_ext);
         std::fs::rename(&path, &bak).map_err(LarpshellError::IoError)?;
         (spec.save)(spec.default)?;
         cli::print_ok(&format!(
@@ -880,7 +886,9 @@ async fn confirm_loop(
                         execute_or_print(&command)?;
                         break 'outer false;
                     }
-                    ConfirmResult::No | ConfirmResult::Explain => break 'outer false,
+                    ConfirmResult::No => break 'outer false,
+                    // Explain is not offered by confirm_execution (Simple mode).
+                    ConfirmResult::Explain => unreachable!(),
                     ConfirmResult::Cancel => match mode {
                         CommandMode::Interactive => break 'outer true,
                         CommandMode::Single => exit_on_sigint(),
