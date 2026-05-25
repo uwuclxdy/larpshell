@@ -3,10 +3,12 @@ use crate::providers::ToolDefinition;
 use grep_regex::RegexMatcherBuilder;
 use grep_searcher::{SearcherBuilder, Sink, SinkMatch};
 use ignore::WalkBuilder;
+use std::borrow::Cow;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::LazyLock;
 use std::time::Duration;
 
 use super::tools::{RegisteredTool, ToolRegistry};
@@ -123,7 +125,7 @@ fn read_file_tool() -> RegisteredTool {
 
 fn execute_read_file(file_path: &str) -> Result<String, String> {
     let expanded = expand_tilde(file_path);
-    let path = Path::new(&expanded);
+    let path = Path::new(expanded.as_ref());
     if !path.exists() {
         return Err(format!("file not found: {expanded}"));
     }
@@ -182,7 +184,7 @@ fn write_file_tool() -> RegisteredTool {
 
 fn execute_write_file(file_path: &str, content: &str) -> Result<String, String> {
     let expanded = expand_tilde(file_path);
-    let path = Path::new(&expanded);
+    let path = Path::new(expanded.as_ref());
     if path.is_dir() {
         return Err(format!("cannot write to directory: {expanded}"));
     }
@@ -242,7 +244,7 @@ fn execute_edit_file(file_path: &str, old_text: &str, new_text: &str) -> Result<
     }
 
     let expanded = expand_tilde(file_path);
-    let path = Path::new(&expanded);
+    let path = Path::new(expanded.as_ref());
     if path.is_dir() {
         return Err(format!("cannot edit directory: {expanded}"));
     }
@@ -290,7 +292,7 @@ fn list_files_tool() -> RegisteredTool {
 
 fn execute_list_files(directory_path: &str) -> Result<String, String> {
     let expanded = expand_tilde(directory_path);
-    let path = Path::new(&expanded);
+    let path = Path::new(expanded.as_ref());
     if !path.is_dir() {
         return Err(format!("not a directory: {expanded}"));
     }
@@ -352,7 +354,7 @@ fn search_files_tool() -> RegisteredTool {
 
 fn execute_search_files(pattern: &str, directory_path: &str) -> Result<String, String> {
     let expanded = expand_tilde(directory_path);
-    let path = Path::new(&expanded);
+    let path = Path::new(expanded.as_ref());
     if !path.is_dir() {
         return Err(format!("not a directory: {expanded}"));
     }
@@ -457,17 +459,20 @@ fn fetch_url_tool() -> RegisteredTool {
     )
 }
 
+static FETCH_CLIENT: LazyLock<reqwest::blocking::Client> = LazyLock::new(|| {
+    reqwest::blocking::Client::builder()
+        .user_agent(concat!("larpshell/", env!("CARGO_PKG_VERSION")))
+        .timeout(Duration::from_secs(10))
+        .build()
+        .expect("failed to build HTTP client for fetch_url")
+});
+
 fn execute_fetch_url(url: &str) -> Result<String, String> {
     if !(url.starts_with("http://") || url.starts_with("https://")) {
         return Err("url must start with http:// or https://".to_string());
     }
 
-    let client = reqwest::blocking::Client::builder()
-        .user_agent(concat!("larpshell/", env!("CARGO_PKG_VERSION")))
-        .timeout(Duration::from_secs(10))
-        .build()
-        .map_err(|error| format!("cannot create HTTP client: {error}"))?;
-    let response = client
+    let response = FETCH_CLIENT
         .get(url)
         .send()
         .map_err(|error| format!("cannot fetch URL: {error}"))?;
@@ -516,7 +521,7 @@ fn run_command_tool(agent_mode: AgentMode) -> RegisteredTool {
         },
         Box::new(move |args| {
             let command = args["command"].as_str().ok_or("command must be a string")?;
-            let command_args = command_args(&args);
+            let command_args = command_args(args);
             execute_run_command(agent_mode, command, &command_args)
         }),
     )
@@ -672,15 +677,15 @@ fn execute_run_command(
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
-fn expand_tilde(path: &str) -> String {
+fn expand_tilde(path: &str) -> Cow<'_, str> {
     if path.starts_with('~')
         && let Some(home) = dirs::home_dir()
     {
         let remaining = path.strip_prefix('~').unwrap_or("");
         let remaining = remaining.strip_prefix('/').unwrap_or(remaining);
-        return home.join(remaining).to_string_lossy().to_string();
+        return Cow::Owned(home.join(remaining).to_string_lossy().into_owned());
     }
-    path.to_string()
+    Cow::Borrowed(path)
 }
 
 #[cfg(test)]

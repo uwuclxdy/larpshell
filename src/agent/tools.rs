@@ -4,23 +4,22 @@ use std::sync::Mutex;
 
 use super::builtins;
 
+type ToolExecutor = Box<dyn Fn(&serde_json::Value) -> Result<String, String> + Send + Sync>;
+
 pub struct RegisteredTool {
     pub definition: ToolDefinition,
-    executor: Box<dyn Fn(serde_json::Value) -> Result<String, String> + Send + Sync>,
+    executor: ToolExecutor,
 }
 
 impl RegisteredTool {
-    pub fn new(
-        definition: ToolDefinition,
-        executor: Box<dyn Fn(serde_json::Value) -> Result<String, String> + Send + Sync>,
-    ) -> Self {
+    pub fn new(definition: ToolDefinition, executor: ToolExecutor) -> Self {
         Self {
             definition,
             executor,
         }
     }
 
-    pub fn execute(&self, args: serde_json::Value) -> Result<String, String> {
+    pub fn execute(&self, args: &serde_json::Value) -> Result<String, String> {
         (self.executor)(args)
     }
 }
@@ -60,6 +59,25 @@ impl ToolRegistry {
     pub fn add_mcp_client(&mut self, client: crate::agent::mcp::StdioMcpClient) {
         let mut prefix = client.server_name().to_owned();
         prefix.push('_');
+
+        // Reject server names that are a prefix of an existing server name (or vice-versa),
+        // because `try_execute_mcp_tool` routes by `starts_with` and would mis-route tool
+        // calls (e.g. "git_status" would match both "git_" and "github_" if "git" is
+        // registered before "github"). Panic at registration so the misconfiguration is
+        // caught during startup rather than silently mislabelling calls at runtime.
+        for existing in &self.mcp_clients {
+            let a = &existing.prefix;
+            let b = &prefix;
+            if a.starts_with(b.as_str()) || b.starts_with(a.as_str()) {
+                panic!(
+                    "MCP server name collision: '{}' and '{}' share a prefix — \
+                     one would shadow the other during tool routing",
+                    a.trim_end_matches('_'),
+                    b.trim_end_matches('_'),
+                );
+            }
+        }
+
         self.mcp_clients.push(McpClientEntry {
             prefix,
             client: Mutex::new(client),
@@ -73,8 +91,8 @@ impl ToolRegistry {
             .collect()
     }
 
-    pub fn execute(&self, name: &str, args: serde_json::Value) -> Result<String, String> {
-        if let Some(result) = self.try_execute_mcp_tool(name, &args) {
+    pub fn execute(&self, name: &str, args: &serde_json::Value) -> Result<String, String> {
+        if let Some(result) = self.try_execute_mcp_tool(name, args) {
             return result;
         }
 
@@ -99,7 +117,7 @@ impl ToolRegistry {
         None
     }
 
-    fn execute_builtin_tool(&self, name: &str, args: serde_json::Value) -> Result<String, String> {
+    fn execute_builtin_tool(&self, name: &str, args: &serde_json::Value) -> Result<String, String> {
         self.tools
             .iter()
             .find(|tool| tool.definition.name == name)
@@ -210,7 +228,7 @@ mod tests {
         let result = registry
             .execute(
                 "read_file",
-                serde_json::json!({"file_path": dir.join("test.txt").to_str().unwrap()}),
+                &serde_json::json!({"file_path": dir.join("test.txt").to_str().unwrap()}),
             )
             .unwrap();
 
@@ -221,7 +239,7 @@ mod tests {
     fn registry_execute_unknown_tool_returns_error() {
         let registry = ToolRegistry::with_builtins(AgentMode::Safe);
         assert_err_contains(
-            registry.execute("nonexistent", serde_json::json!({})),
+            registry.execute("nonexistent", &serde_json::json!({})),
             "unknown tool",
         );
     }

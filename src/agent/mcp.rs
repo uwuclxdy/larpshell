@@ -4,6 +4,14 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 
+/// A JSON-RPC 2.0 notification (no `id` field). Used for fire-and-forget messages
+/// like `notifications/initialized` that don't expect a response.
+#[derive(Serialize)]
+struct JsonRpcNotification<'a> {
+    jsonrpc: &'static str,
+    method: &'a str,
+}
+
 pub struct McpServerConfig {
     pub name: String,
     pub command: String,
@@ -30,7 +38,6 @@ struct JsonRpcRequest<'a> {
 
 #[derive(Deserialize)]
 struct JsonRpcResponse {
-    #[expect(dead_code, reason = "deserialized for protocol completeness")]
     id: Option<u64>,
     result: Option<serde_json::Value>,
     error: Option<JsonRpcError>,
@@ -121,31 +128,41 @@ impl StdioMcpClient {
             .flush()
             .map_err(|error| format!("flush to MCP server '{}': {error}", self.name))?;
 
-        let mut line = String::new();
-        self.stdout
-            .read_line(&mut line)
-            .map_err(|error| format!("read from MCP server '{}': {error}", self.name))?;
+        // A spec-compliant server may emit notifications (messages with no `id`, or an
+        // `id` that doesn't match our request) before sending the real response. Keep
+        // reading until we get a message whose `id` matches `self.request_id`.
+        loop {
+            let mut line = String::new();
+            self.stdout
+                .read_line(&mut line)
+                .map_err(|error| format!("read from MCP server '{}': {error}", self.name))?;
 
-        if line.trim().is_empty() {
-            return Err(format!(
-                "MCP server '{}' returned empty response",
-                self.name
-            ));
+            if line.trim().is_empty() {
+                return Err(format!(
+                    "MCP server '{}' returned empty response",
+                    self.name
+                ));
+            }
+
+            let response: JsonRpcResponse = serde_json::from_str(line.trim())
+                .map_err(|error| format!("parse MCP response: {error}"))?;
+
+            // Skip notifications and responses for other request ids.
+            if response.id != Some(self.request_id) {
+                continue;
+            }
+
+            if let Some(error) = response.error {
+                return Err(format!(
+                    "MCP server '{}' error: {}",
+                    self.name, error.message
+                ));
+            }
+
+            return response
+                .result
+                .ok_or_else(|| format!("MCP server '{}' returned no result", self.name));
         }
-
-        let response: JsonRpcResponse = serde_json::from_str(line.trim())
-            .map_err(|error| format!("parse MCP response: {error}"))?;
-
-        if let Some(error) = response.error {
-            return Err(format!(
-                "MCP server '{}' error: {}",
-                self.name, error.message
-            ));
-        }
-
-        response
-            .result
-            .ok_or_else(|| format!("MCP server '{}' returned no result", self.name))
     }
 
     pub fn initialize(&mut self) -> Result<(), String> {
@@ -159,10 +176,10 @@ impl StdioMcpClient {
         });
         let _ = self.send_request("initialize", Some(params))?;
 
-        let notification = serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "notifications/initialized"
-        });
+        let notification = JsonRpcNotification {
+            jsonrpc: "2.0",
+            method: "notifications/initialized",
+        };
         let json =
             serde_json::to_string(&notification).map_err(|error| format!("serialize: {error}"))?;
         writeln!(self.stdin, "{json}").map_err(|error| format!("write notification: {error}"))?;

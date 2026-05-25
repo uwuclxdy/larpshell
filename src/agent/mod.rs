@@ -171,7 +171,7 @@ fn execute_tool_call(
     tool_call: &ToolCall,
     verbose_tool_output: bool,
 ) -> String {
-    let result = tool_registry.execute(&tool_call.name, tool_call.arguments.clone());
+    let result = tool_registry.execute(&tool_call.name, &tool_call.arguments);
     match &result {
         Ok(output) => render_success_inline(output, verbose_tool_output),
         Err(error) => render_error_inline(error),
@@ -490,6 +490,8 @@ fn read_key() -> Key {
 
             if tcsetattr(&stdin, SetArg::TCSANOW, &raw).is_ok() {
                 let mut buffer = [0u8; 1];
+                // I/O error is treated as EOF: read_key cannot propagate errors, and
+                // returning Key::Other lets the confirm loop spin until valid input arrives.
                 let read_result =
                     if std::io::Read::read(&mut stdin.lock(), &mut buffer).unwrap_or(0) == 0 {
                         Key::Other
@@ -505,6 +507,7 @@ fn read_key() -> Key {
     }
 
     let mut buffer = [0u8; 1];
+    // Same EOF-on-error rationale as above.
     if std::io::Read::read(&mut std::io::stdin().lock(), &mut buffer).unwrap_or(0) == 0 {
         return Key::Other;
     }
