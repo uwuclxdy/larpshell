@@ -173,7 +173,7 @@ pub fn arg_completions(line: &str) -> Option<(usize, Vec<&'static ArgChoice>)> {
     Some((line.len() - partial.len(), candidates))
 }
 
-/// Returns commands whose `/name` is a prefix of `typed`, or `typed` is a prefix of `/name`.
+/// Returns commands whose name is a prefix of `typed`.
 /// Returns nothing if `typed` is empty or does not start with `/`.
 pub fn filter(typed: &str) -> Vec<&'static SlashCommand> {
     if !typed.starts_with('/') {
@@ -183,7 +183,7 @@ pub fn filter(typed: &str) -> Vec<&'static SlashCommand> {
     let typed_cmd = typed[1..].split_whitespace().next().unwrap_or("");
     COMMANDS
         .iter()
-        .filter(|cmd| cmd.name.starts_with(typed_cmd) || typed_cmd.starts_with(cmd.name))
+        .filter(|cmd| cmd.name.starts_with(typed_cmd))
         .collect()
 }
 
