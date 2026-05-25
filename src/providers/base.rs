@@ -58,14 +58,20 @@ impl BaseProvider {
     ) -> Result<reqwest::Response, LarpshellError> {
         if !response.status().is_success() {
             let status = response.status();
+            let retry_after_header = response
+                .headers()
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.to_string());
             let error_text = response
                 .text()
                 .await
                 .unwrap_or_else(|_| "unknown error".to_string());
-            return Err(LarpshellError::from_http_status(
+            return Err(LarpshellError::from_http_status_with_retry_header(
                 status,
                 provider,
                 &error_text,
+                retry_after_header.as_deref(),
             ));
         }
         Ok(response)

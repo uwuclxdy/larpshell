@@ -83,6 +83,23 @@ impl LarpshellError {
         }
     }
 
+    fn parse_retry_after(header: Option<&str>, body: &str) -> Option<u64> {
+        if let Some(header_value) = header.and_then(|v| v.parse::<u64>().ok()) {
+            return Some(header_value);
+        }
+
+        if body.contains("retry") {
+            body.split("retry in ")
+                .nth(1)
+                .and_then(|s| s.split('s').next())
+                .and_then(|s| s.parse::<f64>().ok())
+                .map(f64::ceil)
+                .map(|seconds| seconds as u64)
+        } else {
+            None
+        }
+    }
+
     pub fn connection_failed(provider: impl Into<String>, message: impl Into<String>) -> Self {
         Self::ConnectionFailed {
             provider: provider.into(),
@@ -108,9 +125,24 @@ impl LarpshellError {
     }
 
     pub fn from_http_status(status: reqwest::StatusCode, provider: &str, body: &str) -> Self {
+        Self::from_http_status_with_retry_header(status, provider, body, None)
+    }
+
+    pub fn from_http_status_with_retry_header(
+        status: reqwest::StatusCode,
+        provider: &str,
+        body: &str,
+        retry_after_header: Option<&str>,
+    ) -> Self {
         match status.as_u16() {
             401 | 403 => {
-                if body.contains("key") || body.contains("api") || body.contains("token") {
+                let body_lower = body.to_lowercase();
+                if body_lower.contains("api key")
+                    || body_lower.contains("api_key")
+                    || body_lower.contains("apikey")
+                    || body_lower.contains("invalid key")
+                    || body_lower.contains("missing key")
+                {
                     Self::InvalidApiKey
                 } else {
                     Self::auth_failed(body)
@@ -124,16 +156,7 @@ impl LarpshellError {
                 }
             }
             429 => {
-                let retry_after = if body.contains("retry") {
-                    body.split("retry in ")
-                        .nth(1)
-                        .and_then(|s| s.split('s').next())
-                        .and_then(|s| s.parse::<f64>().ok())
-                        .map(f64::ceil)
-                        .map(|seconds| seconds as u64)
-                } else {
-                    None
-                };
+                let retry_after = Self::parse_retry_after(retry_after_header, body);
                 Self::RateLimitExceeded { retry_after }
             }
             500..=599 => Self::server_error(provider, body),
@@ -162,5 +185,158 @@ impl LarpshellError {
     /// don’t have to repeat the `print_error` boilerplate.
     pub fn print(&self) {
         crate::cli::print_error(&self.to_string());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_api_key_detection_401_with_api_key_phrase() {
+        let err = LarpshellError::from_http_status(
+            reqwest::StatusCode::UNAUTHORIZED,
+            "openai",
+            "invalid api key",
+        );
+        assert!(matches!(err, LarpshellError::InvalidApiKey));
+    }
+
+    #[test]
+    fn test_api_key_detection_403_with_api_key_phrase() {
+        let err = LarpshellError::from_http_status(
+            reqwest::StatusCode::FORBIDDEN,
+            "gemini",
+            "API_KEY authentication failed",
+        );
+        assert!(matches!(err, LarpshellError::InvalidApiKey));
+    }
+
+    #[test]
+    fn test_api_key_detection_403_with_apikey_phrase() {
+        let err = LarpshellError::from_http_status(
+            reqwest::StatusCode::FORBIDDEN,
+            "ollama",
+            "invalid apikey provided",
+        );
+        assert!(matches!(err, LarpshellError::InvalidApiKey));
+    }
+
+    #[test]
+    fn test_api_key_detection_case_insensitive() {
+        let err = LarpshellError::from_http_status(
+            reqwest::StatusCode::UNAUTHORIZED,
+            "provider",
+            "API KEY required",
+        );
+        assert!(matches!(err, LarpshellError::InvalidApiKey));
+    }
+
+    #[test]
+    fn test_quota_not_misclassified_as_invalid_key() {
+        let err = LarpshellError::from_http_status(
+            reqwest::StatusCode::FORBIDDEN,
+            "openai",
+            "quota exceeded for this model. check your API usage",
+        );
+        assert!(!matches!(err, LarpshellError::InvalidApiKey));
+        assert!(matches!(err, LarpshellError::AuthenticationFailed { .. }));
+    }
+
+    #[test]
+    fn test_capacity_not_misclassified_as_invalid_key() {
+        let err = LarpshellError::from_http_status(
+            reqwest::StatusCode::FORBIDDEN,
+            "gemini",
+            "capacity not available in your region",
+        );
+        assert!(!matches!(err, LarpshellError::InvalidApiKey));
+        assert!(matches!(err, LarpshellError::AuthenticationFailed { .. }));
+    }
+
+    #[test]
+    fn test_openapi_not_misclassified_as_invalid_key() {
+        let err = LarpshellError::from_http_status(
+            reqwest::StatusCode::FORBIDDEN,
+            "provider",
+            "openapi schema validation failed",
+        );
+        assert!(!matches!(err, LarpshellError::InvalidApiKey));
+        assert!(matches!(err, LarpshellError::AuthenticationFailed { .. }));
+    }
+
+    #[test]
+    fn test_retry_after_from_header_delta_seconds() {
+        let err = LarpshellError::from_http_status_with_retry_header(
+            reqwest::StatusCode::TOO_MANY_REQUESTS,
+            "openai",
+            "rate limited",
+            Some("120"),
+        );
+        assert!(matches!(
+            err,
+            LarpshellError::RateLimitExceeded {
+                retry_after: Some(120)
+            }
+        ));
+    }
+
+    #[test]
+    fn test_retry_after_from_body_gemini_format() {
+        let err = LarpshellError::from_http_status(
+            reqwest::StatusCode::TOO_MANY_REQUESTS,
+            "gemini",
+            "please retry in 30s",
+        );
+        assert!(matches!(
+            err,
+            LarpshellError::RateLimitExceeded {
+                retry_after: Some(30)
+            }
+        ));
+    }
+
+    #[test]
+    fn test_retry_after_from_body_gemini_format_float() {
+        let err = LarpshellError::from_http_status(
+            reqwest::StatusCode::TOO_MANY_REQUESTS,
+            "gemini",
+            "please retry in 45.5s",
+        );
+        assert!(matches!(
+            err,
+            LarpshellError::RateLimitExceeded {
+                retry_after: Some(46)
+            }
+        ));
+    }
+
+    #[test]
+    fn test_retry_after_header_preferred_over_body() {
+        let err = LarpshellError::from_http_status_with_retry_header(
+            reqwest::StatusCode::TOO_MANY_REQUESTS,
+            "openai",
+            "please retry in 10s",
+            Some("60"),
+        );
+        assert!(matches!(
+            err,
+            LarpshellError::RateLimitExceeded {
+                retry_after: Some(60)
+            }
+        ));
+    }
+
+    #[test]
+    fn test_retry_after_none_when_not_available() {
+        let err = LarpshellError::from_http_status(
+            reqwest::StatusCode::TOO_MANY_REQUESTS,
+            "provider",
+            "rate limited",
+        );
+        assert!(matches!(
+            err,
+            LarpshellError::RateLimitExceeded { retry_after: None }
+        ));
     }
 }
