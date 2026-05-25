@@ -177,77 +177,46 @@ fn verify_and_fix_integrations() -> Result<(), LarpshellError> {
 }
 
 fn verify_and_fix_autocomplete() -> Result<(), LarpshellError> {
-    verify_and_fix_bash_autocomplete()?;
-    verify_and_fix_zsh_autocomplete()?;
-    verify_and_fix_fish_autocomplete()?;
+    let home = home_dir();
+    verify_and_fix_autocomplete_file(
+        &home.join(".local/share/bash-completion/completions/larpshell"),
+        generate_bash_autocomplete(),
+        Some("# larpshell bash autocomplete"),
+    )?;
+    verify_and_fix_autocomplete_file(
+        &home.join(".local/share/zsh/site-functions/_larpshell"),
+        generate_zsh_autocomplete(),
+        Some("# larpshell zsh autocomplete"),
+    )?;
+    verify_and_fix_autocomplete_file(
+        &home.join(".config/fish/completions/larpshell.fish"),
+        generate_fish_autocomplete(),
+        None,
+    )?;
     Ok(())
 }
 
-fn verify_and_fix_bash_autocomplete() -> Result<(), LarpshellError> {
-    let home = home_dir();
-    let completion_path = home.join(".local/share/bash-completion/completions/larpshell");
-
-    if !completion_path.exists() {
+/// Rewrites `path` with `header` (if any) + `expected` when its content drifts.
+/// No-ops when the file doesn't exist or already contains the expected content.
+fn verify_and_fix_autocomplete_file(
+    path: &std::path::Path,
+    expected: &str,
+    header: Option<&str>,
+) -> Result<(), LarpshellError> {
+    if !path.exists() {
         return Ok(());
     }
 
-    let content = fs::read_to_string(&completion_path)?;
-    let expected = generate_bash_autocomplete();
-
-    if !content.contains(expected) {
-        let mut file = OpenOptions::new()
-            .write(true)
-            .truncate(true)
-            .open(&completion_path)?;
-        writeln!(file, "# larpshell bash autocomplete")?;
-        writeln!(file, "{expected}")?;
-    }
-
-    Ok(())
-}
-
-fn verify_and_fix_zsh_autocomplete() -> Result<(), LarpshellError> {
-    let home = home_dir();
-    let completion_path = home.join(".local/share/zsh/site-functions/_larpshell");
-
-    if !completion_path.exists() {
+    let content = fs::read_to_string(path)?;
+    if content.contains(expected) {
         return Ok(());
     }
 
-    let content = fs::read_to_string(&completion_path)?;
-    let expected = generate_zsh_autocomplete();
-
-    if !content.contains(expected) {
-        let mut file = OpenOptions::new()
-            .write(true)
-            .truncate(true)
-            .open(&completion_path)?;
-        writeln!(file, "# larpshell zsh autocomplete")?;
-        writeln!(file, "{expected}")?;
+    let mut file = OpenOptions::new().write(true).truncate(true).open(path)?;
+    if let Some(h) = header {
+        writeln!(file, "{h}")?;
     }
-
-    Ok(())
-}
-
-fn verify_and_fix_fish_autocomplete() -> Result<(), LarpshellError> {
-    let home = home_dir();
-    let completion_path = home.join(".config/fish/completions/larpshell.fish");
-
-    if !completion_path.exists() {
-        return Ok(());
-    }
-
-    let content = fs::read_to_string(&completion_path)?;
-    let expected = generate_fish_autocomplete();
-
-    if !content.contains(expected) {
-        let mut file = OpenOptions::new()
-            .write(true)
-            .truncate(true)
-            .open(&completion_path)?;
-        writeln!(file, "{expected}")?;
-    }
-
+    writeln!(file, "{expected}")?;
     Ok(())
 }
 
@@ -262,7 +231,7 @@ fn verify_and_fix_bash_integration() -> Result<(), LarpshellError> {
     let content = fs::read_to_string(&bashrc_path)?;
 
     // check if integration exists
-    if !content.contains("larpshell()") {
+    if !content.contains("larpshell() {") {
         return Ok(());
     }
 
@@ -315,7 +284,6 @@ fn setup_bash_integration() -> Result<bool, LarpshellError> {
     }
 
     let mut file = OpenOptions::new().append(true).open(&bashrc_path)?;
-
     writeln!(file, "\n# larpshell shell integration")?;
     writeln!(file, "{}", generate_bash_function())?;
     Ok(true)
@@ -345,7 +313,6 @@ fn setup_fish_integration() -> Result<bool, LarpshellError> {
 
     writeln!(file, "# larpshell shell integration")?;
     writeln!(file, "{}", generate_fish_function())?;
-
     Ok(true)
 }
 
@@ -423,14 +390,7 @@ pub fn remove_bash_integration() -> Result<bool, LarpshellError> {
 
 pub fn remove_fish_integration() -> Result<bool, LarpshellError> {
     let home = home_dir();
-    let fish_function_path = home.join(".config/fish/functions/larpshell.fish");
-
-    if fish_function_path.exists() {
-        fs::remove_file(&fish_function_path)?;
-        Ok(true)
-    } else {
-        Ok(false)
-    }
+    remove_file_if_exists(&home.join(".config/fish/functions/larpshell.fish"))
 }
 
 fn setup_autocomplete() -> Result<bool, LarpshellError> {
@@ -526,28 +486,23 @@ fn setup_fish_autocomplete() -> Result<bool, LarpshellError> {
     Ok(true)
 }
 
-fn remove_bash_autocomplete() -> Result<bool, LarpshellError> {
-    let home = home_dir();
-    let completion_path = home.join(".local/share/bash-completion/completions/larpshell");
-
-    if completion_path.exists() {
-        fs::remove_file(&completion_path)?;
+fn remove_file_if_exists(path: &std::path::Path) -> Result<bool, LarpshellError> {
+    if path.exists() {
+        fs::remove_file(path)?;
         Ok(true)
     } else {
         Ok(false)
     }
 }
 
+fn remove_bash_autocomplete() -> Result<bool, LarpshellError> {
+    let home = home_dir();
+    remove_file_if_exists(&home.join(".local/share/bash-completion/completions/larpshell"))
+}
+
 fn remove_zsh_completion_file() -> Result<bool, LarpshellError> {
     let home = home_dir();
-    let completion_path = home.join(".local/share/zsh/site-functions/_larpshell");
-
-    if completion_path.exists() {
-        fs::remove_file(&completion_path)?;
-        Ok(true)
-    } else {
-        Ok(false)
-    }
+    remove_file_if_exists(&home.join(".local/share/zsh/site-functions/_larpshell"))
 }
 
 fn remove_zsh_fpath_block(zshrc: &std::path::Path, marker: &str) -> Result<bool, LarpshellError> {
@@ -604,14 +559,7 @@ fn remove_zsh_autocomplete() -> Result<bool, LarpshellError> {
 
 fn remove_fish_autocomplete() -> Result<bool, LarpshellError> {
     let home = home_dir();
-    let completion_path = home.join(".config/fish/completions/larpshell.fish");
-
-    if completion_path.exists() {
-        fs::remove_file(&completion_path)?;
-        Ok(true)
-    } else {
-        Ok(false)
-    }
+    remove_file_if_exists(&home.join(".config/fish/completions/larpshell.fish"))
 }
 
 fn remove_autocomplete() -> Result<bool, LarpshellError> {
@@ -660,13 +608,7 @@ fn migrate_nlsh_rs_bash() -> Result<bool, LarpshellError> {
 
 fn migrate_nlsh_rs_fish_fn() -> Result<bool, LarpshellError> {
     let home = home_dir();
-    let path = home.join(".config/fish/functions/nlsh-rs.fish");
-    if path.exists() {
-        fs::remove_file(&path)?;
-        Ok(true)
-    } else {
-        Ok(false)
-    }
+    remove_file_if_exists(&home.join(".config/fish/functions/nlsh-rs.fish"))
 }
 
 fn migrate_nlsh_rs_completions() -> Result<bool, LarpshellError> {
