@@ -67,7 +67,7 @@ impl ChatMessage {
         }
     }
 
-    pub const fn assistant_tool_calls(tool_calls: Vec<ToolCall>) -> Self {
+    pub fn assistant_tool_calls(tool_calls: Vec<ToolCall>) -> Self {
         Self {
             role: Role::Assistant,
             content: None,

@@ -187,9 +187,15 @@ impl AIProvider for OllamaProvider {
             return Ok(ChatResponse::ToolCalls(calls));
         }
 
-        Ok(ChatResponse::Message(
-            chat_response.message.content.unwrap_or_default(),
-        ))
+        let content = chat_response
+            .message
+            .content
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| {
+                LarpshellError::InvalidResponse("no content in ollama response".to_string())
+            })?;
+
+        Ok(ChatResponse::Message(content))
     }
 
     fn name(&self) -> String {
@@ -239,5 +245,21 @@ mod tests {
         let response: OllamaChatResponse = serde_json::from_str(json).unwrap();
         assert_eq!(response.message.content.as_deref(), Some("echo hello"));
         assert!(response.message.tool_calls.is_none());
+    }
+
+    #[test]
+    fn ollama_missing_content_is_none() {
+        let json = r#"{"message": {"role": "assistant"}}"#;
+        let response: OllamaChatResponse = serde_json::from_str(json).unwrap();
+        // content absent → None; the provider must error, not return empty string
+        assert!(response.message.content.is_none());
+    }
+
+    #[test]
+    fn ollama_empty_content_filtered_to_none() {
+        let json = r#"{"message": {"role": "assistant", "content": ""}}"#;
+        let response: OllamaChatResponse = serde_json::from_str(json).unwrap();
+        // filter(|s| !s.is_empty()) turns "" into None → error path
+        assert!(response.message.content.filter(|s| !s.is_empty()).is_none());
     }
 }

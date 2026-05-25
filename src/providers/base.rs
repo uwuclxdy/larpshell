@@ -17,7 +17,6 @@ pub fn create_http_client() -> Result<Client, LarpshellError> {
 pub fn strip_url_for_display(url: &str) -> &str {
     url.trim_start_matches("http://")
         .trim_start_matches("https://")
-        .trim_end_matches("/*")
         .trim_end_matches('/')
 }
 

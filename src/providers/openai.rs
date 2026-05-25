@@ -117,11 +117,21 @@ impl OpenAICompatibleProvider {
     }
 
     fn chat_completions_url(&self) -> String {
-        let normalized = self.base_url.trim_end_matches('/');
-        if normalized.ends_with("/v1") {
-            format!("{normalized}/chat/completions")
+        // normalize trailing slash, then route by the last path segment:
+        // - already "/chat/completions" → use as-is (full-path base URL)
+        // - version segment (v<digit>..., e.g. v1, v1beta, v2) → append /chat/completions
+        // - bare host or non-version path → insert /v1 first
+        let base = self.base_url.trim_end_matches('/');
+        if base.ends_with("/chat/completions") {
+            return base.to_string();
+        }
+        let last = base.rsplit('/').next().unwrap_or("");
+        let is_version =
+            last.starts_with('v') && last.chars().nth(1).is_some_and(|c| c.is_ascii_digit());
+        if is_version {
+            format!("{base}/chat/completions")
         } else {
-            format!("{normalized}/v1/chat/completions")
+            format!("{base}/v1/chat/completions")
         }
     }
 
@@ -342,6 +352,74 @@ impl AIProvider for OpenRouterProvider {
 mod tests {
     use super::*;
     use crate::providers::ToolDefinition;
+
+    fn make_provider(base_url: &str) -> OpenAICompatibleProvider {
+        OpenAICompatibleProvider {
+            base: BaseProvider::new().unwrap(),
+            base_url: base_url.to_string(),
+            api_key: None,
+            model: "gpt-4".to_string(),
+            provider_slug: "openai",
+            display_name: "OpenAI",
+        }
+    }
+
+    #[test]
+    fn chat_completions_url_handles_v1_suffix() {
+        let p = make_provider("https://api.openai.com/v1");
+        assert_eq!(
+            p.chat_completions_url(),
+            "https://api.openai.com/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn chat_completions_url_handles_v1_trailing_slash() {
+        let p = make_provider("https://api.openai.com/v1/");
+        assert_eq!(
+            p.chat_completions_url(),
+            "https://api.openai.com/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn chat_completions_url_handles_bare_host() {
+        let p = make_provider("http://localhost:11434");
+        assert_eq!(
+            p.chat_completions_url(),
+            "http://localhost:11434/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn chat_completions_url_handles_v1beta() {
+        // v1beta is a version segment (v + digit) → appends /chat/completions directly
+        let p = make_provider("https://example.com/v1beta");
+        assert_eq!(
+            p.chat_completions_url(),
+            "https://example.com/v1beta/chat/completions"
+        );
+    }
+
+    #[test]
+    fn chat_completions_url_handles_v2() {
+        // v2 is a version segment (v + digit) → appends /chat/completions directly
+        let p = make_provider("https://example.com/v2");
+        assert_eq!(
+            p.chat_completions_url(),
+            "https://example.com/v2/chat/completions"
+        );
+    }
+
+    #[test]
+    fn chat_completions_url_handles_full_path() {
+        // full endpoint URL → used as-is without doubling
+        let p = make_provider("https://api.openai.com/v1/chat/completions");
+        assert_eq!(
+            p.chat_completions_url(),
+            "https://api.openai.com/v1/chat/completions"
+        );
+    }
 
     #[test]
     fn chat_request_with_tools_serializes_correctly() {

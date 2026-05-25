@@ -1,6 +1,6 @@
 use crate::config::GeminiConfig;
 use crate::error::LarpshellError;
-use crate::providers::base::{BaseProvider, strip_url_for_display};
+use crate::providers::base::BaseProvider;
 use crate::providers::{AIProvider, ChatMessage, ChatResponse, Role, ToolCall, ToolDefinition};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -9,7 +9,6 @@ const GEMINI_BASE_URL: &str = "https://generativelanguage.googleapis.com";
 
 pub struct GeminiProvider {
     base: BaseProvider,
-    base_url: String,
     api_key: String,
     model: String,
 }
@@ -100,7 +99,6 @@ impl GeminiProvider {
     pub fn new(config: &GeminiConfig) -> Result<Self, LarpshellError> {
         Ok(Self {
             base: BaseProvider::new()?,
-            base_url: GEMINI_BASE_URL.to_string(),
             api_key: config.api_key.clone(),
             model: config.model.clone(),
         })
@@ -109,7 +107,7 @@ impl GeminiProvider {
     fn generate_url(&self) -> String {
         format!(
             "{}/v1beta/models/{}:generateContent",
-            self.base_url, self.model
+            GEMINI_BASE_URL, self.model
         )
     }
 
@@ -361,7 +359,7 @@ impl AIProvider for GeminiProvider {
     }
 
     fn name(&self) -> String {
-        format!("Gemini ({})", strip_url_for_display(&self.base_url))
+        format!("Gemini ({})", self.model)
     }
 }
 
