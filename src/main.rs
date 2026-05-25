@@ -109,23 +109,28 @@ async fn run() -> Result<(), LarpshellError> {
 
     let mut runtime = Runtime::create()?;
 
-    let result = match cli.subcommand {
+    match cli.subcommand {
         Some(cli::Subcommands::Explain { command }) => {
-            handle_explain_subcommand(command, runtime.provider.as_ref()).await
+            let result = handle_explain_subcommand(command, runtime.provider.as_ref()).await;
+            runtime.finish_update().await;
+            result
         }
         _ => match select_run_mode(&cli.command) {
             RunMode::OneShot(input) => {
-                process_user_input(&input, &mut runtime, CommandMode::Single)
+                let result = process_user_input(&input, &mut runtime, CommandMode::Single)
                     .await
-                    .map(drop)
+                    .map(drop);
+                runtime.finish_update().await;
+                result
             }
-            RunMode::Piped => run_piped(&mut runtime).await,
+            RunMode::Piped => {
+                let result = run_piped(&mut runtime).await;
+                runtime.finish_update().await;
+                result
+            }
             RunMode::Repl => run_repl(&mut runtime).await,
         },
-    };
-
-    runtime.finish_update().await;
-    result
+    }
 }
 
 // ── startup ─────────────────────────────────────────────────────────────────
