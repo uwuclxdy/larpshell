@@ -9,7 +9,7 @@ use crate::prompt::DEFAULT_EXPLAIN_PROMPT;
 const OLD_EXPLAIN_PROMPT_V1: &str = include_str!("../prompts/old/explain_v1.md");
 const OLD_EXPLAIN_PROMPT_V2: &str = include_str!("../prompts/old/explain_v2.md");
 
-use super::{ActiveProvider, Config, MultiProviderConfig, explain_prompt_path};
+use super::{ActiveProvider, Config, MultiProviderConfig, atomic_write, explain_prompt_path};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct V1ProviderSection {
@@ -97,7 +97,7 @@ pub fn migrate_explain_prompt() -> Result<bool, LarpshellError> {
     for migrator in migrators {
         if migrator.can_migrate(&content) {
             let new_content = migrator.migrate(&content)?;
-            fs::write(&explain_prompt_path, new_content)?;
+            atomic_write(&explain_prompt_path, &new_content)?;
             return Ok(true);
         }
     }
@@ -112,7 +112,7 @@ pub fn migrate_config(config_path: &Path) -> Result<bool, LarpshellError> {
     for migrator in migrators {
         if migrator.can_migrate(&content) {
             let new_content = migrator.migrate(&content)?;
-            fs::write(config_path, new_content)?;
+            atomic_write(config_path, &new_content)?;
             return Ok(true);
         }
     }

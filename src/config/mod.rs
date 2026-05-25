@@ -2,7 +2,7 @@ use colored::Colorize;
 use inquire::{Confirm, Text};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::cli::{
     print_error, print_ok_bold, prompt_input, prompt_input_with_default, prompt_select,
@@ -347,12 +347,30 @@ pub fn load_config() -> Result<Config, LarpshellError> {
     }
 }
 
+/// Writes `contents` to `path` atomically: writes to a sibling `*.tmp` file
+/// first, then renames it over the target so a crash between the two steps
+/// leaves the original intact.
+pub(crate) fn atomic_write(path: &Path, contents: &str) -> Result<(), LarpshellError> {
+    let tmp = path.with_extension("tmp");
+    if let Err(e) = fs::write(&tmp, contents) {
+        return Err(LarpshellError::ConfigError(format!(
+            "failed to write temp config: {e}"
+        )));
+    }
+    if let Err(e) = fs::rename(&tmp, path) {
+        let _ = fs::remove_file(&tmp);
+        return Err(LarpshellError::ConfigError(format!(
+            "failed to replace config atomically: {e}"
+        )));
+    }
+    Ok(())
+}
+
 pub fn save_config(config: &Config) -> Result<(), LarpshellError> {
     let config_dir = ensure_config_dir()?;
     let config_path = config_dir.join("config.toml");
     let toml_string = toml::to_string_pretty(config)?;
-    fs::write(&config_path, toml_string)?;
-    Ok(())
+    atomic_write(&config_path, &toml_string)
 }
 
 const PROVIDER_OPTIONS: &[(&str, ActiveProvider)] = &[

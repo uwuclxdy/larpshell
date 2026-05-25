@@ -504,3 +504,26 @@ fn agent_subcommand_off_prints_confirmation() {
         "config should have agent = \"off\""
     );
 }
+
+#[test]
+fn atomic_write_produces_correct_content_and_no_temp_file() {
+    use crate::config::atomic_write;
+    // Use a unique subdir so parallel test runs don't collide.
+    let dir = std::env::temp_dir().join(format!("larpshell_test_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let target = dir.join("config.toml");
+    let content = "provider = \"ollama\"\n";
+
+    atomic_write(&target, content).expect("atomic_write should succeed");
+
+    assert_eq!(
+        fs::read_to_string(&target).unwrap(),
+        content,
+        "target should contain what was written"
+    );
+    assert!(
+        !dir.join("config.tmp").exists(),
+        "temp file must not be left behind after a successful write"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
