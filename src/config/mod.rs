@@ -74,48 +74,45 @@ pub struct Config {
 
 impl Config {
     pub fn provider_config(&self) -> Result<ProviderConfig, LarpshellError> {
-        match self.active_provider {
-            ActiveProvider::Gemini => Ok(ProviderConfig {
-                provider_type: ActiveProvider::Gemini,
-                config: ProviderSpecificConfig::Gemini {
-                    gemini: self.providers.gemini.clone().ok_or_else(|| {
-                        LarpshellError::ConfigError(
-                            "gemini config not found for active provider".to_string(),
-                        )
-                    })?,
-                },
-            }),
-            ActiveProvider::Ollama => Ok(ProviderConfig {
-                provider_type: ActiveProvider::Ollama,
-                config: ProviderSpecificConfig::Ollama {
-                    ollama: self.providers.ollama.clone().ok_or_else(|| {
-                        LarpshellError::ConfigError(
-                            "ollama config not found for active provider".to_string(),
-                        )
-                    })?,
-                },
-            }),
-            ActiveProvider::OpenRouter => Ok(ProviderConfig {
-                provider_type: ActiveProvider::OpenRouter,
-                config: ProviderSpecificConfig::OpenRouter {
-                    openrouter: self.providers.openrouter.clone().ok_or_else(|| {
-                        LarpshellError::ConfigError(
-                            "openrouter config not found for active provider".to_string(),
-                        )
-                    })?,
-                },
-            }),
-            ActiveProvider::OpenAI => Ok(ProviderConfig {
-                provider_type: ActiveProvider::OpenAI,
-                config: ProviderSpecificConfig::OpenAI {
-                    openai: self.providers.openai.clone().ok_or_else(|| {
-                        LarpshellError::ConfigError(
-                            "openai config not found for active provider".to_string(),
-                        )
-                    })?,
-                },
-            }),
+        macro_rules! require {
+            ($opt:expr, $name:literal) => {
+                $opt.clone().ok_or_else(|| {
+                    LarpshellError::ConfigError(
+                        concat!($name, " config not found for active provider").to_string(),
+                    )
+                })?
+            };
         }
+        let (provider_type, config) = match self.active_provider {
+            ActiveProvider::Gemini => (
+                ActiveProvider::Gemini,
+                ProviderSpecificConfig::Gemini {
+                    gemini: require!(self.providers.gemini, "gemini"),
+                },
+            ),
+            ActiveProvider::Ollama => (
+                ActiveProvider::Ollama,
+                ProviderSpecificConfig::Ollama {
+                    ollama: require!(self.providers.ollama, "ollama"),
+                },
+            ),
+            ActiveProvider::OpenRouter => (
+                ActiveProvider::OpenRouter,
+                ProviderSpecificConfig::OpenRouter {
+                    openrouter: require!(self.providers.openrouter, "openrouter"),
+                },
+            ),
+            ActiveProvider::OpenAI => (
+                ActiveProvider::OpenAI,
+                ProviderSpecificConfig::OpenAI {
+                    openai: require!(self.providers.openai, "openai"),
+                },
+            ),
+        };
+        Ok(ProviderConfig {
+            provider_type,
+            config,
+        })
     }
 }
 
@@ -155,6 +152,15 @@ impl ProviderSpecificConfig {
             Self::Ollama { ollama } => &ollama.model,
             Self::OpenRouter { openrouter } => &openrouter.model,
             Self::OpenAI { openai } => &openai.model,
+        }
+    }
+
+    pub fn base_url(&self) -> Option<&str> {
+        match self {
+            Self::Gemini { .. } => None,
+            Self::Ollama { ollama } => Some(&ollama.base_url),
+            Self::OpenRouter { openrouter } => Some(&openrouter.base_url),
+            Self::OpenAI { openai } => Some(&openai.base_url),
         }
     }
 }
@@ -426,7 +432,7 @@ fn colored_provider_options(current_provider: Option<ActiveProvider>) -> Vec<Str
         .iter()
         .map(|(name, variant)| {
             if Some(*variant) == current_provider {
-                format!("{}", name.custom_color(CTP_GREEN))
+                name.custom_color(CTP_GREEN).to_string()
             } else {
                 name.to_string()
             }
@@ -503,43 +509,13 @@ fn display_config_summary(config: &Config, provider_name: &str) -> Result<(), La
     );
 
     let provider_config = config.provider_config()?;
-    match &provider_config.config {
-        ProviderSpecificConfig::Gemini { gemini } => {
-            eprintln!(
-                "{}",
-                style_message_markup(&format!("Model: {}", gemini.model))
-            );
-        }
-        ProviderSpecificConfig::Ollama { ollama } => {
-            eprintln!(
-                "{}",
-                style_message_markup(&format!("Model: {}", ollama.model))
-            );
-            eprintln!(
-                "{}",
-                style_message_markup(&format!("Base URL: {}", ollama.base_url))
-            );
-        }
-        ProviderSpecificConfig::OpenRouter { openrouter } => {
-            eprintln!(
-                "{}",
-                style_message_markup(&format!("Model: {}", openrouter.model))
-            );
-            eprintln!(
-                "{}",
-                style_message_markup(&format!("Base URL: {}", openrouter.base_url))
-            );
-        }
-        ProviderSpecificConfig::OpenAI { openai } => {
-            eprintln!(
-                "{}",
-                style_message_markup(&format!("Model: {}", openai.model))
-            );
-            eprintln!(
-                "{}",
-                style_message_markup(&format!("Base URL: {}", openai.base_url))
-            );
-        }
+    let specific = &provider_config.config;
+    eprintln!(
+        "{}",
+        style_message_markup(&format!("Model: {}", specific.model()))
+    );
+    if let Some(url) = specific.base_url() {
+        eprintln!("{}", style_message_markup(&format!("Base URL: {url}")));
     }
 
     Ok(())
