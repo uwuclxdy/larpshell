@@ -818,7 +818,7 @@ async fn generate_single_shot(
     #[cfg(unix)]
     let saved_for_ctrlc = saved_echo.clone();
 
-    tokio::spawn(async move {
+    let ctrl_c = tokio::spawn(async move {
         tokio::signal::ctrl_c().await.ok();
         eprintln!();
         #[cfg(unix)]
@@ -830,6 +830,7 @@ async fn generate_single_shot(
     });
 
     let result = provider.generate(prompt).await;
+    ctrl_c.abort();
     clear_line();
     show_cursor();
     #[cfg(unix)]
