@@ -16,14 +16,6 @@ pub struct OpenAICompatibleProvider {
     display_name: &'static str,
 }
 
-pub struct OpenAIProvider {
-    inner: OpenAICompatibleProvider,
-}
-
-pub struct OpenRouterProvider {
-    inner: OpenAICompatibleProvider,
-}
-
 #[derive(Serialize)]
 struct ChatRequest {
     model: String,
@@ -116,6 +108,26 @@ impl OpenAICompatibleProvider {
         })
     }
 
+    pub fn openai(config: &OpenAIConfig) -> Result<Self, LarpshellError> {
+        Self::new(
+            config.base_url.clone(),
+            config.api_key.clone(),
+            config.model.clone(),
+            "openai",
+            "OpenAI",
+        )
+    }
+
+    pub fn openrouter(config: &OpenRouterConfig) -> Result<Self, LarpshellError> {
+        Self::new(
+            config.base_url.clone(),
+            config.api_key.clone(),
+            config.model.clone(),
+            "openrouter",
+            "OpenRouter",
+        )
+    }
+
     fn chat_completions_url(&self) -> String {
         // normalize trailing slash, then route by the last path segment:
         // - already "/chat/completions" → use as-is (full-path base URL)
@@ -135,7 +147,7 @@ impl OpenAICompatibleProvider {
         }
     }
 
-    async fn generate(&self, prompt: &str) -> Result<String, LarpshellError> {
+    async fn do_generate(&self, prompt: &str) -> Result<String, LarpshellError> {
         let url = self.chat_completions_url();
 
         let request_body = ChatRequest {
@@ -170,7 +182,7 @@ impl OpenAICompatibleProvider {
             })
     }
 
-    async fn generate_with_tools(
+    async fn do_generate_with_tools(
         &self,
         messages: &[crate::providers::ChatMessage],
         tools: &[crate::providers::ToolDefinition],
@@ -273,7 +285,7 @@ impl OpenAICompatibleProvider {
         Ok(ChatResponse::Message(content))
     }
 
-    fn name(&self) -> String {
+    fn display(&self) -> String {
         format!(
             "{} ({})",
             self.display_name,
@@ -282,38 +294,10 @@ impl OpenAICompatibleProvider {
     }
 }
 
-impl OpenAIProvider {
-    pub fn new(config: &OpenAIConfig) -> Result<Self, LarpshellError> {
-        Ok(Self {
-            inner: OpenAICompatibleProvider::new(
-                config.base_url.clone(),
-                config.api_key.clone(),
-                config.model.clone(),
-                "openai",
-                "OpenAI",
-            )?,
-        })
-    }
-}
-
-impl OpenRouterProvider {
-    pub fn new(config: &OpenRouterConfig) -> Result<Self, LarpshellError> {
-        Ok(Self {
-            inner: OpenAICompatibleProvider::new(
-                config.base_url.clone(),
-                config.api_key.clone(),
-                config.model.clone(),
-                "openrouter",
-                "OpenRouter",
-            )?,
-        })
-    }
-}
-
 #[async_trait]
-impl AIProvider for OpenAIProvider {
+impl AIProvider for OpenAICompatibleProvider {
     async fn generate(&self, prompt: &str) -> Result<String, LarpshellError> {
-        self.inner.generate(prompt).await
+        self.do_generate(prompt).await
     }
 
     async fn generate_with_tools(
@@ -321,30 +305,11 @@ impl AIProvider for OpenAIProvider {
         messages: &[crate::providers::ChatMessage],
         tools: &[crate::providers::ToolDefinition],
     ) -> Result<crate::providers::ChatResponse, LarpshellError> {
-        self.inner.generate_with_tools(messages, tools).await
+        self.do_generate_with_tools(messages, tools).await
     }
 
     fn name(&self) -> String {
-        self.inner.name()
-    }
-}
-
-#[async_trait]
-impl AIProvider for OpenRouterProvider {
-    async fn generate(&self, prompt: &str) -> Result<String, LarpshellError> {
-        self.inner.generate(prompt).await
-    }
-
-    async fn generate_with_tools(
-        &self,
-        messages: &[crate::providers::ChatMessage],
-        tools: &[crate::providers::ToolDefinition],
-    ) -> Result<crate::providers::ChatResponse, LarpshellError> {
-        self.inner.generate_with_tools(messages, tools).await
-    }
-
-    fn name(&self) -> String {
-        self.inner.name()
+        self.display()
     }
 }
 

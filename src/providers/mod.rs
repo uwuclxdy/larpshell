@@ -133,11 +133,11 @@ pub fn create_provider(config: &Config) -> Result<Box<dyn AIProvider>, Larpshell
         ProviderSpecificConfig::Ollama { ollama } => {
             Ok(Box::new(ollama::OllamaProvider::new(ollama)?))
         }
-        ProviderSpecificConfig::OpenRouter { openrouter } => {
-            Ok(Box::new(openai::OpenRouterProvider::new(openrouter)?))
-        }
+        ProviderSpecificConfig::OpenRouter { openrouter } => Ok(Box::new(
+            openai::OpenAICompatibleProvider::openrouter(openrouter)?,
+        )),
         ProviderSpecificConfig::OpenAI { openai } => {
-            Ok(Box::new(openai::OpenAIProvider::new(openai)?))
+            Ok(Box::new(openai::OpenAICompatibleProvider::openai(openai)?))
         }
     }
 }
