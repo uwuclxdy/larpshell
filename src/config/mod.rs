@@ -282,7 +282,7 @@ pub fn history_path() -> Result<PathBuf, LarpshellError> {
 }
 
 pub fn history_enabled() -> bool {
-    history_disabled_path().map_or(true, |p| !p.exists())
+    history_disabled_path().is_ok_and(|p| !p.exists())
 }
 
 pub fn set_history_enabled(enabled: bool) -> Result<(), LarpshellError> {
@@ -387,10 +387,17 @@ const PROVIDER_OPTIONS: &[(&str, ActiveProvider)] = &[
 pub fn interactive_setup() -> Result<(), LarpshellError> {
     let existing_config = load_config().ok();
     let current_provider = existing_config.as_ref().map(|c| c.active_provider);
+    let default_index = current_provider
+        .and_then(|cp| {
+            PROVIDER_OPTIONS
+                .iter()
+                .position(|(_, variant)| *variant == cp)
+        })
+        .unwrap_or(0);
     let selection = prompt_select(
         "Select API Provider",
         &colored_provider_options(current_provider),
-        0,
+        default_index,
     )?;
     let (provider_display_name, selected_variant) = PROVIDER_OPTIONS[selection];
 
@@ -646,5 +653,54 @@ fn prompt_model_name(default: Option<&str>) -> Result<String, LarpshellError> {
             return Ok(model);
         }
         print_error("Model name cannot be empty");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_provider_default_index_gemini() {
+        let idx = PROVIDER_OPTIONS
+            .iter()
+            .position(|(_, v)| *v == ActiveProvider::Gemini)
+            .unwrap_or(0);
+        assert_eq!(idx, 0);
+    }
+
+    #[test]
+    fn test_provider_default_index_ollama() {
+        let idx = PROVIDER_OPTIONS
+            .iter()
+            .position(|(_, v)| *v == ActiveProvider::Ollama)
+            .unwrap_or(0);
+        assert_eq!(idx, 1);
+    }
+
+    #[test]
+    fn test_provider_default_index_openrouter() {
+        let idx = PROVIDER_OPTIONS
+            .iter()
+            .position(|(_, v)| *v == ActiveProvider::OpenRouter)
+            .unwrap_or(0);
+        assert_eq!(idx, 2);
+    }
+
+    #[test]
+    fn test_provider_default_index_openai() {
+        let idx = PROVIDER_OPTIONS
+            .iter()
+            .position(|(_, v)| *v == ActiveProvider::OpenAI)
+            .unwrap_or(0);
+        assert_eq!(idx, 3);
+    }
+
+    #[test]
+    fn test_history_enabled_returns_bool() {
+        let result = history_enabled();
+        // This is a simple smoke test. The function should not panic.
+        // Fail-closed behavior: if ensure_config_dir fails, returns false.
+        let _ = result; // Suppress unused warning
     }
 }
