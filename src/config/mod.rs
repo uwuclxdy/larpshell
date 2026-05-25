@@ -227,7 +227,7 @@ pub fn load_sys_prompt() -> Option<String> {
 }
 
 pub fn save_sys_prompt(content: &str) -> Result<(), LarpshellError> {
-    Ok(fs::write(sys_prompt_path()?, content)?)
+    atomic_write(&sys_prompt_path()?, content)
 }
 
 pub fn explain_prompt_path() -> Result<PathBuf, LarpshellError> {
@@ -242,7 +242,7 @@ pub fn load_explain_prompt() -> Option<String> {
 }
 
 pub fn save_explain_prompt(content: &str) -> Result<(), LarpshellError> {
-    Ok(fs::write(explain_prompt_path()?, content)?)
+    atomic_write(&explain_prompt_path()?, content)
 }
 
 pub fn agent_prompt_path() -> Result<PathBuf, LarpshellError> {
@@ -256,7 +256,7 @@ pub fn load_agent_prompt() -> Option<String> {
 }
 
 pub fn save_agent_prompt(content: &str) -> Result<(), LarpshellError> {
-    Ok(fs::write(agent_prompt_path()?, content)?)
+    atomic_write(&agent_prompt_path()?, content)
 }
 
 pub fn agent_safe_prompt_path() -> Result<PathBuf, LarpshellError> {
@@ -270,7 +270,7 @@ pub fn load_agent_safe_prompt() -> Option<String> {
 }
 
 pub fn save_agent_safe_prompt(content: &str) -> Result<(), LarpshellError> {
-    Ok(fs::write(agent_safe_prompt_path()?, content)?)
+    atomic_write(&agent_safe_prompt_path()?, content)
 }
 
 fn history_disabled_path() -> Result<PathBuf, LarpshellError> {
@@ -521,9 +521,9 @@ fn display_config_summary(config: &Config, provider_name: &str) -> Result<(), La
 
 fn configure_gemini(existing: Option<&GeminiConfig>) -> Result<ProviderConfig, LarpshellError> {
     let api_key = prompt_api_key("Gemini API key", existing.map(|e| e.api_key.as_str()))?;
-    let model = prompt_model_name(
-        existing.map_or(Some("gemini-flash-latest"), |e| Some(e.model.as_str())),
-    )?;
+    let model = prompt_model_name(Some(
+        existing.map_or("gemini-flash-latest", |e| e.model.as_str()),
+    ))?;
 
     Ok(ProviderConfig {
         provider_type: ActiveProvider::Gemini,
@@ -640,7 +640,7 @@ fn prompt_optional_api_key(
 
 fn prompt_model_name(default: Option<&str>) -> Result<String, LarpshellError> {
     loop {
-        let model = prompt_input("Model name:", default)?;
+        let model = prompt_input("Model name", default)?;
 
         if !model.trim().is_empty() {
             return Ok(model);

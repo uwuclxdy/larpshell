@@ -55,7 +55,7 @@ impl Migrator for ConfigMigrator {
         let new_config = Config {
             active_provider,
             providers: old_config.providers,
-            agent: AgentMode::Safe,
+            agent: AgentMode::Off,
             verbose_tool_output: true,
         };
 
@@ -146,4 +146,37 @@ pub fn migrate_from_nlsh_rs() -> Result<bool, LarpshellError> {
 
     let _ = fs::remove_dir_all(&old_dir);
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn v1_config_migrates_agent_to_off() {
+        let v1 = r#"
+[provider]
+type = "ollama"
+
+[ollama]
+base_url = "http://localhost:11434"
+model = "llama3"
+"#;
+        let path = std::env::temp_dir().join("larpshell_migration_test.toml");
+        fs::write(&path, v1).unwrap();
+
+        let migrated = migrate_config(&path).unwrap();
+        assert!(migrated, "expected migration to run");
+
+        let content = fs::read_to_string(&path).unwrap();
+        let config: Config = toml::from_str(&content).unwrap();
+        assert_eq!(
+            config.agent,
+            AgentMode::Off,
+            "migrated config must not opt users into agent mode"
+        );
+
+        let _ = fs::remove_file(&path);
+    }
 }
