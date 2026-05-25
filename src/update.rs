@@ -32,10 +32,15 @@ fn detect_install_method() -> InstallMethod {
     };
     let path = exe.to_string_lossy();
 
-    if path.starts_with("/usr") {
-        InstallMethod::Aur
-    } else if path.contains(".cargo/bin") {
+    if path.contains(".cargo/bin") {
         InstallMethod::Cargo
+    } else if path.starts_with("/usr") {
+        let is_arch = std::path::Path::new("/etc/arch-release").exists();
+        if is_arch {
+            InstallMethod::Aur
+        } else {
+            InstallMethod::Unknown
+        }
     } else {
         InstallMethod::Unknown
     }
