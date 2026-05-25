@@ -129,18 +129,24 @@ fn execute_read_file(file_path: &str) -> Result<String, String> {
     }
 
     let metadata = fs::metadata(path).map_err(|error| format!("cannot read file: {error}"))?;
-    let content = fs::read_to_string(path).map_err(|error| format!("cannot read file: {error}"))?;
-
     if metadata.len() > MAX_FILE_SIZE as u64 {
-        Ok(truncate_content(&content, metadata.len()))
-    } else {
-        Ok(content)
+        // Read only the first MAX_FILE_SIZE bytes to avoid allocating the full file.
+        let mut buf = vec![0u8; MAX_FILE_SIZE];
+        let mut file =
+            fs::File::open(path).map_err(|error| format!("cannot read file: {error}"))?;
+        use std::io::Read;
+        let n = file
+            .read(&mut buf)
+            .map_err(|error| format!("cannot read file: {error}"))?;
+        buf.truncate(n);
+        let partial = String::from_utf8_lossy(&buf);
+        return Ok(format!(
+            "{partial}\n\n[truncated — file is {} bytes, showing first {MAX_FILE_SIZE}]",
+            metadata.len()
+        ));
     }
-}
 
-fn truncate_content(content: &str, file_size: u64) -> String {
-    let truncated = content.get(..MAX_FILE_SIZE).unwrap_or(content);
-    format!("{truncated}\n\n[truncated — file is {file_size} bytes, showing first {MAX_FILE_SIZE}]")
+    fs::read_to_string(path).map_err(|error| format!("cannot read file: {error}"))
 }
 
 fn write_file_tool() -> RegisteredTool {
@@ -300,7 +306,6 @@ fn execute_list_files(directory_path: &str) -> Result<String, String> {
 }
 
 fn entry_name(entry: &fs::DirEntry) -> Result<String, String> {
-    let name = entry.file_name().to_string_lossy().to_string();
     let suffix = if entry
         .file_type()
         .map_err(|error| format!("error reading entry: {error}"))?
@@ -311,7 +316,7 @@ fn entry_name(entry: &fs::DirEntry) -> Result<String, String> {
         ""
     };
 
-    Ok(format!("{name}{suffix}"))
+    Ok(format!("{}{}", entry.file_name().to_string_lossy(), suffix))
 }
 
 fn search_files_tool() -> RegisteredTool {
@@ -364,9 +369,11 @@ fn execute_search_files(pattern: &str, directory_path: &str) -> Result<String, S
 
     let mut searcher = SearcherBuilder::new().line_number(true).build();
     let mut matches: Vec<String> = Vec::new();
+    let mut truncated = false;
 
     for entry in walker.flatten() {
         if matches.len() >= MAX_SEARCH_MATCHES {
+            truncated = true;
             break;
         }
 
@@ -381,6 +388,7 @@ fn execute_search_files(pattern: &str, directory_path: &str) -> Result<String, S
         let mut sink = MatchSink {
             path: entry_path.to_path_buf(),
             matches: &mut matches,
+            truncated: &mut truncated,
         };
 
         let _ = searcher.search_path(&matcher, entry_path, &mut sink);
@@ -390,13 +398,18 @@ fn execute_search_files(pattern: &str, directory_path: &str) -> Result<String, S
         return Ok(format!("no matches found for '{pattern}'"));
     }
 
-    append_search_summary(&mut matches);
+    if truncated {
+        matches.push(format!(
+            "\n[showing {MAX_SEARCH_MATCHES} of more matches — refine your pattern to see all]"
+        ));
+    }
     Ok(matches.join("\n"))
 }
 
 struct MatchSink<'a> {
     path: PathBuf,
     matches: &'a mut Vec<String>,
+    truncated: &'a mut bool,
 }
 
 impl Sink for MatchSink<'_> {
@@ -408,6 +421,7 @@ impl Sink for MatchSink<'_> {
         mat: &SinkMatch<'_>,
     ) -> Result<bool, io::Error> {
         if self.matches.len() >= MAX_SEARCH_MATCHES {
+            *self.truncated = true;
             return Ok(false);
         }
 
@@ -417,16 +431,6 @@ impl Sink for MatchSink<'_> {
         self.matches
             .push(format!("{}:{line_number}:{line}", self.path.display()));
         Ok(true)
-    }
-}
-
-fn append_search_summary(matches: &mut Vec<String>) {
-    let total = matches.len();
-    if total > MAX_SEARCH_MATCHES {
-        matches.truncate(MAX_SEARCH_MATCHES);
-        matches.push(format!(
-            "\n[showing {MAX_SEARCH_MATCHES} of {total} matches]"
-        ));
     }
 }
 
@@ -512,7 +516,7 @@ fn run_command_tool(agent_mode: AgentMode) -> RegisteredTool {
         },
         Box::new(move |args| {
             let command = args["command"].as_str().ok_or("command must be a string")?;
-            let command_args = command_args_from_json(&args);
+            let command_args = command_args(&args);
             execute_run_command(agent_mode, command, &command_args)
         }),
     )
@@ -528,7 +532,7 @@ const fn run_command_description(agent_mode: AgentMode) -> &'static str {
     }
 }
 
-fn command_args_from_json(args: &serde_json::Value) -> Vec<String> {
+fn command_args(args: &serde_json::Value) -> Vec<String> {
     args.get("args")
         .and_then(|value| value.as_array())
         .map(|values| {
@@ -541,7 +545,7 @@ fn command_args_from_json(args: &serde_json::Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn split_command_and_args(command: &str, args: &[String]) -> Result<(String, Vec<String>), String> {
+fn split_command(command: &str, args: &[String]) -> Result<(String, Vec<String>), String> {
     if !args.is_empty() {
         return Ok((command.to_string(), args.to_vec()));
     }
@@ -648,7 +652,7 @@ fn execute_run_command(
             vec!["-c".to_string(), command.to_string()],
         )
     } else {
-        let (c, a) = split_command_and_args(command, args)?;
+        let (c, a) = split_command(command, args)?;
         if agent_mode.is_safe() {
             validate_safe_run_command(&c, &a)?;
         }
@@ -872,6 +876,22 @@ mod tests {
         let result = execute_search_files("nonexistent_pattern", dir.to_str().unwrap()).unwrap();
 
         assert!(result.contains("no matches found"));
+    }
+
+    #[test]
+    fn search_files_appends_truncation_notice_when_cap_hit() {
+        let dir = test_dir("search_truncate");
+        // One file with MAX_SEARCH_MATCHES + 5 matching lines — guarantees the cap fires.
+        let content = "match\n".repeat(MAX_SEARCH_MATCHES + 5);
+        fs::write(dir.join("many.txt"), &content).unwrap();
+
+        let result = execute_search_files("match", dir.to_str().unwrap()).unwrap();
+        let lines: Vec<&str> = result.lines().collect();
+
+        // Exactly MAX_SEARCH_MATCHES match lines plus the truncation notice.
+        let match_lines = lines.iter().filter(|l| l.contains("many.txt:")).count();
+        assert_eq!(match_lines, MAX_SEARCH_MATCHES);
+        assert!(result.contains("showing 50 of more matches"));
     }
 
     #[test]
