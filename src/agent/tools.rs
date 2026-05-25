@@ -25,9 +25,15 @@ impl RegisteredTool {
     }
 }
 
+struct McpClientEntry {
+    // avoids a per-call `format!` allocation in the agent loop
+    prefix: String,
+    client: Mutex<crate::agent::mcp::StdioMcpClient>,
+}
+
 pub struct ToolRegistry {
     tools: Vec<RegisteredTool>,
-    mcp_clients: Vec<Mutex<crate::agent::mcp::StdioMcpClient>>,
+    mcp_clients: Vec<McpClientEntry>,
 }
 
 impl ToolRegistry {
@@ -52,7 +58,12 @@ impl ToolRegistry {
     }
 
     pub fn add_mcp_client(&mut self, client: crate::agent::mcp::StdioMcpClient) {
-        self.mcp_clients.push(Mutex::new(client));
+        let mut prefix = client.server_name().to_owned();
+        prefix.push('_');
+        self.mcp_clients.push(McpClientEntry {
+            prefix,
+            client: Mutex::new(client),
+        });
     }
 
     pub fn definitions(&self) -> Vec<ToolDefinition> {
@@ -75,12 +86,12 @@ impl ToolRegistry {
         name: &str,
         args: &serde_json::Value,
     ) -> Option<Result<String, String>> {
-        for client_mutex in &self.mcp_clients {
-            let mut client = client_mutex
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            let prefix = format!("{}_", client.server_name());
-            if name.starts_with(&prefix) {
+        for entry in &self.mcp_clients {
+            if name.starts_with(&entry.prefix) {
+                let mut client = entry
+                    .client
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 return Some(client.call_tool(name, args));
             }
         }

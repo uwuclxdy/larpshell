@@ -20,10 +20,10 @@ pub struct StdioMcpClient {
 }
 
 #[derive(Serialize)]
-struct JsonRpcRequest {
-    jsonrpc: String,
+struct JsonRpcRequest<'a> {
+    jsonrpc: &'static str,
     id: u64,
-    method: String,
+    method: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     params: Option<serde_json::Value>,
 }
@@ -107,9 +107,9 @@ impl StdioMcpClient {
     ) -> Result<serde_json::Value, String> {
         self.request_id += 1;
         let request = JsonRpcRequest {
-            jsonrpc: "2.0".to_string(),
+            jsonrpc: "2.0",
             id: self.request_id,
-            method: method.to_string(),
+            method,
             params,
         };
 
@@ -196,8 +196,11 @@ impl StdioMcpClient {
         tool_name: &str,
         arguments: &serde_json::Value,
     ) -> Result<String, String> {
+        // Routing guarantees the prefix is present; fall back to the bare name
+        // only for callers that already stripped it (e.g. direct test calls).
         let original_name = tool_name
-            .strip_prefix(&format!("{}_", self.name))
+            .strip_prefix(self.name.as_str())
+            .and_then(|rest| rest.strip_prefix('_'))
             .unwrap_or(tool_name);
 
         let params = serde_json::json!({
