@@ -2,7 +2,11 @@ use crate::providers::ToolDefinition;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, BufWriter, Write};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::mpsc::{self, Receiver};
+use std::time::Duration;
+
+const MCP_REQUEST_TIMEOUT_SECS: u64 = 30;
 
 /// A JSON-RPC 2.0 notification (no `id` field). Used for fire-and-forget messages
 /// like `notifications/initialized` that don't expect a response.
@@ -23,7 +27,7 @@ pub struct StdioMcpClient {
     name: String,
     child: Child,
     stdin: BufWriter<ChildStdin>,
-    stdout: BufReader<ChildStdout>,
+    receiver: Receiver<Result<String, std::io::Error>>,
     request_id: u64,
 }
 
@@ -96,13 +100,33 @@ impl StdioMcpClient {
         })?;
 
         let stdin = BufWriter::new(child.stdin.take().ok_or("failed to get stdin")?);
-        let stdout = BufReader::new(child.stdout.take().ok_or("failed to get stdout")?);
+        let child_stdout = BufReader::new(child.stdout.take().ok_or("failed to get stdout")?);
+
+        let (sender, receiver) = mpsc::channel();
+        std::thread::spawn(move || {
+            let mut reader = child_stdout;
+            loop {
+                let mut line = String::new();
+                match reader.read_line(&mut line) {
+                    Ok(0) => break, // EOF — child closed stdout; sender drops here
+                    Ok(_) => {
+                        if sender.send(Ok(line)).is_err() {
+                            break; // receiver dropped
+                        }
+                    }
+                    Err(error) => {
+                        let _ = sender.send(Err(error));
+                        break;
+                    }
+                }
+            }
+        });
 
         Ok(Self {
             name: config.name.clone(),
             child,
             stdin,
-            stdout,
+            receiver,
             request_id: 0,
         })
     }
@@ -131,11 +155,24 @@ impl StdioMcpClient {
         // A spec-compliant server may emit notifications (messages with no `id`, or an
         // `id` that doesn't match our request) before sending the real response. Keep
         // reading until we get a message whose `id` matches `self.request_id`.
+        // Each recv_timeout call covers one line; the full loop is bounded by the timeout.
+        let timeout = Duration::from_secs(MCP_REQUEST_TIMEOUT_SECS);
         loop {
-            let mut line = String::new();
-            self.stdout
-                .read_line(&mut line)
-                .map_err(|error| format!("read from MCP server '{}': {error}", self.name))?;
+            let line = match self.receiver.recv_timeout(timeout) {
+                Ok(Ok(line)) => line,
+                Ok(Err(error)) => {
+                    return Err(format!("read from MCP server '{}': {error}", self.name));
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    return Err(format!(
+                        "MCP server '{}' did not respond within {MCP_REQUEST_TIMEOUT_SECS}s",
+                        self.name
+                    ));
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err(format!("MCP server '{}' exited unexpectedly", self.name));
+                }
+            };
 
             if line.trim().is_empty() {
                 return Err(format!(
