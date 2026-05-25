@@ -270,13 +270,10 @@ pub fn prompt_select(
     items: &[String],
     default: usize,
 ) -> Result<usize, LarpshellError> {
-    let selection = Select::new(prompt, items.to_vec())
+    let selected = Select::new(prompt, items.to_vec())
         .with_starting_cursor(default)
-        .prompt()?;
-    Ok(items
-        .iter()
-        .position(|x| x == &selection)
-        .unwrap_or(default))
+        .raw_prompt()?;
+    Ok(selected.index)
 }
 
 pub fn prompt_input(prompt: &str, default: Option<&str>) -> Result<String, LarpshellError> {

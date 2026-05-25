@@ -241,20 +241,22 @@ fn parse_bool_toggle_strict(
     }
 }
 
-fn parse_prompt_kind(arg: Option<&str>) -> PromptKind {
+fn parse_prompt_kind(arg: Option<&str>) -> Result<PromptKind, (&'static str, &'static str)> {
     match arg {
-        Some("explain") => PromptKind::Explain,
-        Some("agent-safe") => PromptKind::AgentSafe,
-        Some("agent") => PromptKind::Agent,
-        _ => PromptKind::System,
+        None | Some("system") => Ok(PromptKind::System),
+        Some("explain") => Ok(PromptKind::Explain),
+        Some("agent-safe") => Ok(PromptKind::AgentSafe),
+        Some("agent") => Ok(PromptKind::Agent),
+        Some(_) => Err(("prompt", "system, explain, agent, or agent-safe")),
     }
 }
 
-fn parse_prompt_action(arg: Option<&str>) -> PromptAction {
+fn parse_prompt_action(arg: Option<&str>) -> Result<PromptAction, (&'static str, &'static str)> {
     match arg {
-        Some("edit") => PromptAction::Edit,
-        Some("reset") => PromptAction::Reset,
-        _ => PromptAction::Show,
+        None | Some("show") => Ok(PromptAction::Show),
+        Some("edit") => Ok(PromptAction::Edit),
+        Some("reset") => Ok(PromptAction::Reset),
+        Some(_) => Err(("prompt", "show, edit, or reset")),
     }
 }
 
@@ -289,10 +291,17 @@ pub fn parse(input: &str) -> SlashCmd {
         Some("/explain") => SlashCmd::Explain {
             args: parts.map(std::string::ToString::to_string).collect(),
         },
-        Some("/prompt") => SlashCmd::Prompt {
-            kind: parse_prompt_kind(parts.next()),
-            action: parse_prompt_action(parts.next()),
-        },
+        Some("/prompt") => {
+            let kind_arg = parts.next();
+            let action_arg = parts.next();
+            match (parse_prompt_kind(kind_arg), parse_prompt_action(action_arg)) {
+                (Ok(kind), Ok(action)) => SlashCmd::Prompt { kind, action },
+                (Err((cmd, expected)), _) | (_, Err((cmd, expected))) => SlashCmd::InvalidArgs {
+                    command: cmd,
+                    expected,
+                },
+            }
+        }
         _ => SlashCmd::Unknown(input.to_string()),
     }
 }
@@ -359,6 +368,28 @@ mod tests {
             SlashCmd::Explain { args } => assert_eq!(args, vec!["ls", "-la"]),
             _ => panic!("expected Explain"),
         }
+    }
+
+    #[test]
+    fn parse_prompt_bad_kind_returns_invalid_args() {
+        assert!(matches!(
+            parse("/prompt garbage"),
+            SlashCmd::InvalidArgs {
+                command: "prompt",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_prompt_bad_action_returns_invalid_args() {
+        assert!(matches!(
+            parse("/prompt system garbage"),
+            SlashCmd::InvalidArgs {
+                command: "prompt",
+                ..
+            }
+        ));
     }
 
     #[test]
