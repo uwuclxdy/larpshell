@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::env;
 use std::fs;
 use std::io;
@@ -67,15 +68,15 @@ pub fn current_directory_display() -> String {
     cwd
 }
 
-pub fn os_name() -> String {
+pub fn os_name() -> Cow<'static, str> {
     if cfg!(target_os = "linux") {
-        linux_info()
+        linux_info().into()
     } else if cfg!(target_os = "macos") {
-        "macOS".to_string()
+        "macOS".into()
     } else if cfg!(windows) {
-        "Windows".to_string()
+        "Windows".into()
     } else {
-        "Unix".to_string()
+        "Unix".into()
     }
 }
 

@@ -16,7 +16,7 @@ pub fn create_system_prompt(user_request: &str, template: Option<&str>) -> Strin
 
     let tmpl = template.unwrap_or(DEFAULT_PROMPT_TEMPLATE);
 
-    tmpl.replace("{os}", os.as_str())
+    tmpl.replace("{os}", &os)
         .replace("{cwd}", cwd.as_str())
         .replace("{home}", home.as_str())
         .replace("{user}", user.as_str())

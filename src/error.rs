@@ -14,7 +14,7 @@ pub enum LarpshellError {
     #[error("model not found: {0}")]
     ModelNotFound(String),
 
-    #[error("rate limit exceeded{}", retry_after.map_or("; please try again later".to_string(), |n| format!("; retry after {n} seconds")))]
+    #[error("rate limit exceeded{}", Self::rate_limit_suffix(*retry_after))]
     RateLimitExceeded { retry_after: Option<u64> },
 
     #[error("server error from {provider}: {message}")]
@@ -76,6 +76,13 @@ pub enum LarpshellError {
 }
 
 impl LarpshellError {
+    fn rate_limit_suffix(retry_after: Option<u64>) -> std::borrow::Cow<'static, str> {
+        match retry_after {
+            Some(n) => format!("; retry after {n} seconds").into(),
+            None => "; please try again later".into(),
+        }
+    }
+
     pub fn connection_failed(provider: impl Into<String>, message: impl Into<String>) -> Self {
         Self::ConnectionFailed {
             provider: provider.into(),

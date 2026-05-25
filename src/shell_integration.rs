@@ -591,14 +591,14 @@ fn remove_zsh_fpath_block(zshrc: &std::path::Path, marker: &str) -> Result<bool,
     Ok(removed)
 }
 
-fn remove_zsh_fpath_from_zshrc() -> Result<bool, LarpshellError> {
+fn remove_zsh_fpath() -> Result<bool, LarpshellError> {
     let home = home_dir();
     remove_zsh_fpath_block(&home.join(".zshrc"), "# larpshell autocomplete")
 }
 
 fn remove_zsh_autocomplete() -> Result<bool, LarpshellError> {
     let file_removed = remove_zsh_completion_file()?;
-    let zshrc_cleaned = remove_zsh_fpath_from_zshrc()?;
+    let zshrc_cleaned = remove_zsh_fpath()?;
     Ok(file_removed || zshrc_cleaned)
 }
 
