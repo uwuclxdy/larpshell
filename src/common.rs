@@ -179,6 +179,9 @@ pub fn flush_stderr() {
 /// gets the terminal width in columns.
 #[cfg(unix)]
 pub fn terminal_width() -> usize {
+    // SAFETY: `winsize` is a POD C struct; zeroing it is a valid initialised
+    // state. `ioctl` writes into `ws` only on success (return value 0), and
+    // we check that before reading `ws_col`.
     unsafe {
         let mut ws: libc::winsize = std::mem::zeroed();
         if libc::ioctl(libc::STDERR_FILENO, libc::TIOCGWINSZ, &mut ws) == 0 && ws.ws_col > 0 {
@@ -254,4 +257,38 @@ pub fn disable_terminal_echo() -> Option<nix::sys::termios::Termios> {
 pub fn restore_terminal_echo(saved: &nix::sys::termios::Termios) {
     use nix::sys::termios::{SetArg, tcsetattr};
     let _ = tcsetattr(std::io::stdin(), SetArg::TCSANOW, saved);
+}
+
+/// RAII guard that puts stdin into raw mode (no ICANON, ECHO, or ISIG) and
+/// restores the original termios on drop.
+///
+/// Returns `None` when stdin is not a tty or `tcsetattr` fails (e.g. piped
+/// stdin in tests), so callers can fall back to plain reads.
+#[cfg(unix)]
+pub struct RawModeGuard {
+    original: nix::sys::termios::Termios,
+}
+
+#[cfg(unix)]
+impl RawModeGuard {
+    /// Enters raw mode. Returns `None` when stdin is not a tty or the mode
+    /// change fails.
+    pub fn enter() -> Option<Self> {
+        use nix::sys::termios::{LocalFlags, SetArg, tcgetattr, tcsetattr};
+        let stdin = std::io::stdin();
+        let original = tcgetattr(&stdin).ok()?;
+        let mut raw = original.clone();
+        raw.local_flags
+            .remove(LocalFlags::ICANON | LocalFlags::ECHO | LocalFlags::ISIG);
+        tcsetattr(&stdin, SetArg::TCSANOW, &raw).ok()?;
+        Some(Self { original })
+    }
+}
+
+#[cfg(unix)]
+impl Drop for RawModeGuard {
+    fn drop(&mut self) {
+        use nix::sys::termios::{SetArg, tcsetattr};
+        let _ = tcsetattr(std::io::stdin(), SetArg::TCSANOW, &self.original);
+    }
 }

@@ -5,6 +5,8 @@ pub mod tools;
 use colored::Colorize;
 
 use crate::cli::print_warning;
+#[cfg(unix)]
+use crate::common::RawModeGuard;
 use crate::common::{
     CTP_BLUE, CTP_GREEN, CTP_OVERLAY0, CTP_PRIMARY, CTP_RED, CTP_YELLOW, clear_line, eprint_flush,
     hide_cursor, show_cursor,
@@ -479,31 +481,17 @@ const fn parse_byte(b: u8) -> Key {
 
 fn read_key() -> Key {
     #[cfg(unix)]
-    {
-        use nix::sys::termios::{LocalFlags, SetArg, tcgetattr, tcsetattr};
-
-        let stdin = std::io::stdin();
-        if let Ok(original) = tcgetattr(&stdin) {
-            let mut raw = original.clone();
-            raw.local_flags
-                .remove(LocalFlags::ICANON | LocalFlags::ECHO | LocalFlags::ISIG);
-
-            if tcsetattr(&stdin, SetArg::TCSANOW, &raw).is_ok() {
-                let mut buffer = [0u8; 1];
-                // I/O error is treated as EOF: read_key cannot propagate errors, and
-                // returning Key::Other lets the confirm loop spin until valid input arrives.
-                let read_result =
-                    if std::io::Read::read(&mut stdin.lock(), &mut buffer).unwrap_or(0) == 0 {
-                        Key::Other
-                    } else {
-                        parse_byte(buffer[0])
-                    };
-                let _ = tcsetattr(&stdin, SetArg::TCSANOW, &original);
-                return read_result;
-            }
-
-            let _ = tcsetattr(&stdin, SetArg::TCSANOW, &original);
-        }
+    if let Some(_guard) = RawModeGuard::enter() {
+        let mut buffer = [0u8; 1];
+        // I/O error is treated as EOF: read_key cannot propagate errors, and
+        // returning Key::Other lets the confirm loop spin until valid input arrives.
+        let key =
+            if std::io::Read::read(&mut std::io::stdin().lock(), &mut buffer).unwrap_or(0) == 0 {
+                Key::Other
+            } else {
+                parse_byte(buffer[0])
+            };
+        return key; // _guard drops here, restoring termios
     }
 
     let mut buffer = [0u8; 1];
@@ -511,7 +499,6 @@ fn read_key() -> Key {
     if std::io::Read::read(&mut std::io::stdin().lock(), &mut buffer).unwrap_or(0) == 0 {
         return Key::Other;
     }
-
     parse_byte(buffer[0])
 }
 

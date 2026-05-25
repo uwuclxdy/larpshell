@@ -1,6 +1,8 @@
 use colored::Colorize;
 
 use crate::cli::is_interactive_terminal;
+#[cfg(unix)]
+use crate::common::RawModeGuard;
 use crate::common::{
     ANSI_CLEAR_LINE, CTP_BLUE, CTP_GREEN, CTP_PRIMARY, CTP_RED, CTP_TEXT, CTP_YELLOW, EXIT_SIGINT,
     clear_n_lines, count_visual_lines, flush_stderr, show_cursor, terminal_width,
@@ -96,23 +98,10 @@ fn flush_stdin_input() {}
 
 #[cfg(unix)]
 fn read_key_event() -> KeyEvent {
-    use nix::sys::termios::{LocalFlags, SetArg, tcgetattr, tcsetattr};
-
-    let stdin_handle = std::io::stdin();
-
     // Attempt raw mode; fall back to plain reads (e.g. piped stdin in tests).
-    if let Ok(original) = tcgetattr(&stdin_handle) {
-        let mut raw = original.clone();
-        raw.local_flags
-            .remove(LocalFlags::ICANON | LocalFlags::ECHO | LocalFlags::ISIG);
-        if tcsetattr(&stdin_handle, SetArg::TCSANOW, &raw).is_ok() {
-            let result = parse_key_from_reader(&mut stdin_handle.lock());
-            let _ = tcsetattr(&stdin_handle, SetArg::TCSANOW, &original);
-            return result;
-        }
-        let _ = tcsetattr(&stdin_handle, SetArg::TCSANOW, &original);
+    if let Some(_guard) = RawModeGuard::enter() {
+        return parse_key_from_reader(&mut std::io::stdin().lock()); // _guard drops here
     }
-
     parse_key_from_reader(&mut std::io::stdin().lock())
 }
 
