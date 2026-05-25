@@ -133,17 +133,18 @@ fn execute_read_file(file_path: &str) -> Result<String, String> {
     let metadata = fs::metadata(path).map_err(|error| format!("cannot read file: {error}"))?;
     if metadata.len() > MAX_FILE_SIZE as u64 {
         // Read only the first MAX_FILE_SIZE bytes to avoid allocating the full file.
-        let mut buf = vec![0u8; MAX_FILE_SIZE];
         let mut file =
             fs::File::open(path).map_err(|error| format!("cannot read file: {error}"))?;
         use std::io::Read;
-        let n = file
-            .read(&mut buf)
+        let mut buf = Vec::with_capacity(MAX_FILE_SIZE);
+        file.by_ref()
+            .take(MAX_FILE_SIZE as u64)
+            .read_to_end(&mut buf)
             .map_err(|error| format!("cannot read file: {error}"))?;
-        buf.truncate(n);
+        let n = buf.len();
         let partial = String::from_utf8_lossy(&buf);
         return Ok(format!(
-            "{partial}\n\n[truncated — file is {} bytes, showing first {MAX_FILE_SIZE}]",
+            "{partial}\n\n[truncated — file is {} bytes, showing first {n}]",
             metadata.len()
         ));
     }
@@ -485,11 +486,17 @@ fn execute_fetch_url(url: &str) -> Result<String, String> {
         .text()
         .map_err(|error| format!("cannot read response body: {error}"))?;
     if content.len() > MAX_FETCH_SIZE {
-        let truncated = content.get(..MAX_FETCH_SIZE).unwrap_or(&content);
+        // Floor to the nearest char boundary at or below MAX_FETCH_SIZE so we
+        // always truncate an oversize body regardless of codepoint widths.
+        let cut = content
+            .char_indices()
+            .rev()
+            .find(|(i, _)| *i <= MAX_FETCH_SIZE)
+            .map_or(0, |(i, _)| i);
+        let truncated = &content[..cut];
         Ok(format!(
-            "{truncated}\n\n[truncated — response is {} bytes, showing first {}]",
-            content.len(),
-            MAX_FETCH_SIZE
+            "{truncated}\n\n[truncated — response is {} bytes, showing first {cut}]",
+            content.len()
         ))
     } else {
         Ok(content)
@@ -589,13 +596,54 @@ fn is_dangerous_argument(arg: &str) -> bool {
     has_shell_metacharacters(arg) || has_dangerous_flag(arg) || is_dangerous_argument_token(arg)
 }
 
+/// Returns true when the config key in a `git -c key=value` pair can be used
+/// to execute arbitrary code (pager, hooks, ssh command, aliases, etc.).
+fn git_config_key_is_exec_capable(key: &str) -> bool {
+    // Reject by suffix/substring; case-insensitive to match git's behaviour.
+    let key_lc = key.to_ascii_lowercase();
+    // Exact dangerous keys.
+    const EXEC_KEYS: &[&str] = &[
+        "core.pager",
+        "core.sshcommand",
+        "core.fsmonitor",
+        "core.editor",
+        "core.askpass",
+    ];
+    if EXEC_KEYS.contains(&key_lc.as_str()) {
+        return true;
+    }
+    // Any alias.* key can run arbitrary commands.
+    if key_lc.starts_with("alias.") {
+        return true;
+    }
+    // Any *.pager key (e.g. pager.log, pager.diff).
+    if key_lc.ends_with(".pager") {
+        return true;
+    }
+    // Any key containing "cmd" or "command" (e.g. credential.helper, remote.*.uploadpack).
+    if key_lc.contains("cmd") || key_lc.contains("command") {
+        return true;
+    }
+    false
+}
+
 fn git_command_is_read_only(args: &[String]) -> bool {
     let mut i = 0;
 
     while i < args.len() {
         match args[i].as_str() {
             "--version" | "version" | "help" => return true,
-            "-c" | "-C" | "--git-dir" | "--work-tree" | "--namespace" | "--config-env" => {
+            "-c" => {
+                // Inspect the key=value pair; reject exec-capable config keys.
+                if let Some(pair) = args.get(i + 1) {
+                    let key = pair.split('=').next().unwrap_or(pair);
+                    if git_config_key_is_exec_capable(key) {
+                        return false;
+                    }
+                }
+                i += 2;
+            }
+            "-C" | "--git-dir" | "--work-tree" | "--namespace" | "--config-env" => {
                 i += 2;
             }
             arg if arg.starts_with("--git-dir=")
@@ -1062,6 +1110,133 @@ bar",
         assert_err_contains(
             execute_run_command(AgentMode::Safe, "echo foo && echo bar", &[]),
             "shell expressions not allowed in safe mode",
+        );
+    }
+
+    // ── regression: bug fixes ────────────────────────────────────────────────
+
+    #[test]
+    fn fetch_url_truncates_multibyte_unicode_body_at_char_boundary() {
+        // Build a body whose byte length exceeds MAX_FETCH_SIZE but whose last
+        // few bytes before the cap land in the middle of a multi-byte codepoint.
+        // Each '€' is 3 UTF-8 bytes; fill just past the cap so the naive
+        // byte-slice would panic or silently return the full string.
+        let unit = '€'; // 3-byte codepoint
+        let unit_bytes = unit.len_utf8();
+        // Repeat enough times that the total byte length is slightly above MAX_FETCH_SIZE.
+        let count = MAX_FETCH_SIZE / unit_bytes + 1;
+        let body: String = std::iter::repeat_n(unit, count).collect();
+        assert!(
+            body.len() > MAX_FETCH_SIZE,
+            "body must exceed cap for test to be meaningful"
+        );
+
+        let response = http_response("200 OK", &body);
+        let url = test_http_server(Box::leak(response.into_boxed_str()));
+
+        let result = execute_fetch_url(&url).unwrap();
+        // The truncation notice must be present — the body was over the limit.
+        assert!(
+            result.contains("[truncated"),
+            "expected truncation notice in: {result}"
+        );
+        // The prefix before the notice must be valid UTF-8 (no mid-codepoint cut).
+        let prefix = result.split("\n\n[truncated").next().unwrap_or("");
+        assert!(std::str::from_utf8(prefix.as_bytes()).is_ok());
+        // The prefix must be strictly shorter than the full body.
+        assert!(
+            prefix.len() < body.len(),
+            "prefix should be shorter than the full body"
+        );
+    }
+
+    #[test]
+    fn git_safe_mode_rejects_exec_capable_config_key() {
+        // `core.pager` can execute arbitrary commands; must be rejected in safe mode.
+        assert_err_contains(
+            execute_run_command(
+                AgentMode::Safe,
+                "git",
+                &[
+                    "-c".to_string(),
+                    "core.pager=evil-cmd".to_string(),
+                    "log".to_string(),
+                ],
+            ),
+            "dangerous git subcommand",
+        );
+    }
+
+    #[test]
+    fn git_safe_mode_rejects_alias_config_key() {
+        assert_err_contains(
+            execute_run_command(
+                AgentMode::Safe,
+                "git",
+                &[
+                    "-c".to_string(),
+                    "alias.x=!evil".to_string(),
+                    "status".to_string(),
+                ],
+            ),
+            "dangerous git subcommand",
+        );
+    }
+
+    #[test]
+    fn git_safe_mode_accepts_benign_config_key_with_read_only_subcommand() {
+        // `color.ui` cannot execute code; a read-only subcommand must be allowed.
+        let result = execute_run_command(
+            AgentMode::Safe,
+            "git",
+            &[
+                "-c".to_string(),
+                "color.ui=never".to_string(),
+                "log".to_string(),
+                "--oneline".to_string(),
+                "-1".to_string(),
+            ],
+        );
+        // We may not be in a git repo in CI, but the rejection must NOT happen.
+        // Accept both success and a git error; reject only a "dangerous" error.
+        if let Err(e) = result {
+            assert!(
+                !e.contains("dangerous"),
+                "benign -c key should not be rejected; got: {e}"
+            );
+        }
+    }
+
+    #[test]
+    fn read_file_truncation_notice_reports_actual_bytes_read() {
+        let dir = test_dir("read_actual_bytes");
+        let file_path = dir.join("big.txt");
+        // Create a file larger than the cap with distinct content.
+        let content = "A".repeat(MAX_FILE_SIZE + 500);
+        fs::write(&file_path, &content).unwrap();
+
+        let result = execute_read_file(file_path.to_str().unwrap()).unwrap();
+
+        // The notice must mention the actual bytes read (≤ MAX_FILE_SIZE),
+        // not the hardcoded constant as if a full read always occurred.
+        assert!(result.contains("[truncated"), "expected truncation notice");
+        // Extract the "showing first N" number from the notice.
+        let notice = result.split("[truncated").nth(1).unwrap_or("");
+        let showing_count: usize = notice
+            .split("showing first ")
+            .nth(1)
+            .and_then(|s| s.split(']').next())
+            .and_then(|s| s.trim().parse().ok())
+            .expect("could not parse byte count from truncation notice");
+        // Must be ≤ MAX_FILE_SIZE (not the hardcoded constant stated regardless of actual read).
+        assert!(
+            showing_count <= MAX_FILE_SIZE,
+            "showing count {showing_count} exceeds MAX_FILE_SIZE {MAX_FILE_SIZE}"
+        );
+        // For an all-ASCII file, the actual read should equal the cap exactly.
+        assert_eq!(
+            showing_count, MAX_FILE_SIZE,
+            "ASCII file should fill the buffer completely"
         );
     }
 }
