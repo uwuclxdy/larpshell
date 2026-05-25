@@ -12,20 +12,23 @@ pub const fn generate_bash_autocomplete() -> &'static str {
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
     if [ $COMP_CWORD -eq 1 ]; then
-        COMPREPLY=( $(compgen -W "api agent history prompt explain uninstall --help --version" -- "$cur") )
+        COMPREPLY=( $(compgen -W "api agent history verbose prompt explain uninstall --help --version" -- "$cur") )
     elif [ $COMP_CWORD -eq 2 ]; then
         case "$prev" in
-            agent|history)
+            agent)
                 COMPREPLY=( $(compgen -W "off safe on" -- "$cur") )
                 ;;
+            history|verbose)
+                COMPREPLY=( $(compgen -W "off on" -- "$cur") )
+                ;;
             prompt)
-                COMPREPLY=( $(compgen -W "system explain" -- "$cur") )
+                COMPREPLY=( $(compgen -W "system explain agent agent-safe" -- "$cur") )
                 ;;
         esac
     elif [ $COMP_CWORD -eq 3 ]; then
         case "${COMP_WORDS[1]}" in
             prompt)
-                COMPREPLY=( $(compgen -W "show edit" -- "$cur") )
+                COMPREPLY=( $(compgen -W "show edit reset" -- "$cur") )
                 ;;
         esac
     fi
@@ -44,6 +47,7 @@ _larpshell() {
         'agent:set agent mode (off, safe, on)'
         'explain:explain a shell command'
         'history:enable or disable prompt history'
+        'verbose:enable or disable verbose agent tool output'
         'prompt:view or edit system/explain prompts'
         'uninstall:uninstall larpshell'
     )
@@ -60,7 +64,15 @@ _larpshell() {
             ;;
         args)
             case "${words[1]}" in
-                agent|history)
+                agent)
+                    local -a toggles
+                    toggles=('off:disable' 'safe:safe mode' 'on:enable')
+                    _arguments '1: :->toggle'
+                    case "$state" in
+                        toggle) _describe -t toggles 'toggle' toggles ;;
+                    esac
+                    ;;
+                history|verbose)
                     local -a toggles
                     toggles=('on:enable' 'off:disable')
                     _arguments '1: :->toggle'
@@ -70,8 +82,8 @@ _larpshell() {
                     ;;
                 prompt)
                     local -a kinds actions
-                    kinds=('system:system prompt' 'explain:explain prompt')
-                    actions=('show:show prompt' 'edit:edit prompt')
+                    kinds=('system:system prompt' 'explain:explain prompt' 'agent:agent prompt' 'agent-safe:agent safe prompt')
+                    actions=('show:show prompt' 'edit:edit prompt' 'reset:reset prompt')
                     _arguments \
                         '1: :->kind' \
                         '2: :->action'
@@ -95,15 +107,19 @@ complete -c larpshell -n "__fish_use_subcommand" -a api -d 'configure API provid
 complete -c larpshell -n "__fish_use_subcommand" -a agent -d 'set agent mode'
 complete -c larpshell -n "__fish_use_subcommand" -a explain -d 'explain a shell command'
 complete -c larpshell -n "__fish_use_subcommand" -a history -d 'enable or disable prompt history'
+complete -c larpshell -n "__fish_use_subcommand" -a verbose -d 'enable or disable verbose agent tool output'
 complete -c larpshell -n "__fish_use_subcommand" -a prompt -d 'view or edit system/explain prompts'
 complete -c larpshell -n "__fish_use_subcommand" -a uninstall -d 'uninstall larpshell'
 complete -c larpshell -l help -d 'show help information'
 complete -c larpshell -l version -d 'show version information'
 complete -c larpshell -n "__fish_seen_subcommand_from agent" -a "off safe on" -d 'set agent mode'
 complete -c larpshell -n "__fish_seen_subcommand_from history" -a "on off" -d 'toggle history'
+complete -c larpshell -n "__fish_seen_subcommand_from verbose" -a "on off" -d 'toggle verbose'
 complete -c larpshell -n "__fish_seen_subcommand_from prompt" -a system -d 'system prompt'
 complete -c larpshell -n "__fish_seen_subcommand_from prompt" -a explain -d 'explain prompt'
-complete -c larpshell -n "__fish_seen_subcommand_from prompt; and __fish_seen_subcommand_from system explain" -a "show edit" -d 'prompt action'"#
+complete -c larpshell -n "__fish_seen_subcommand_from prompt" -a agent -d 'agent prompt'
+complete -c larpshell -n "__fish_seen_subcommand_from prompt" -a agent-safe -d 'agent safe prompt'
+complete -c larpshell -n "__fish_seen_subcommand_from prompt; and __fish_seen_subcommand_from system explain agent agent-safe" -a "show edit reset" -d 'prompt action'"#
 }
 
 pub const fn generate_bash_function() -> &'static str {
@@ -114,7 +130,7 @@ pub const fn generate_bash_function() -> &'static str {
     fi
 
     case "$1" in
-        api|agent|explain|history|uninstall|prompt|--help|-h|--version|-V)
+        api|agent|explain|history|verbose|uninstall|prompt|--help|-h|--version|-V)
             command larpshell "$@"
             return $?
             ;;
@@ -142,7 +158,7 @@ pub const fn generate_fish_function() -> &'static str {
     end
 
     switch $argv[1]
-        case api explain history uninstall prompt -- help --help -h --version -V
+        case api agent explain history verbose uninstall prompt -- help --help -h --version -V
             command larpshell $argv
             return $status
     end
@@ -630,4 +646,140 @@ fn migrate_nlsh_rs_completions() -> Result<bool, LarpshellError> {
 fn migrate_nlsh_rs_zsh_comment() -> Result<bool, LarpshellError> {
     let home = home_dir();
     remove_zsh_fpath_block(&home.join(".zshrc"), "# nlsh-rs autocomplete")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bash_autocomplete_has_verbose_subcommand() {
+        let s = generate_bash_autocomplete();
+        assert!(s.contains("verbose"), "bash autocomplete missing 'verbose'");
+    }
+
+    #[test]
+    fn bash_autocomplete_history_no_safe() {
+        let s = generate_bash_autocomplete();
+        // history arm must not offer 'safe'; agent arm does
+        // The split arms now have history|verbose and agent separately
+        assert!(
+            s.contains("history|verbose)"),
+            "bash autocomplete: history and verbose should share an arm without 'safe'"
+        );
+        assert!(
+            !s.contains(
+                "history|verbose)\n                COMPREPLY=( $(compgen -W \"off safe on\""
+            ),
+            "bash autocomplete: history arm must not offer 'safe'"
+        );
+    }
+
+    #[test]
+    fn bash_autocomplete_prompt_has_agent_kinds() {
+        let s = generate_bash_autocomplete();
+        assert!(
+            s.contains("agent agent-safe"),
+            "bash autocomplete: prompt completions missing 'agent' and 'agent-safe'"
+        );
+    }
+
+    #[test]
+    fn bash_autocomplete_prompt_action_has_reset() {
+        let s = generate_bash_autocomplete();
+        assert!(
+            s.contains("show edit reset"),
+            "bash autocomplete: prompt action completions missing 'reset'"
+        );
+    }
+
+    #[test]
+    fn zsh_autocomplete_has_verbose_subcommand() {
+        let s = generate_zsh_autocomplete();
+        assert!(s.contains("verbose"), "zsh autocomplete missing 'verbose'");
+    }
+
+    #[test]
+    fn zsh_autocomplete_agent_has_safe() {
+        let s = generate_zsh_autocomplete();
+        assert!(
+            s.contains("safe:safe mode"),
+            "zsh autocomplete: agent arm missing 'safe' toggle"
+        );
+    }
+
+    #[test]
+    fn zsh_autocomplete_prompt_has_agent_kinds() {
+        let s = generate_zsh_autocomplete();
+        assert!(
+            s.contains("agent:agent prompt"),
+            "zsh autocomplete: prompt kinds missing 'agent'"
+        );
+        assert!(
+            s.contains("agent-safe:agent safe prompt"),
+            "zsh autocomplete: prompt kinds missing 'agent-safe'"
+        );
+    }
+
+    #[test]
+    fn zsh_autocomplete_prompt_action_has_reset() {
+        let s = generate_zsh_autocomplete();
+        assert!(
+            s.contains("reset:reset prompt"),
+            "zsh autocomplete: prompt action missing 'reset'"
+        );
+    }
+
+    #[test]
+    fn fish_autocomplete_has_verbose_subcommand() {
+        let s = generate_fish_autocomplete();
+        assert!(
+            s.contains("-a verbose"),
+            "fish autocomplete missing 'verbose'"
+        );
+    }
+
+    #[test]
+    fn fish_autocomplete_prompt_has_agent_kinds() {
+        let s = generate_fish_autocomplete();
+        assert!(
+            s.contains("-a agent -d 'agent prompt'"),
+            "fish autocomplete: prompt completions missing 'agent'"
+        );
+        assert!(
+            s.contains("-a agent-safe"),
+            "fish autocomplete: prompt completions missing 'agent-safe'"
+        );
+    }
+
+    #[test]
+    fn fish_autocomplete_prompt_action_has_reset() {
+        let s = generate_fish_autocomplete();
+        assert!(
+            s.contains("show edit reset"),
+            "fish autocomplete: prompt actions missing 'reset'"
+        );
+    }
+
+    #[test]
+    fn bash_function_has_verbose_passthrough() {
+        let s = generate_bash_function();
+        assert!(
+            s.contains("verbose"),
+            "bash wrapper function missing 'verbose' passthrough"
+        );
+    }
+
+    #[test]
+    fn fish_function_has_verbose_and_agent_passthroughs() {
+        let s = generate_fish_function();
+        assert!(
+            s.contains("verbose"),
+            "fish wrapper function missing 'verbose' passthrough"
+        );
+        assert!(
+            s.contains("agent"),
+            "fish wrapper function missing 'agent' passthrough"
+        );
+    }
 }
