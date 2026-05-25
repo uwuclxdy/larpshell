@@ -15,8 +15,9 @@ mod slash_commands;
 mod uninstall;
 mod update;
 
-use std::io::{IsTerminal, Read};
+use std::io::IsTerminal;
 use std::process::ExitCode;
+use tokio::io::AsyncReadExt;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
@@ -138,7 +139,9 @@ fn setup_environment() {
         colored::control::set_override(true);
     }
 
-    create_prompts().ok();
+    if let Err(error) = create_prompts() {
+        print_warning(&format!("failed to create prompt files: {error}"));
+    }
 
     if !validate_sys_prompt(
         config::load_sys_prompt()
@@ -199,7 +202,7 @@ fn select_run_mode(command: &[String]) -> RunMode {
 
 async fn run_piped(runtime: &mut Runtime) -> Result<(), LarpshellError> {
     let mut buf = String::new();
-    std::io::stdin().read_to_string(&mut buf)?;
+    tokio::io::stdin().read_to_string(&mut buf).await?;
     let input = buf.trim();
 
     if input.is_empty() {
@@ -641,7 +644,11 @@ fn reset_prompt(spec: &PromptSpec) -> Result<(), LarpshellError> {
     if path.exists() {
         let bak = path.with_extension(path.extension().map_or_else(
             || "bak".to_string(),
-            |ext| format!("{ext}.bak", ext = ext.to_string_lossy()),
+            |ext| {
+                let mut s = ext.to_string_lossy().into_owned();
+                s.push_str(".bak");
+                s
+            },
         ));
         std::fs::rename(&path, &bak).map_err(LarpshellError::IoError)?;
         (spec.save)(spec.default)?;
