@@ -24,64 +24,36 @@ struct V1Config {
     providers: MultiProviderConfig,
 }
 
-type MigrationResult = Result<String, LarpshellError>;
-
-trait Migrator {
-    fn can_migrate(&self, content: &str) -> bool;
-    fn migrate(&self, content: &str) -> MigrationResult;
+fn can_migrate_config(content: &str) -> bool {
+    content.contains("[provider]") && content.contains("type = ")
 }
 
-struct ConfigMigrator;
+fn migrate_config_content(content: &str) -> Result<String, LarpshellError> {
+    let old_config: V1Config = toml::from_str(content)?;
 
-impl Migrator for ConfigMigrator {
-    fn can_migrate(&self, content: &str) -> bool {
-        content.contains("[provider]") && content.contains("type = ")
-    }
+    let active_provider = match old_config.provider.provider_type.as_str() {
+        "gemini" => ActiveProvider::Gemini,
+        "ollama" => ActiveProvider::Ollama,
+        "openai" => ActiveProvider::OpenAI,
+        other => {
+            return Err(LarpshellError::ConfigError(format!(
+                "unknown provider type in config: {other}"
+            )));
+        }
+    };
 
-    fn migrate(&self, content: &str) -> MigrationResult {
-        let old_config: V1Config = toml::from_str(content)?;
+    let new_config = Config {
+        active_provider,
+        providers: old_config.providers,
+        agent: AgentMode::Off,
+        verbose_tool_output: true,
+    };
 
-        let active_provider = match old_config.provider.provider_type.as_str() {
-            "gemini" => ActiveProvider::Gemini,
-            "ollama" => ActiveProvider::Ollama,
-            "openai" => ActiveProvider::OpenAI,
-            other => {
-                return Err(LarpshellError::ConfigError(format!(
-                    "unknown provider type in config: {other}"
-                )));
-            }
-        };
-
-        let new_config = Config {
-            active_provider,
-            providers: old_config.providers,
-            agent: AgentMode::Off,
-            verbose_tool_output: true,
-        };
-
-        let new_content = toml::to_string_pretty(&new_config)?;
-        Ok(new_content)
-    }
+    Ok(toml::to_string_pretty(&new_config)?)
 }
 
-fn migrators() -> Vec<Box<dyn Migrator>> {
-    vec![Box::new(ConfigMigrator)]
-}
-
-struct ExplainPromptMigrator;
-
-impl Migrator for ExplainPromptMigrator {
-    fn can_migrate(&self, content: &str) -> bool {
-        matches!(content, OLD_EXPLAIN_PROMPT_V1 | OLD_EXPLAIN_PROMPT_V2)
-    }
-
-    fn migrate(&self, _content: &str) -> MigrationResult {
-        Ok(DEFAULT_EXPLAIN_PROMPT.to_string())
-    }
-}
-
-fn explain_prompt_migrators() -> Vec<Box<dyn Migrator>> {
-    vec![Box::new(ExplainPromptMigrator)]
+fn can_migrate_explain_prompt(content: &str) -> bool {
+    matches!(content, OLD_EXPLAIN_PROMPT_V1 | OLD_EXPLAIN_PROMPT_V2)
 }
 
 pub fn migrate_explain_prompt() -> Result<bool, LarpshellError> {
@@ -92,14 +64,10 @@ pub fn migrate_explain_prompt() -> Result<bool, LarpshellError> {
     }
 
     let content = fs::read_to_string(&explain_prompt_path)?;
-    let migrators = explain_prompt_migrators();
 
-    for migrator in migrators {
-        if migrator.can_migrate(&content) {
-            let new_content = migrator.migrate(&content)?;
-            atomic_write(&explain_prompt_path, &new_content)?;
-            return Ok(true);
-        }
+    if can_migrate_explain_prompt(&content) {
+        atomic_write(&explain_prompt_path, DEFAULT_EXPLAIN_PROMPT)?;
+        return Ok(true);
     }
 
     Ok(false)
@@ -107,14 +75,11 @@ pub fn migrate_explain_prompt() -> Result<bool, LarpshellError> {
 
 pub fn migrate_config(config_path: &Path) -> Result<bool, LarpshellError> {
     let content = fs::read_to_string(config_path)?;
-    let migrators = migrators();
 
-    for migrator in migrators {
-        if migrator.can_migrate(&content) {
-            let new_content = migrator.migrate(&content)?;
-            atomic_write(config_path, &new_content)?;
-            return Ok(true);
-        }
+    if can_migrate_config(&content) {
+        let new_content = migrate_config_content(&content)?;
+        atomic_write(config_path, &new_content)?;
+        return Ok(true);
     }
 
     Ok(false)
