@@ -279,12 +279,12 @@ pub fn prompt_select(
         .unwrap_or(default))
 }
 
-pub fn prompt_input(prompt: &str) -> Result<String, LarpshellError> {
-    Ok(Text::new(prompt).prompt()?)
-}
-
-pub fn prompt_input_with_default(prompt: &str, default: &str) -> Result<String, LarpshellError> {
-    Ok(Text::new(prompt).with_default(default).prompt()?)
+pub fn prompt_input(prompt: &str, default: Option<&str>) -> Result<String, LarpshellError> {
+    let mut text = Text::new(prompt);
+    if let Some(d) = default {
+        text = text.with_default(d);
+    }
+    Ok(text.prompt()?)
 }
 
 pub fn home_dir() -> PathBuf {

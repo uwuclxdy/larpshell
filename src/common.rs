@@ -220,10 +220,6 @@ pub fn count_visual_lines(text: &str, width: usize) -> usize {
         .sum()
 }
 
-pub fn exit_with_code(code: i32) -> ! {
-    std::process::exit(code);
-}
-
 /// sets up terminal to hide control characters.
 #[cfg(unix)]
 pub fn setup_terminal() {

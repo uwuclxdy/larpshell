@@ -3,7 +3,7 @@ use colored::Colorize;
 use crate::cli::is_interactive_terminal;
 use crate::common::{
     ANSI_CLEAR_LINE, CTP_BLUE, CTP_GREEN, CTP_PRIMARY, CTP_RED, CTP_TEXT, CTP_YELLOW, EXIT_SIGINT,
-    clear_n_lines, count_visual_lines, exit_with_code, flush_stderr, show_cursor, terminal_width,
+    clear_n_lines, count_visual_lines, flush_stderr, show_cursor, terminal_width,
 };
 
 pub enum ConfirmResult {
@@ -482,7 +482,7 @@ pub fn confirm_from_reader(
             KeyEvent::CtrlC => {
                 clear_n_lines(lines_to_clear);
                 show_cursor();
-                exit_with_code(EXIT_SIGINT);
+                std::process::exit(EXIT_SIGINT);
             }
             KeyEvent::Eof => {
                 clear_n_lines(lines_to_clear);

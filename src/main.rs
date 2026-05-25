@@ -28,8 +28,7 @@ use colored::Colorize;
 #[cfg(unix)]
 use common::setup_terminal;
 use common::{
-    CTP_BLUE, CTP_OVERLAY0, EXIT_SIGINT, clear_line, eprint_flush, exit_with_code, hide_cursor,
-    show_cursor,
+    CTP_BLUE, CTP_OVERLAY0, EXIT_SIGINT, clear_line, eprint_flush, hide_cursor, show_cursor,
 };
 use config::{AgentMode, Config, interactive_setup, load_config};
 use confirmation::style_message_markup;
@@ -182,7 +181,7 @@ fn try_auto_install_shell() {
         print_warning(
             "restart shell or run 'source ~/.bashrc' ('source ~/.config/fish/config.fish' for fish).",
         );
-        exit_with_code(0);
+        std::process::exit(0);
     }
 }
 
@@ -274,7 +273,7 @@ async fn run_repl(runtime: &mut Runtime) -> Result<(), LarpshellError> {
 
     runtime.finish_update().await;
     if sigint_exit {
-        exit_with_code(EXIT_SIGINT);
+        std::process::exit(EXIT_SIGINT);
     }
     Ok(())
 }
@@ -833,7 +832,7 @@ async fn generate_single_shot(
             common::restore_terminal_echo(saved);
         }
         update::print_if_resolved();
-        exit_with_code(EXIT_SIGINT);
+        std::process::exit(EXIT_SIGINT);
     });
 
     let result = provider.generate(prompt).await;
@@ -902,7 +901,7 @@ async fn confirm_loop(
 fn exit_on_sigint() -> ! {
     show_cursor();
     update::print_if_resolved();
-    exit_with_code(EXIT_SIGINT);
+    std::process::exit(EXIT_SIGINT);
 }
 
 fn execute_or_print(command: &str) -> Result<(), LarpshellError> {

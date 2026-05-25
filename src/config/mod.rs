@@ -4,9 +4,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::cli::{
-    print_error, print_ok_bold, prompt_input, prompt_input_with_default, prompt_select,
-};
+use crate::cli::{print_error, print_ok_bold, prompt_input, prompt_select};
 use crate::common::{CTP_GREEN, clear_line};
 use crate::confirmation::style_message_markup;
 use crate::error::LarpshellError;
@@ -537,7 +535,7 @@ fn configure_gemini(existing: Option<&GeminiConfig>) -> Result<ProviderConfig, L
 
 fn configure_ollama(existing: Option<&OllamaConfig>) -> Result<ProviderConfig, LarpshellError> {
     let url_default = existing.map_or("http://localhost:11434", |e| e.base_url.as_str());
-    let base_url = prompt_input_with_default("Ollama base URL", url_default)?;
+    let base_url = prompt_input("Ollama base URL", Some(url_default))?;
 
     let model = prompt_model_name(existing.map(|e| e.model.as_str()))?;
 
@@ -553,7 +551,7 @@ fn configure_openrouter(
     existing: Option<&OpenRouterConfig>,
 ) -> Result<ProviderConfig, LarpshellError> {
     let url_default = existing.map_or("https://openrouter.ai/api/v1", |e| e.base_url.as_str());
-    let base_url = prompt_input_with_default("OpenRouter base URL", url_default)?;
+    let base_url = prompt_input("OpenRouter base URL", Some(url_default))?;
 
     let api_key = prompt_optional_api_key(
         "OpenRouter API key",
@@ -562,7 +560,7 @@ fn configure_openrouter(
     )?;
 
     let model_default = existing.map_or("openrouter/auto", |e| e.model.as_str());
-    let model = prompt_input_with_default("Model name", model_default)?;
+    let model = prompt_input("Model name", Some(model_default))?;
 
     Ok(ProviderConfig {
         provider_type: ActiveProvider::OpenRouter,
@@ -578,7 +576,7 @@ fn configure_openrouter(
 
 fn configure_openai(existing: Option<&OpenAIConfig>) -> Result<ProviderConfig, LarpshellError> {
     let url_default = existing.map_or("https://api.openai.com/v1", |e| e.base_url.as_str());
-    let base_url = prompt_input_with_default("API base URL", url_default)?;
+    let base_url = prompt_input("API base URL", Some(url_default))?;
 
     let api_key = prompt_optional_api_key(
         "API key (optional for local servers)",
@@ -612,7 +610,7 @@ fn prompt_api_key(label: &str, saved: Option<&str>) -> Result<String, LarpshellE
         }
         Ok(input)
     } else {
-        Ok(prompt_input(label)?)
+        Ok(prompt_input(label, None)?)
     }
 }
 
@@ -642,11 +640,7 @@ fn prompt_optional_api_key(
 
 fn prompt_model_name(default: Option<&str>) -> Result<String, LarpshellError> {
     loop {
-        let model = if let Some(def) = default {
-            prompt_input_with_default("Model name:", def)?
-        } else {
-            prompt_input("Model name:")?
-        };
+        let model = prompt_input("Model name:", default)?;
 
         if !model.trim().is_empty() {
             return Ok(model);
