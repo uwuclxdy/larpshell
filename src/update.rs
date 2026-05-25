@@ -72,15 +72,6 @@ pub async fn is_update_available() -> bool {
     available
 }
 
-/// Prints the update notice if the background check has already completed and
-/// found a newer version. Safe to call from any context — no-ops if the result
-/// is not yet available.
-pub fn print_if_resolved() {
-    if *UPDATE_RESULT.get().unwrap_or(&false) {
-        print_notice();
-    }
-}
-
 fn print_notice() {
     let mut msg = "update available".to_string();
     msg.push_str(update_instruction());

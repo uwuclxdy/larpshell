@@ -4,10 +4,9 @@ use crate::cli::is_interactive_terminal;
 #[cfg(unix)]
 use crate::common::RawModeGuard;
 use crate::common::{
-    ANSI_CLEAR_LINE, CTP_BLUE, CTP_GREEN, CTP_PRIMARY, CTP_RED, CTP_TEXT, CTP_YELLOW, EXIT_SIGINT,
+    ANSI_CLEAR_LINE, CTP_BLUE, CTP_GREEN, CTP_PRIMARY, CTP_RED, CTP_TEXT, CTP_YELLOW,
     clear_n_lines, count_visual_lines, flush_stderr, show_cursor, terminal_width,
 };
-use crate::update;
 
 pub enum ConfirmResult {
     Yes,
@@ -311,27 +310,31 @@ fn strip_markdown_links(text: &str) -> String {
     let mut stripped = String::new();
     let mut index = 0;
 
-    while index < bytes.len() {
-        if bytes[index] == b'!'
-            && index + 1 < bytes.len()
-            && bytes[index + 1] == b'['
-            && let Some((label, next_index)) = parse_markdown_link(text, index + 1)
+    for (char_index, ch) in text.char_indices() {
+        if char_index < index {
+            continue;
+        }
+
+        if bytes[char_index] == b'!'
+            && char_index + 1 < bytes.len()
+            && bytes[char_index + 1] == b'['
+            && let Some((label, next_index)) = parse_markdown_link(text, char_index + 1)
         {
             stripped.push_str(label);
             index = next_index;
             continue;
         }
 
-        if bytes[index] == b'['
-            && let Some((label, next_index)) = parse_markdown_link(text, index)
+        if bytes[char_index] == b'['
+            && let Some((label, next_index)) = parse_markdown_link(text, char_index)
         {
             stripped.push_str(label);
             index = next_index;
             continue;
         }
 
-        stripped.push(bytes[index] as char);
-        index += 1;
+        stripped.push(ch);
+        index = char_index + ch.len_utf8();
     }
 
     stripped
@@ -474,8 +477,7 @@ pub fn confirm_from_reader(
             KeyEvent::CtrlC => {
                 clear_n_lines(lines_to_clear);
                 show_cursor();
-                update::print_if_resolved();
-                std::process::exit(EXIT_SIGINT);
+                return ConfirmResult::Cancel;
             }
             KeyEvent::Eof => {
                 clear_n_lines(lines_to_clear);

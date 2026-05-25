@@ -92,6 +92,13 @@ fn style_message_markup_drops_rules_and_fences() {
 }
 
 #[test]
+fn style_message_markup_preserves_non_ascii_outside_links() {
+    // Multi-byte sequences (em-dash, CJK) must survive strip_markdown_links intact.
+    let result = style_message_markup_for_test("café — 日本語 [label](url)", false);
+    assert_eq!(result, "café — 日本語 label");
+}
+
+#[test]
 fn parse_key_from_reader_maps_enter() {
     let mut input = std::io::Cursor::new(b"\n");
     assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::Enter));

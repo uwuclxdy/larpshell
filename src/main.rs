@@ -84,6 +84,9 @@ enum SlashOutcome {
 async fn main() -> ExitCode {
     match run().await {
         Ok(()) => ExitCode::SUCCESS,
+        // Runtime (and its MCP children) has already dropped by the time run()
+        // returns, so it is safe to exit with the signal code here.
+        Err(LarpshellError::Cancelled) => std::process::exit(EXIT_SIGINT),
         Err(error) => {
             error.print();
             ExitCode::FAILURE
@@ -170,8 +173,12 @@ fn do_nlsh_rs_migration() {
         return;
     }
 
-    config::migrate_from_nlsh_rs().ok();
-    migrate_nlsh_rs_shell().ok();
+    if let Err(error) = config::migrate_from_nlsh_rs() {
+        print_warning(&format!("nlsh-rs config migration failed: {error}"));
+    }
+    if let Err(error) = migrate_nlsh_rs_shell() {
+        print_warning(&format!("nlsh-rs shell migration failed: {error}"));
+    }
 
     std::process::Command::new("cargo")
         .args(["uninstall", "nlsh-rs"])
@@ -824,30 +831,34 @@ async fn generate_with_cancellation(
     result
 }
 
-/// In single-command mode, Ctrl-C exits the process immediately with
-/// `EXIT_SIGINT` after restoring the terminal and printing any pending update.
+/// In single-command mode, Ctrl-C cancels generation and returns
+/// `LarpshellError::Cancelled` so the caller can drop `Runtime` (and with it
+/// any MCP children) before exiting with `EXIT_SIGINT`.
 async fn generate_single_shot(
     provider: &dyn AIProvider,
     prompt: &str,
 ) -> Result<String, LarpshellError> {
     #[cfg(unix)]
     let saved_echo = common::disable_terminal_echo();
-    #[cfg(unix)]
-    let saved_for_ctrlc = saved_echo.clone();
 
+    let cancel_token = CancellationToken::new();
+    let cancel_clone = cancel_token.clone();
     let ctrl_c = tokio::spawn(async move {
         tokio::signal::ctrl_c().await.ok();
-        eprintln!();
-        #[cfg(unix)]
-        if let Some(saved) = saved_for_ctrlc.as_ref() {
-            common::restore_terminal_echo(saved);
-        }
-        update::print_if_resolved();
-        std::process::exit(EXIT_SIGINT);
+        cancel_clone.cancel();
     });
 
-    let result = provider.generate(prompt).await;
-    ctrl_c.abort();
+    let result = tokio::select! {
+        res = provider.generate(prompt) => {
+            ctrl_c.abort();
+            res
+        }
+        () = cancel_token.cancelled() => {
+            ctrl_c.abort();
+            Err(LarpshellError::Cancelled)
+        }
+    };
+
     clear_line();
     show_cursor();
     #[cfg(unix)]
@@ -876,7 +887,7 @@ async fn confirm_loop(
             ConfirmResult::No => break 'outer false,
             ConfirmResult::Cancel => match mode {
                 CommandMode::Interactive => break 'outer true,
-                CommandMode::Single => exit_on_sigint(),
+                CommandMode::Single => return Err(LarpshellError::Cancelled),
             },
             ConfirmResult::Edit => {
                 if let Some(new_cmd) = edit_command(&command) {
@@ -896,7 +907,7 @@ async fn confirm_loop(
                     ConfirmResult::Explain => unreachable!(),
                     ConfirmResult::Cancel => match mode {
                         CommandMode::Interactive => break 'outer true,
-                        CommandMode::Single => exit_on_sigint(),
+                        CommandMode::Single => return Err(LarpshellError::Cancelled),
                     },
                     ConfirmResult::Edit => {
                         if let Some(new_cmd) = edit_command(&command) {
@@ -909,12 +920,6 @@ async fn confirm_loop(
     };
 
     Ok(cancelled.then(|| user_input.to_string()))
-}
-
-fn exit_on_sigint() -> ! {
-    show_cursor();
-    update::print_if_resolved();
-    std::process::exit(EXIT_SIGINT);
 }
 
 fn execute_or_print(command: &str) -> Result<(), LarpshellError> {
