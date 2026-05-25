@@ -5,6 +5,7 @@ use crate::common::{
     ANSI_CLEAR_LINE, CTP_BLUE, CTP_GREEN, CTP_PRIMARY, CTP_RED, CTP_TEXT, CTP_YELLOW, EXIT_SIGINT,
     clear_n_lines, count_visual_lines, flush_stderr, show_cursor, terminal_width,
 };
+use crate::update;
 
 pub enum ConfirmResult {
     Yes,
@@ -39,6 +40,8 @@ pub enum KeyEvent {
 /// terminals and plain pipes (e.g. during tests with piped stdin).
 pub fn parse_key_from_reader(reader: &mut impl std::io::Read) -> KeyEvent {
     let mut key_byte = [0u8; 1];
+    // I/O errors on a raw terminal (broken pipe, disconnected pty) are
+    // indistinguishable from EOF in practice; treat both as EOF.
     if reader.read(&mut key_byte).unwrap_or(0) == 0 {
         return KeyEvent::Eof;
     }
@@ -482,6 +485,7 @@ pub fn confirm_from_reader(
             KeyEvent::CtrlC => {
                 clear_n_lines(lines_to_clear);
                 show_cursor();
+                update::print_if_resolved();
                 std::process::exit(EXIT_SIGINT);
             }
             KeyEvent::Eof => {

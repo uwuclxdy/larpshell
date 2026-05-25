@@ -40,8 +40,8 @@ use error::LarpshellError;
 use interactive::{user_input, user_input_prefilled};
 use prompt::{
     DEFAULT_AGENT_PROMPT, DEFAULT_AGENT_SAFE_PROMPT, DEFAULT_EXPLAIN_PROMPT,
-    DEFAULT_PROMPT_TEMPLATE, clean_response, create_explain_prompt, create_prompts,
-    create_system_prompt, validate_explain_prompt, validate_sys_prompt,
+    DEFAULT_PROMPT_TEMPLATE, create_explain_prompt, create_prompts, create_system_prompt,
+    normalize_model_output, validate_explain_prompt, validate_sys_prompt,
 };
 use providers::{AIProvider, create_provider};
 use shell_integration::{auto_setup_shell_function, migrate_nlsh_rs_shell};
@@ -716,7 +716,7 @@ async fn process_command(
         CommandMode::Single => generate_single_shot(provider, &prompt).await?,
     };
 
-    let command = clean_response(&response);
+    let command = normalize_model_output(&response);
     if command.trim().is_empty() {
         return Err(LarpshellError::EmptyResponse(provider.name()));
     }
@@ -771,7 +771,7 @@ async fn process_command_agent(
 
     match response.kind {
         agent::FinalResponseKind::Command => {
-            let command = clean_response(&response.content);
+            let command = normalize_model_output(&response.content);
             if command.trim().is_empty() {
                 return Err(LarpshellError::EmptyResponse(provider.name()));
             }

@@ -83,11 +83,7 @@ pub fn os_name() -> Cow<'static, str> {
 pub fn shell_name() -> String {
     env::var("SHELL")
         .ok()
-        .and_then(|s| {
-            s.split('/')
-                .next_back()
-                .map(std::string::ToString::to_string)
-        })
+        .and_then(|s| s.split('/').next_back().map(str::to_string))
         .unwrap_or_else(|| "sh".to_string())
 }
 

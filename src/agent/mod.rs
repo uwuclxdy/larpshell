@@ -293,7 +293,7 @@ fn parse_final_response(text: &str) -> FinalResponse {
         }
     }
 
-    let content = crate::prompt::clean_response(trimmed);
+    let content = crate::prompt::normalize_model_output(trimmed);
     FinalResponse {
         kind: FinalResponseKind::Message,
         message: Some(content.clone()),

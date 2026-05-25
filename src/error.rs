@@ -56,13 +56,13 @@ pub enum LarpshellError {
     #[error("agent reached maximum iterations ({0}) without producing a final response")]
     AgentMaxIterations(usize),
 
-    #[error("no command provided.")]
+    #[error("no command provided")]
     NoCommandProvided,
 
-    #[error("failed to generate a valid explanation.")]
+    #[error("failed to generate a valid explanation")]
     EmptyExplanation,
 
-    #[error("no API provider configured.")]
+    #[error("no API provider configured")]
     NoProviderConfigured,
 
     #[error("unknown command '{0}'")]

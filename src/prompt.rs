@@ -137,7 +137,7 @@ pub fn parse_labeled_response(text: &str) -> ParsedLabeledResponse {
     }
 }
 
-fn normalize_model_output(text: &str) -> String {
+pub fn normalize_model_output(text: &str) -> String {
     let stripped = strip_fence(text);
     let parsed = parse_labeled_response(stripped);
 
@@ -150,10 +150,6 @@ fn normalize_model_output(text: &str) -> String {
     }
 
     stripped.trim().to_string()
-}
-
-pub fn clean_response(response: &str) -> String {
-    normalize_model_output(response)
 }
 
 pub fn clean_explanation(response: &str, command: &str) -> String {
@@ -289,14 +285,14 @@ mod tests {
     }
 
     #[test]
-    fn clean_response_extracts_prefixed_command_from_fenced_block() {
-        let result = clean_response("```bash\nCOMMAND: ls -la\n```");
+    fn normalize_model_output_extracts_prefixed_command_from_fenced_block() {
+        let result = normalize_model_output("```bash\nCOMMAND: ls -la\n```");
         assert_eq!(result, "ls -la");
     }
 
     #[test]
-    fn clean_response_extracts_command_after_leading_prose() {
-        let result = clean_response("Here is the command:\nCOMMAND: ls -la");
+    fn normalize_model_output_extracts_command_after_leading_prose() {
+        let result = normalize_model_output("Here is the command:\nCOMMAND: ls -la");
         assert_eq!(result, "ls -la");
     }
 
@@ -361,8 +357,8 @@ mod tests {
     }
 
     #[test]
-    fn clean_response_prefers_command_when_both_labels_exist() {
-        let result = clean_response("MESSAGE: note\nCOMMAND: echo hello\necho world");
+    fn normalize_model_output_prefers_command_when_both_labels_exist() {
+        let result = normalize_model_output("MESSAGE: note\nCOMMAND: echo hello\necho world");
         assert_eq!(result, "echo hello\necho world");
     }
 }

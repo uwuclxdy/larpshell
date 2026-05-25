@@ -82,11 +82,11 @@ pub fn print_if_resolved() {
 }
 
 fn print_notice() {
+    let mut msg = "update available".to_string();
+    msg.push_str(update_instruction());
     eprintln!(
         "{}",
-        style_message_markup(&format!("update available{}", update_instruction()))
-            .custom_color(CTP_PRIMARY)
-            .bold()
+        style_message_markup(&msg).custom_color(CTP_PRIMARY).bold()
     );
 }
 
