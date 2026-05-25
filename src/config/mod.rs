@@ -394,7 +394,7 @@ pub fn interactive_setup() -> Result<(), LarpshellError> {
         agent: existing_config.as_ref().map_or(AgentMode::Off, |c| c.agent),
         verbose_tool_output: existing_config
             .as_ref()
-            .map_or(true, |c| c.verbose_tool_output),
+            .is_none_or(|c| c.verbose_tool_output),
     };
 
     save_config(&config)?;
