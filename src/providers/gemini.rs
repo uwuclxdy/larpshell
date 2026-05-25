@@ -152,13 +152,8 @@ impl GeminiProvider {
             .first()
             .ok_or_else(|| LarpshellError::InvalidResponse("empty candidates list".to_string()))?;
 
-        if let Some(finish_reason) = &candidate.finish_reason
-            && (finish_reason == "SAFETY" || finish_reason == "RECITATION")
-        {
-            let reason = finish_reason.to_lowercase();
-            return Err(LarpshellError::InvalidResponse(format!(
-                "content blocked by gemini: {reason}"
-            )));
+        if let Some(err) = Self::check_blocked(candidate) {
+            return Err(err);
         }
 
         let content = candidate
@@ -273,6 +268,18 @@ impl GeminiProvider {
         })
     }
 
+    fn check_blocked(candidate: &Candidate) -> Option<LarpshellError> {
+        let reason = candidate.finish_reason.as_deref()?;
+        if matches!(reason, "SAFETY" | "RECITATION") {
+            Some(LarpshellError::InvalidResponse(format!(
+                "content blocked by gemini: {}",
+                reason.to_lowercase()
+            )))
+        } else {
+            None
+        }
+    }
+
     fn extract_tool_parts(candidate: &Candidate) -> Result<&Vec<Part>, LarpshellError> {
         candidate
             .content
@@ -309,6 +316,10 @@ impl GeminiProvider {
         let candidate = candidates
             .first()
             .ok_or_else(|| LarpshellError::InvalidResponse("empty candidates list".to_string()))?;
+
+        if let Some(err) = Self::check_blocked(candidate) {
+            return Err(err);
+        }
 
         let parts = Self::extract_tool_parts(candidate)?;
         let tool_calls = Self::extract_tool_calls(parts);
@@ -417,5 +428,25 @@ mod tests {
             .unwrap()[0];
         assert_eq!(part.text.as_deref(), Some("echo hello"));
         assert!(part.function_call.is_none());
+    }
+
+    #[test]
+    fn extract_chat_response_safety_block_returns_blocked_error() {
+        let json = r#"{
+            "candidates": [{
+                "finishReason": "SAFETY"
+            }]
+        }"#;
+        let response: GeminiResponse = serde_json::from_str(json).unwrap();
+        let err = GeminiProvider::extract_chat_response(response).unwrap_err();
+        match err {
+            LarpshellError::InvalidResponse(msg) => {
+                assert!(
+                    msg.contains("content blocked by gemini") && msg.contains("safety"),
+                    "unexpected error message: {msg}"
+                );
+            }
+            other => panic!("expected InvalidResponse, got {other:?}"),
+        }
     }
 }
