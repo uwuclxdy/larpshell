@@ -1,4 +1,4 @@
-use crate::common::{current_directory, os_name, shell_name, username};
+use crate::common::{current_directory, home_dir, os_name, shell_name, username};
 use crate::config::{
     agent_prompt_path, agent_safe_prompt_path, explain_prompt_path, save_agent_prompt,
     save_agent_safe_prompt, save_explain_prompt, save_sys_prompt, sys_prompt_path,
@@ -11,7 +11,7 @@ pub fn create_system_prompt(user_request: &str, template: Option<&str>) -> Strin
     let cwd = current_directory();
     let os = os_name();
     let shell = shell_name();
-    let home = dirs::home_dir().map_or_else(|| "~".to_string(), |p| p.display().to_string());
+    let home = home_dir().display().to_string();
     let user = username();
 
     let tmpl = template.unwrap_or(DEFAULT_PROMPT_TEMPLATE);

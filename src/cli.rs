@@ -1,8 +1,8 @@
 use colored::Colorize;
 use inquire::{Select, Text};
 use std::env;
+use std::fs::OpenOptions;
 use std::io::IsTerminal;
-use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -228,6 +228,12 @@ pub fn execute_shell_command_unlocked(command: &str) -> Result<(), LarpshellErro
     // to the parent process.
     let seq = CWD_FILE_COUNTER.fetch_add(1, Ordering::Relaxed);
     let cwd_file = env::temp_dir().join(format!(".larpshell_cwd_{}_{}", std::process::id(), seq));
+    // Create exclusively (O_EXCL) so a pre-planted symlink is never followed —
+    // if the path already exists the open fails rather than writing through it.
+    OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&cwd_file)?;
     let script = format!(
         "{trimmed}\n__larpshell_rc=$?\npwd > {cwd_path}\nexit $__larpshell_rc",
         cwd_path = cwd_file.display(),
@@ -284,9 +290,4 @@ pub fn prompt_input(prompt: &str, default: Option<&str>) -> Result<String, Larps
     Ok(text.prompt()?)
 }
 
-pub fn home_dir() -> PathBuf {
-    env::var("HOME")
-        .ok()
-        .or_else(|| env::var("USERPROFILE").ok())
-        .map_or_else(|| PathBuf::from("~"), PathBuf::from)
-}
+pub use crate::common::home_dir;

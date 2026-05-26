@@ -2,6 +2,7 @@ use std::borrow::Cow;
 use std::env;
 use std::fs;
 use std::io;
+use std::path::PathBuf;
 use std::process::Command;
 use std::sync::LazyLock;
 
@@ -54,17 +55,22 @@ pub const ANSI_HIDE_CURSOR: &str = "\x1b[?25l";
 pub const ANSI_CLEAR_LINE: &str = "\r\x1b[K";
 pub const ANSI_CURSOR_UP_CLEAR: &str = "\x1b[1A\r\x1b[K";
 
+pub fn home_dir() -> PathBuf {
+    env::var("HOME")
+        .ok()
+        .or_else(|| env::var("USERPROFILE").ok())
+        .map_or_else(|| PathBuf::from("~"), PathBuf::from)
+}
+
 pub fn current_directory() -> String {
     env::current_dir().map_or_else(|_| "/".to_string(), |p| p.display().to_string())
 }
 
 pub fn current_directory_display() -> String {
     let cwd = current_directory();
-    if let Some(home) = dirs::home_dir() {
-        let home_str = home.display().to_string();
-        if let Some(rel) = cwd.strip_prefix(&home_str) {
-            return format!("~{rel}");
-        }
+    let home_str = home_dir().display().to_string();
+    if let Some(rel) = cwd.strip_prefix(&home_str) {
+        return format!("~{rel}");
     }
     cwd
 }

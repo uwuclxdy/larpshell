@@ -1,3 +1,4 @@
+use crate::common::home_dir;
 use crate::config::AgentMode;
 use crate::providers::ToolDefinition;
 use grep_regex::RegexMatcherBuilder;
@@ -714,9 +715,8 @@ fn execute_run_command(
 }
 
 fn expand_tilde(path: &str) -> Cow<'_, str> {
-    if path.starts_with('~')
-        && let Some(home) = dirs::home_dir()
-    {
+    if path.starts_with('~') {
+        let home = home_dir();
         let remaining = path.strip_prefix('~').unwrap_or("");
         let remaining = remaining.strip_prefix('/').unwrap_or(remaining);
         return Cow::Owned(home.join(remaining).to_string_lossy().into_owned());
