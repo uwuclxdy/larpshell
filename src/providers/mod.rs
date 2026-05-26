@@ -37,6 +37,12 @@ pub struct ChatMessage {
     pub tool_calls: Option<Vec<ToolCall>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
+    /// Function name of the tool call this result answers. Carried internally so
+    /// providers that match tool results by name (Gemini's `functionResponse.name`)
+    /// can recover it; OpenAI/Ollama match by `tool_call_id` and ignore this.
+    /// Skipped in serde so those providers' payloads stay byte-identical.
+    #[serde(skip)]
+    pub tool_call_name: Option<String>,
 }
 
 impl ChatMessage {
@@ -46,6 +52,7 @@ impl ChatMessage {
             content: Some(content.into()),
             tool_calls: None,
             tool_call_id: None,
+            tool_call_name: None,
         }
     }
 
@@ -55,15 +62,21 @@ impl ChatMessage {
             content: Some(content.into()),
             tool_calls: None,
             tool_call_id: None,
+            tool_call_name: None,
         }
     }
 
-    pub fn tool_result(tool_call_id: impl Into<String>, content: impl Into<String>) -> Self {
+    pub fn tool_result(
+        tool_call_id: impl Into<String>,
+        tool_call_name: impl Into<String>,
+        content: impl Into<String>,
+    ) -> Self {
         Self {
             role: Role::Tool,
             content: Some(content.into()),
             tool_calls: None,
             tool_call_id: Some(tool_call_id.into()),
+            tool_call_name: Some(tool_call_name.into()),
         }
     }
 
@@ -73,6 +86,7 @@ impl ChatMessage {
             content: None,
             tool_calls: Some(tool_calls),
             tool_call_id: None,
+            tool_call_name: None,
         }
     }
 }
@@ -191,11 +205,12 @@ mod tests {
 
     #[test]
     fn chat_message_tool_result_sets_tool_metadata_and_serializes_content() {
-        let message = ChatMessage::tool_result("call-1", "done");
+        let message = ChatMessage::tool_result("call-1", "search", "done");
 
         assert_eq!(message.role, Role::Tool);
         assert_eq!(message.content.as_deref(), Some("done"));
         assert_eq!(message.tool_call_id.as_deref(), Some("call-1"));
+        assert_eq!(message.tool_call_name.as_deref(), Some("search"));
         assert_eq!(message.tool_calls, None);
         assert_eq!(
             serde_json::to_value(&message).unwrap(),
@@ -306,7 +321,7 @@ mod tests {
         let messages = [
             ChatMessage::system("you are helpful"),
             ChatMessage::user("list files"),
-            ChatMessage::tool_result("tc_1", "file1.txt"),
+            ChatMessage::tool_result("tc_1", "list_files", "file1.txt"),
         ];
 
         let prompt: String = messages

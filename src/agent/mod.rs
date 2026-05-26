@@ -246,12 +246,17 @@ where
         match confirm_tool(tool_call) {
             ToolConfirmResult::Allow => {
                 let result_text = execute_tool_call(tool_registry, tool_call, verbose_tool_output);
-                pending_messages.push(ChatMessage::tool_result(&tool_call.id, result_text));
+                pending_messages.push(ChatMessage::tool_result(
+                    &tool_call.id,
+                    &tool_call.name,
+                    result_text,
+                ));
             }
             ToolConfirmResult::Deny => {
                 render_denied_inline();
                 pending_messages.push(ChatMessage::tool_result(
                     &tool_call.id,
+                    &tool_call.name,
                     denied_tool_result(),
                 ));
             }

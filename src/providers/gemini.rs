@@ -143,8 +143,13 @@ impl GeminiProvider {
             .map_err(|error| LarpshellError::InvalidResponse(error.to_string()))
     }
 
-    fn extract_generate_text(gemini_response: GeminiResponse) -> Result<String, LarpshellError> {
-        let candidates = gemini_response.candidates.ok_or_else(|| {
+    /// Returns the first candidate after rejecting blocked content, or an error
+    /// if there are no candidates / the candidates list is empty / the content
+    /// was blocked.
+    fn first_unblocked_candidate(
+        candidates: &Option<Vec<Candidate>>,
+    ) -> Result<&Candidate, LarpshellError> {
+        let candidates = candidates.as_ref().ok_or_else(|| {
             LarpshellError::InvalidResponse("no candidates in response".to_string())
         })?;
 
@@ -156,16 +161,11 @@ impl GeminiProvider {
             return Err(err);
         }
 
-        let content = candidate
-            .content
-            .as_ref()
-            .ok_or_else(|| LarpshellError::InvalidResponse("no content in response".to_string()))?;
+        Ok(candidate)
+    }
 
-        let parts = content
-            .parts
-            .as_ref()
-            .ok_or_else(|| LarpshellError::InvalidResponse("no parts in content".to_string()))?;
-
+    /// Joins the text across all parts, erroring if the result is empty.
+    fn join_part_text(parts: &[Part]) -> Result<String, LarpshellError> {
         let text: String = parts
             .iter()
             .filter_map(|part| part.text.as_deref())
@@ -177,6 +177,22 @@ impl GeminiProvider {
             ));
         }
         Ok(text)
+    }
+
+    fn extract_generate_text(gemini_response: GeminiResponse) -> Result<String, LarpshellError> {
+        let candidate = Self::first_unblocked_candidate(&gemini_response.candidates)?;
+
+        let content = candidate
+            .content
+            .as_ref()
+            .ok_or_else(|| LarpshellError::InvalidResponse("no content in response".to_string()))?;
+
+        let parts = content
+            .parts
+            .as_ref()
+            .ok_or_else(|| LarpshellError::InvalidResponse("no parts in content".to_string()))?;
+
+        Self::join_part_text(parts)
     }
 
     async fn request_generate(
@@ -227,14 +243,23 @@ impl GeminiProvider {
                 })
                 .collect()
         } else if message.role == Role::Tool {
-            let tool_call_id = message.tool_call_id.as_deref().ok_or_else(|| {
-                LarpshellError::InvalidResponse("tool message is missing tool_call_id".to_string())
-            })?;
+            // Gemini matches a functionResponse to its functionCall by name, so
+            // use the original function name; fall back to the id only if the
+            // name is absent.
+            let name = message
+                .tool_call_name
+                .as_deref()
+                .or(message.tool_call_id.as_deref())
+                .ok_or_else(|| {
+                    LarpshellError::InvalidResponse(
+                        "tool message is missing tool_call_name and tool_call_id".to_string(),
+                    )
+                })?;
             vec![Part {
                 text: None,
                 function_call: None,
                 function_response: Some(FunctionResponse {
-                    name: tool_call_id.to_string(),
+                    name: name.to_string(),
                     response: serde_json::json!({
                         "result": message.content.clone().unwrap_or_default()
                     }),
@@ -309,17 +334,7 @@ impl GeminiProvider {
     fn extract_chat_response(
         gemini_response: GeminiResponse,
     ) -> Result<ChatResponse, LarpshellError> {
-        let candidates = gemini_response.candidates.ok_or_else(|| {
-            LarpshellError::InvalidResponse("no candidates in response".to_string())
-        })?;
-
-        let candidate = candidates
-            .first()
-            .ok_or_else(|| LarpshellError::InvalidResponse("empty candidates list".to_string()))?;
-
-        if let Some(err) = Self::check_blocked(candidate) {
-            return Err(err);
-        }
+        let candidate = Self::first_unblocked_candidate(&gemini_response.candidates)?;
 
         let parts = Self::extract_tool_parts(candidate)?;
         let tool_calls = Self::extract_tool_calls(parts);
@@ -328,18 +343,7 @@ impl GeminiProvider {
             return Ok(ChatResponse::ToolCalls(tool_calls));
         }
 
-        let text: String = parts
-            .iter()
-            .filter_map(|part| part.text.as_deref())
-            .collect::<Vec<_>>()
-            .join("");
-        if text.is_empty() {
-            return Err(LarpshellError::InvalidResponse(
-                "no text in response".to_string(),
-            ));
-        }
-
-        Ok(ChatResponse::Message(text))
+        Self::join_part_text(parts).map(ChatResponse::Message)
     }
 }
 
