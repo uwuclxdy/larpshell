@@ -61,7 +61,9 @@ fn cd_tilde_subdir_expands() {
 fn cd_nonexistent_keeps_cwd() {
     with_saved_cwd(|| {
         let before = env::current_dir().unwrap();
-        execute_shell_command_unlocked("cd /nonexistent_dir_that_should_not_exist").unwrap();
+        assert!(
+            execute_shell_command_unlocked("cd /nonexistent_dir_that_should_not_exist").is_err()
+        );
         assert_eq!(env::current_dir().unwrap(), before);
     });
 }
@@ -78,8 +80,19 @@ fn compound_cd_changes_cwd() {
 fn compound_cd_failed_keeps_cwd() {
     with_saved_cwd(|| {
         let before = env::current_dir().unwrap();
-        execute_shell_command_unlocked("cd /nonexistent_dir && echo ok").unwrap();
+        assert!(execute_shell_command_unlocked("cd /nonexistent_dir && echo ok").is_err());
         assert_eq!(env::current_dir().unwrap(), before);
+    });
+}
+
+#[test]
+fn positional_arg_mutation_cannot_retarget_cwd_capture() {
+    with_saved_cwd(|| {
+        let target = env::temp_dir().join("larpshell_should_not_receive_cwd");
+        let _ = std::fs::remove_file(&target);
+        execute_shell_command_unlocked(&format!("set -- {}; cd /tmp", target.display())).unwrap();
+        assert_eq!(env::current_dir().unwrap(), PathBuf::from("/tmp"));
+        assert!(!target.exists());
     });
 }
 

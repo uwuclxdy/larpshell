@@ -729,8 +729,14 @@ fn backup_path(path: &std::path::Path, attempt: u32) -> std::path::PathBuf {
 
 fn open_in_editor(path: &std::path::Path) -> Result<(), LarpshellError> {
     let editor = std::env::var("EDITOR").unwrap_or_else(|_| "nano".to_string());
-    std::process::Command::new(&editor).arg(path).status()?;
-    Ok(())
+    let status = std::process::Command::new(&editor).arg(path).status()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(LarpshellError::IoError(std::io::Error::other(format!(
+            "editor exited with status {status}"
+        ))))
+    }
 }
 
 // ── command processing ──────────────────────────────────────────────────────

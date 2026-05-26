@@ -251,13 +251,14 @@ pub fn execute_shell_command_unlocked(command: &str) -> Result<(), LarpshellErro
         .create_new(true)
         .open(&cwd_file)?;
     let script = format!(
-        "{trimmed}\n__larpshell_rc=$?\npwd > {cwd_path}\nexit $__larpshell_rc",
-        cwd_path = cwd_file.display(),
+        "__larpshell_cwd_file=$1\nreadonly __larpshell_cwd_file\n{trimmed}\n__larpshell_rc=$?\npwd > \"$__larpshell_cwd_file\"\nexit $__larpshell_rc"
     );
 
-    Command::new("sh")
+    let status = Command::new("sh")
         .arg("-c")
         .arg(&script)
+        .arg("larpshell")
+        .arg(&cwd_file)
         .current_dir(env::current_dir()?)
         .status()?;
 
@@ -270,7 +271,13 @@ pub fn execute_shell_command_unlocked(command: &str) -> Result<(), LarpshellErro
     }
     let _ = std::fs::remove_file(&cwd_file);
 
-    Ok(())
+    if status.success() {
+        Ok(())
+    } else {
+        Err(LarpshellError::IoError(std::io::Error::other(format!(
+            "sh exited with status {status}"
+        ))))
+    }
 }
 
 pub fn execute_shell_command(command: &str) -> Result<(), LarpshellError> {

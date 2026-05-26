@@ -1019,6 +1019,7 @@ dependencies = [
  "nix",
  "reqwest",
  "rustyline",
+ "semver",
  "serde",
  "serde_json",
  "strip-ansi-escapes",

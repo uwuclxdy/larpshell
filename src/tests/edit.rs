@@ -123,7 +123,7 @@ fn edit_left_then_insert_char() {
 fn edit_home_then_insert_prefix() {
     let (home, _) = setup("edit_home_insert", &[CMD]);
     let out = run(&home, b"\x1b[A\x1b[Hprefix \ny");
-    assert!(out.status.success());
+    assert!(!out.status.success());
     assert_eq!(stdout(&out), "");
 }
 
@@ -134,7 +134,7 @@ fn edit_insert_at_start_delete_from_end() {
     let (home, _) = setup("edit_both_ends", &[CMD]);
     // Home → type 'X' → "Xecho mock"; End → Backspace → "Xecho moc"
     let out = run(&home, b"\x1b[A\x1b[HX\x1b[F\x7f\ny");
-    assert!(out.status.success());
+    assert!(!out.status.success());
     assert_eq!(stdout(&out), "");
 }
 

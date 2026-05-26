@@ -68,7 +68,17 @@ pub async fn is_update_available() -> bool {
     let Ok(info) = response.json::<CrateInfo>().await else {
         return false;
     };
-    info.krate.newest_version != env!("CARGO_PKG_VERSION")
+    remote_version_is_newer(&info.krate.newest_version, env!("CARGO_PKG_VERSION"))
+}
+
+fn remote_version_is_newer(remote: &str, current: &str) -> bool {
+    let (Ok(remote), Ok(current)) = (
+        semver::Version::parse(remote),
+        semver::Version::parse(current),
+    ) else {
+        return false;
+    };
+    remote.cmp_precedence(&current).is_gt()
 }
 
 fn print_notice() {
@@ -83,5 +93,35 @@ fn print_notice() {
 pub async fn print_if_available(task: JoinHandle<bool>) {
     if matches!(task.await, Ok(true)) {
         print_notice();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::remote_version_is_newer;
+
+    #[test]
+    fn update_available_when_remote_is_greater() {
+        assert!(remote_version_is_newer("0.2.4", "0.2.3"));
+    }
+
+    #[test]
+    fn update_unavailable_when_remote_is_equal() {
+        assert!(!remote_version_is_newer("0.2.3", "0.2.3"));
+    }
+
+    #[test]
+    fn update_unavailable_when_remote_is_older() {
+        assert!(!remote_version_is_newer("0.2.2", "0.2.3"));
+    }
+
+    #[test]
+    fn update_unavailable_when_remote_only_differs_as_string() {
+        assert!(!remote_version_is_newer("0.2.3+build.1", "0.2.3"));
+    }
+
+    #[test]
+    fn update_unavailable_when_version_is_invalid() {
+        assert!(!remote_version_is_newer("not-a-version", "0.2.3"));
     }
 }
