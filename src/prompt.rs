@@ -19,8 +19,8 @@ pub fn create_system_prompt(user_request: &str, template: Option<&str>) -> Strin
     tmpl.replace("{os}", &os)
         .replace("{cwd}", cwd.as_str())
         .replace("{home}", home.as_str())
-        .replace("{user}", user.as_str())
-        .replace("{shell}", shell.as_str())
+        .replace("{user}", user)
+        .replace("{shell}", shell)
         .replace("{request}", user_request)
 }
 

@@ -106,15 +106,15 @@ pub fn os_name() -> Cow<'static, str> {
     }
 }
 
-pub fn shell_name() -> String {
-    SHELL_NAME.as_str().to_string()
+pub fn shell_name() -> &'static str {
+    SHELL_NAME.as_str()
 }
 
-pub fn username() -> String {
-    USERNAME.as_str().to_string()
+pub fn username() -> &'static str {
+    USERNAME.as_str()
 }
 
-/// reads /etc/os-release to get the distro name and version.
+/// Reads `/etc/os-release` to get the distro name and version.
 fn linux_distro() -> String {
     fs::read_to_string("/etc/os-release").map_or_else(
         |_| "linux".to_string(),
@@ -139,7 +139,7 @@ fn linux_distro() -> String {
     )
 }
 
-/// gets the kernel version from `uname -r` or `/proc/sys/kernel/osrelease`.
+/// Gets the kernel version from `uname -r` or `/proc/sys/kernel/osrelease`.
 fn kernel_version() -> String {
     Command::new("uname")
         .arg("-r")
@@ -189,7 +189,7 @@ pub fn flush_stderr() {
     let _ = io::Write::flush(&mut io::stderr());
 }
 
-/// gets the terminal width in columns.
+/// Gets the terminal width in columns.
 #[cfg(unix)]
 pub fn terminal_width() -> usize {
     // SAFETY: `winsize` is a POD C struct; zeroing it is a valid initialised
@@ -215,7 +215,7 @@ pub fn terminal_width() -> usize {
         .unwrap_or(80)
 }
 
-/// counts the number of visual lines a string will occupy when printed to terminal.
+/// Counts the number of visual lines a string will occupy when printed to terminal.
 pub fn count_visual_lines(text: &str, width: usize) -> usize {
     text.lines()
         .map(|line| {
@@ -225,15 +225,17 @@ pub fn count_visual_lines(text: &str, width: usize) -> usize {
                 // Strip ANSI escape codes to get only visible characters
                 let stripped = strip(line.as_bytes());
                 let visible_line = String::from_utf8_lossy(&stripped);
-                // Calculate visual width accounting for wide characters
-                let visual_width = visible_line.width();
+                // Calculate visual width accounting for wide characters.
+                // A non-empty line that strips to zero visible width (e.g. ANSI-only)
+                // still occupies one terminal row.
+                let visual_width = visible_line.width().max(1);
                 visual_width.div_ceil(width)
             }
         })
         .sum()
 }
 
-/// sets up terminal to hide control characters.
+/// Sets up terminal to hide control characters.
 #[cfg(unix)]
 pub fn setup_terminal() {
     use nix::sys::termios::{LocalFlags, SetArg, tcgetattr, tcsetattr};

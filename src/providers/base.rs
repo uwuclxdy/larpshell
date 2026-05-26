@@ -3,9 +3,9 @@ use crate::error::LarpshellError;
 use reqwest::Client;
 use std::time::Duration;
 
-/// creates a new HTTP client with default timeout.
+/// Creates a new HTTP client with default timeout.
 ///
-/// this ensures consistent timeout behavior across all providers.
+/// Ensures consistent timeout behavior across all providers.
 pub fn create_http_client() -> Result<Client, LarpshellError> {
     Client::builder()
         .timeout(Duration::from_secs(DEFAULT_PROVIDER_TIMEOUT_SECS))
@@ -13,32 +13,32 @@ pub fn create_http_client() -> Result<Client, LarpshellError> {
         .map_err(|e| LarpshellError::ConfigError(e.to_string()))
 }
 
-/// strips scheme prefix and trailing slashes from a URL for display purposes.
+/// Strips scheme prefix and trailing slashes from a URL for display purposes.
 pub fn strip_url_for_display(url: &str) -> &str {
     url.trim_start_matches("http://")
         .trim_start_matches("https://")
         .trim_end_matches('/')
 }
 
-/// base provider struct containing common HTTP client.
+/// Base provider struct containing a shared HTTP client.
 ///
-/// this reduces duplication across providers by centralizing
-/// the client creation and timeout configuration.
+/// Reduces duplication across providers by centralizing
+/// client creation and timeout configuration.
 pub struct BaseProvider {
     pub(crate) client: Client,
 }
 
 impl BaseProvider {
-    /// creates a new base provider with HTTP client.
+    /// Creates a new base provider with an HTTP client.
     pub fn new() -> Result<Self, LarpshellError> {
         Ok(Self {
             client: create_http_client()?,
         })
     }
 
-    /// sends an HTTP request and checks the response status.
+    /// Sends an HTTP request and checks the response status.
     ///
-    /// combines the common pattern of sending a request, handling reqwest errors,
+    /// Combines the common pattern of sending a request, handling reqwest errors,
     /// and validating the HTTP status code.
     pub async fn send_json(
         request: reqwest::RequestBuilder,
@@ -51,7 +51,7 @@ impl BaseProvider {
         Self::check_response(response, provider).await
     }
 
-    /// checks an HTTP response status and returns an appropriate error for non-success codes.
+    /// Checks an HTTP response status and returns an appropriate error for non-success codes.
     pub async fn check_response(
         response: reqwest::Response,
         provider: &str,
