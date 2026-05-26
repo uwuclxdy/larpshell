@@ -173,15 +173,15 @@ fn execute_tool_call(
     tool_call: &ToolCall,
     verbose_tool_output: bool,
 ) -> String {
-    let result = tool_registry.execute(&tool_call.name, &tool_call.arguments);
-    match &result {
-        Ok(output) => render_success_inline(output, verbose_tool_output),
-        Err(error) => render_error_inline(error),
-    }
-
-    match result {
-        Ok(output) => output,
-        Err(error) => format!("Error: {error}"),
+    match tool_registry.execute(&tool_call.name, &tool_call.arguments) {
+        Ok(output) => {
+            render_success_inline(&output, verbose_tool_output);
+            output
+        }
+        Err(error) => {
+            render_error_inline(&error);
+            format!("Error: {error}")
+        }
     }
 }
 

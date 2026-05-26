@@ -6,21 +6,39 @@ use super::builtins;
 
 type ToolExecutor = Box<dyn Fn(&serde_json::Value) -> Result<String, String> + Send + Sync>;
 
-pub struct RegisteredTool {
-    pub definition: ToolDefinition,
-    executor: ToolExecutor,
+pub enum RegisteredTool {
+    /// A builtin tool with an owned executor closure.
+    Builtin {
+        definition: ToolDefinition,
+        executor: ToolExecutor,
+    },
+    /// An MCP-backed tool; execution is always routed through `mcp_clients`
+    /// by name-prefix, so no executor is stored here.
+    Mcp { definition: ToolDefinition },
 }
 
 impl RegisteredTool {
     pub fn new(definition: ToolDefinition, executor: ToolExecutor) -> Self {
-        Self {
+        Self::Builtin {
             definition,
             executor,
         }
     }
 
+    pub fn definition(&self) -> &ToolDefinition {
+        match self {
+            Self::Builtin { definition, .. } | Self::Mcp { definition } => definition,
+        }
+    }
+
     pub fn execute(&self, args: &serde_json::Value) -> Result<String, String> {
-        (self.executor)(args)
+        match self {
+            Self::Builtin { executor, .. } => executor(args),
+            Self::Mcp { definition } => Err(format!(
+                "MCP tool '{}' must be dispatched via mcp_clients",
+                definition.name
+            )),
+        }
     }
 }
 
@@ -47,13 +65,10 @@ impl ToolRegistry {
         self.tools.push(tool);
     }
 
-    /// Registers an MCP-backed tool's definition. Execution is always routed
-    /// through `mcp_clients`, so the executor closure is unreachable.
+    /// Registers an MCP-backed tool's definition. Execution is routed through
+    /// `mcp_clients` by name-prefix; this entry is definition-only.
     pub fn register_mcp_tool(&mut self, definition: ToolDefinition) {
-        self.tools.push(RegisteredTool::new(
-            definition,
-            Box::new(|_| unreachable!("MCP tools are executed via mcp_clients")),
-        ));
+        self.tools.push(RegisteredTool::Mcp { definition });
     }
 
     pub fn add_mcp_client(&mut self, client: crate::agent::mcp::StdioMcpClient) {
@@ -87,7 +102,7 @@ impl ToolRegistry {
     pub fn definitions(&self) -> Vec<ToolDefinition> {
         self.tools
             .iter()
-            .map(|tool| tool.definition.clone())
+            .map(|tool| tool.definition().clone())
             .collect()
     }
 
@@ -120,7 +135,7 @@ impl ToolRegistry {
     fn execute_builtin_tool(&self, name: &str, args: &serde_json::Value) -> Result<String, String> {
         self.tools
             .iter()
-            .find(|tool| tool.definition.name == name)
+            .find(|tool| tool.definition().name == name)
             .ok_or_else(|| format!("unknown tool: {name}"))
             .and_then(|tool| tool.execute(args))
     }
