@@ -1,8 +1,57 @@
 use std::fs::{self, OpenOptions};
 use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::cli::home_dir;
 use crate::error::LarpshellError;
+
+static ATOMIC_WRITE_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+fn atomic_temp_path(path: &Path) -> PathBuf {
+    let mut name = path
+        .file_name()
+        .map_or_else(|| "larpshell".into(), |name| name.to_os_string());
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_nanos());
+    name.push(format!(
+        ".{}.{}.tmp",
+        std::process::id(),
+        now + u128::from(ATOMIC_WRITE_COUNTER.fetch_add(1, Ordering::Relaxed))
+    ));
+    path.with_file_name(name)
+}
+
+fn atomic_write(path: &Path, contents: &str) -> Result<(), LarpshellError> {
+    let tmp = atomic_temp_path(path);
+    let metadata = fs::metadata(path)?;
+    let mut file = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
+    if let Err(error) = preserve_permissions(&file, &metadata)
+        .and_then(|()| file.write_all(contents.as_bytes()))
+        .and_then(|()| file.sync_all())
+    {
+        let _ = fs::remove_file(&tmp);
+        return Err(error.into());
+    }
+    drop(file);
+    if let Err(error) = fs::rename(&tmp, path) {
+        let _ = fs::remove_file(&tmp);
+        return Err(error.into());
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn preserve_permissions(file: &fs::File, metadata: &fs::Metadata) -> std::io::Result<()> {
+    file.set_permissions(metadata.permissions())
+}
+
+#[cfg(not(unix))]
+fn preserve_permissions(_file: &fs::File, _metadata: &fs::Metadata) -> std::io::Result<()> {
+    Ok(())
+}
 
 pub const fn generate_bash_autocomplete() -> &'static str {
     r#"_larpshell_completions() {
@@ -332,9 +381,41 @@ fn setup_fish_integration() -> Result<bool, LarpshellError> {
     Ok(true)
 }
 
+fn function_name(function_sig: &str) -> &str {
+    function_sig.strip_suffix("()").unwrap_or(function_sig)
+}
+
+fn is_function_tail(rest: &str) -> bool {
+    let rest = rest.trim_start();
+    rest.is_empty() || rest.starts_with("()") || rest.starts_with('{')
+}
+
+fn is_function_keyword_start(trimmed: &str, name: &str) -> bool {
+    let Some(rest) = trimmed.strip_prefix("function") else {
+        return false;
+    };
+    let rest = rest.trim_start();
+    rest.strip_prefix(name).is_some_and(is_function_tail)
+}
+
+fn is_function_name_start(trimmed: &str, name: &str) -> bool {
+    trimmed.strip_prefix(name).is_some_and(is_function_tail)
+}
+
+fn is_function_start(line: &str, function_sig: &str) -> bool {
+    let name = function_name(function_sig);
+    let trimmed = line.trim_start();
+    is_function_keyword_start(trimmed, name) || is_function_name_start(trimmed, name)
+}
+
+fn line_brace_delta(line: &str) -> i32 {
+    i32::try_from(line.matches('{').count()).unwrap_or(i32::MAX)
+        - i32::try_from(line.matches('}').count()).unwrap_or(i32::MAX)
+}
+
 /// Removes a marked function block from shell config content.
 /// Looks for `marker` as a comment line, then tracks brace depth starting from
-/// the line matching `function_sig` until braces balance to zero.
+/// the function declaration until braces balance to zero.
 /// Returns the cleaned content and whether the block was found.
 fn remove_marked_function_block(content: &str, marker: &str, function_sig: &str) -> (String, bool) {
     let lines: Vec<&str> = content.lines().collect();
@@ -342,6 +423,7 @@ fn remove_marked_function_block(content: &str, marker: &str, function_sig: &str)
     let mut skip = false;
     let mut brace_depth = 0;
     let mut in_function = false;
+    let mut waiting_for_open_brace = false;
     let mut found = false;
 
     for line in lines {
@@ -352,18 +434,41 @@ fn remove_marked_function_block(content: &str, marker: &str, function_sig: &str)
         }
 
         if skip {
-            if !in_function && line.contains(function_sig) {
-                in_function = true;
-                brace_depth += i32::try_from(line.matches('{').count()).unwrap_or(i32::MAX);
-            } else if in_function {
-                brace_depth += i32::try_from(line.matches('{').count()).unwrap_or(i32::MAX);
-                brace_depth -= i32::try_from(line.matches('}').count()).unwrap_or(i32::MAX);
-
-                if brace_depth == 0 {
-                    skip = false;
-                    in_function = false;
+            if waiting_for_open_brace {
+                if line.trim().is_empty() {
                     continue;
                 }
+                if line.contains('{') {
+                    in_function = true;
+                    waiting_for_open_brace = false;
+                    brace_depth += line_brace_delta(line);
+                } else {
+                    skip = false;
+                    waiting_for_open_brace = false;
+                    new_lines.push(line);
+                    continue;
+                }
+            } else if !in_function {
+                if line.trim().is_empty() {
+                    continue;
+                }
+                if is_function_start(line, function_sig) {
+                    let opens_function = line.contains('{');
+                    in_function = opens_function;
+                    waiting_for_open_brace = !opens_function;
+                    brace_depth += line_brace_delta(line);
+                } else {
+                    skip = false;
+                    new_lines.push(line);
+                    continue;
+                }
+            } else {
+                brace_depth += line_brace_delta(line);
+            }
+
+            if in_function && brace_depth <= 0 {
+                skip = false;
+                in_function = false;
             }
             continue;
         }
@@ -390,7 +495,10 @@ pub fn remove_bash_integration() -> Result<bool, LarpshellError> {
 
     let content = fs::read_to_string(&bashrc_path)?;
 
-    if !content.contains("larpshell() {") && !content.contains("larpshell()") {
+    if !content.contains("# larpshell shell integration")
+        && !content.contains("larpshell() {")
+        && !content.contains("larpshell()")
+    {
         return Ok(false);
     }
 
@@ -398,7 +506,7 @@ pub fn remove_bash_integration() -> Result<bool, LarpshellError> {
         remove_marked_function_block(&content, "# larpshell shell integration", "larpshell()");
 
     if found {
-        fs::write(&bashrc_path, new_content)?;
+        atomic_write(&bashrc_path, &new_content)?;
     }
 
     Ok(found)
@@ -556,7 +664,7 @@ fn remove_zsh_fpath_block(zshrc: &std::path::Path, marker: &str) -> Result<bool,
         while new_lines.last().is_some_and(|l| l.trim().is_empty()) {
             new_lines.pop();
         }
-        fs::write(zshrc, new_lines.join("\n") + "\n")?;
+        atomic_write(zshrc, &(new_lines.join("\n") + "\n"))?;
     }
 
     Ok(removed)
@@ -617,7 +725,7 @@ fn migrate_nlsh_rs_bash() -> Result<bool, LarpshellError> {
     let (new_content, found) =
         remove_marked_function_block(&content, "# nlsh-rs shell integration", "nlsh-rs()");
     if found {
-        fs::write(&bashrc, new_content)?;
+        atomic_write(&bashrc, &new_content)?;
     }
     Ok(found)
 }
@@ -652,6 +760,26 @@ fn migrate_nlsh_rs_zsh_comment() -> Result<bool, LarpshellError> {
 mod tests {
     use super::*;
     use crate::vocab;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_write_preserves_existing_mode() {
+        let path = std::env::temp_dir().join(format!(
+            "larpshell-mode-test-{}-{}",
+            std::process::id(),
+            ATOMIC_WRITE_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::write(&path, "before").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+
+        atomic_write(&path, "after").unwrap();
+
+        let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        let _ = fs::remove_file(&path);
+        assert_eq!(mode, 0o600);
+    }
 
     // These guards pin the hand-written completion strings to `vocab`, so a
     // token added to or removed from `vocab` fails here unless every generator
@@ -892,6 +1020,80 @@ mod tests {
         assert!(
             s.contains("agent"),
             "fish wrapper function missing 'agent' passthrough"
+        );
+    }
+
+    #[test]
+    fn remove_marked_function_block_handles_one_line_function() {
+        let content = "before\n# larpshell shell integration\nlarpshell() { command larpshell \"$@\"; }\nafter\n";
+        let (cleaned, found) =
+            remove_marked_function_block(content, "# larpshell shell integration", "larpshell()");
+
+        assert!(found);
+        assert_eq!(cleaned, "before\nafter\n");
+    }
+
+    #[test]
+    fn remove_marked_function_block_preserves_following_config() {
+        let content = "# larpshell shell integration\nlarpshell() {\n    command larpshell \"$@\"\n}\nexport PATH=$PATH:/tmp\n";
+        let (cleaned, found) =
+            remove_marked_function_block(content, "# larpshell shell integration", "larpshell()");
+
+        assert!(found);
+        assert_eq!(cleaned, "export PATH=$PATH:/tmp\n");
+    }
+
+    #[test]
+    fn remove_marked_function_block_handles_edited_function_signature() {
+        let content = "# larpshell shell integration\nfunction larpshell { command larpshell \"$@\"; }\nexport PATH=$PATH:/tmp\n";
+        let (cleaned, found) =
+            remove_marked_function_block(content, "# larpshell shell integration", "larpshell()");
+
+        assert!(found);
+        assert_eq!(cleaned, "export PATH=$PATH:/tmp\n");
+    }
+
+    #[test]
+    fn remove_marked_function_block_handles_function_keyword_next_line_brace() {
+        let content = "# larpshell shell integration\nfunction larpshell\n{\n    command larpshell \"$@\"\n}\nexport PATH=$PATH:/tmp\n";
+        let (cleaned, found) =
+            remove_marked_function_block(content, "# larpshell shell integration", "larpshell()");
+
+        assert!(found);
+        assert_eq!(cleaned, "export PATH=$PATH:/tmp\n");
+    }
+
+    #[test]
+    fn remove_marked_function_block_preserves_config_when_signature_missing() {
+        let content = "# larpshell shell integration\nexport PATH=$PATH:/tmp\n";
+        let (cleaned, found) =
+            remove_marked_function_block(content, "# larpshell shell integration", "larpshell()");
+
+        assert!(found);
+        assert_eq!(cleaned, "export PATH=$PATH:/tmp\n");
+    }
+
+    #[test]
+    fn remove_marked_function_block_preserves_non_function_larpshell_command() {
+        let content =
+            "# larpshell shell integration\nlarpshell --version\nexport PATH=$PATH:/tmp\n";
+        let (cleaned, found) =
+            remove_marked_function_block(content, "# larpshell shell integration", "larpshell()");
+
+        assert!(found);
+        assert_eq!(cleaned, "larpshell --version\nexport PATH=$PATH:/tmp\n");
+    }
+
+    #[test]
+    fn remove_marked_function_block_preserves_different_function_name() {
+        let content = "# larpshell shell integration\nfunction larpshell_backup { command larpshell \"$@\"; }\nexport PATH=$PATH:/tmp\n";
+        let (cleaned, found) =
+            remove_marked_function_block(content, "# larpshell shell integration", "larpshell()");
+
+        assert!(found);
+        assert_eq!(
+            cleaned,
+            "function larpshell_backup { command larpshell \"$@\"; }\nexport PATH=$PATH:/tmp\n"
         );
     }
 }

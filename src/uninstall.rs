@@ -1,5 +1,6 @@
 use colored::Colorize;
 use inquire::Confirm;
+use serde::Deserialize;
 use std::fs;
 use std::process::Command;
 
@@ -8,6 +9,16 @@ use crate::common::{CTP_GREEN, CTP_YELLOW, clear_line, show_cursor};
 use crate::confirmation::style_message_markup;
 use crate::error::LarpshellError;
 use crate::shell_integration::remove_shell_integration;
+
+#[derive(Deserialize)]
+struct CargoManifest {
+    package: Option<CargoPackage>,
+}
+
+#[derive(Deserialize)]
+struct CargoPackage {
+    name: String,
+}
 
 pub fn uninstall_larpshell() -> Result<(), LarpshellError> {
     eprintln!(
@@ -105,13 +116,20 @@ fn remove_config_optional() -> Result<(), LarpshellError> {
     Ok(())
 }
 
+fn is_larpshell_manifest(contents: &str) -> Result<bool, LarpshellError> {
+    let manifest: CargoManifest = toml::from_str(contents)?;
+    Ok(manifest
+        .package
+        .is_some_and(|package| package.name == "larpshell"))
+}
+
 fn remove_repo_optional() -> Result<(), LarpshellError> {
     let current_dir = std::env::current_dir()?;
     let cargo_toml = current_dir.join("Cargo.toml");
 
     if cargo_toml.exists() {
         let contents = fs::read_to_string(&cargo_toml)?;
-        if contents.contains("name = \"larpshell\"") {
+        if is_larpshell_manifest(&contents)? {
             eprintln!();
             show_cursor();
             let remove_repo = Confirm::new("Remove current directory (larpshell repository)?")
@@ -135,4 +153,26 @@ fn remove_repo_optional() -> Result<(), LarpshellError> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn larpshell_manifest_requires_package_name() {
+        assert!(is_larpshell_manifest("[package]\nname = \"larpshell\"\n").unwrap());
+    }
+
+    #[test]
+    fn larpshell_manifest_ignores_matching_dependency_name() {
+        let manifest = "[package]\nname = \"other\"\n\n[dependencies]\nlarpshell = \"1\"\n";
+        assert!(!is_larpshell_manifest(manifest).unwrap());
+    }
+
+    #[test]
+    fn larpshell_manifest_ignores_matching_string_outside_package() {
+        let manifest = "[workspace.package]\nname = \"larpshell\"\n";
+        assert!(!is_larpshell_manifest(manifest).unwrap());
+    }
 }
