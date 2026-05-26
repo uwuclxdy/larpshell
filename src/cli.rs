@@ -231,9 +231,21 @@ pub fn execute_shell_command_unlocked(command: &str) -> Result<(), LarpshellErro
     // sync it back, so that `cd` (even inside compound commands) propagates
     // to the parent process.
     let seq = CWD_FILE_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let cwd_file = env::temp_dir().join(format!(".larpshell_cwd_{}_{}", std::process::id(), seq));
-    // Create exclusively (O_EXCL) so a pre-planted symlink is never followed —
-    // if the path already exists the open fails rather than writing through it.
+    // Mix in nanosecond timestamp for unpredictability — an attacker who
+    // knows the PID cannot pre-create a symlink at the path because the
+    // nanos component is not guessable without a timing oracle.
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    let cwd_file = env::temp_dir().join(format!(
+        ".larpshell_cwd_{}_{}_{:08x}",
+        std::process::id(),
+        seq,
+        nanos,
+    ));
+    // Create exclusively (O_EXCL) so a pre-planted symlink at this exact path
+    // is never followed — the open fails rather than writing through it.
     OpenOptions::new()
         .write(true)
         .create_new(true)
