@@ -158,7 +158,7 @@ pub const fn generate_fish_function() -> &'static str {
     end
 
     switch $argv[1]
-        case api agent explain history verbose uninstall prompt -- help --help -h --version -V
+        case api agent explain history verbose uninstall prompt --help -h --version -V
             command larpshell $argv
             return $status
     end
