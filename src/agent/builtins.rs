@@ -57,21 +57,9 @@ const SAFE_COMMANDS: &[&str] = &[
     "dig",
     "nslookup",
     "host",
-    "curl",
-    "wget",
     "git",
     "svn",
     "hg",
-    "docker",
-    "podman",
-    "kubectl",
-    "aws",
-    "gcloud",
-    "az",
-    "terraform",
-    "ansible",
-    "vault",
-    "consul",
 ];
 const DANGEROUS_FLAG_PREFIXES: &[&str] = &["--delete", "--remove", "--force"];
 const DANGEROUS_ARGUMENT_TOKENS: &[&str] = &["rm", "mv", "cp", "chmod", "chown"];
@@ -403,7 +391,7 @@ fn execute_search_files(pattern: &str, directory_path: &str) -> Result<String, S
 
     if truncated {
         matches.push(format!(
-            "\n[showing {MAX_SEARCH_MATCHES} of more matches — refine your pattern to see all]"
+            "\n[showing first {MAX_SEARCH_MATCHES} matches; refine your pattern to see more]"
         ));
     }
     Ok(matches.join("\n"))
@@ -944,7 +932,7 @@ mod tests {
         // Exactly MAX_SEARCH_MATCHES match lines plus the truncation notice.
         let match_lines = lines.iter().filter(|l| l.contains("many.txt:")).count();
         assert_eq!(match_lines, MAX_SEARCH_MATCHES);
-        assert!(result.contains("showing 50 of more matches"));
+        assert!(result.contains("showing first 50 matches; refine your pattern to see more"));
     }
 
     #[test]
@@ -1110,6 +1098,68 @@ bar",
         assert_err_contains(
             execute_run_command(AgentMode::Safe, "echo foo && echo bar", &[]),
             "shell expressions not allowed in safe mode",
+        );
+    }
+
+    // ── safe-mode allowlist: write-capable / state-mutating commands ─────────
+
+    #[test]
+    fn run_command_safe_rejects_curl() {
+        assert_err_contains(
+            execute_run_command(
+                AgentMode::Safe,
+                "curl",
+                &[
+                    "-o".to_string(),
+                    "/tmp/x".to_string(),
+                    "http://example.com".to_string(),
+                ],
+            ),
+            "command not allowed",
+        );
+    }
+
+    #[test]
+    fn run_command_safe_rejects_wget() {
+        assert_err_contains(
+            execute_run_command(
+                AgentMode::Safe,
+                "wget",
+                &[
+                    "-O".to_string(),
+                    "/tmp/x".to_string(),
+                    "http://example.com".to_string(),
+                ],
+            ),
+            "command not allowed",
+        );
+    }
+
+    #[test]
+    fn run_command_safe_rejects_docker() {
+        assert_err_contains(
+            execute_run_command(AgentMode::Safe, "docker", &["ps".to_string()]),
+            "command not allowed",
+        );
+    }
+
+    #[test]
+    fn run_command_safe_rejects_kubectl() {
+        assert_err_contains(
+            execute_run_command(
+                AgentMode::Safe,
+                "kubectl",
+                &["get".to_string(), "pods".to_string()],
+            ),
+            "command not allowed",
+        );
+    }
+
+    #[test]
+    fn run_command_safe_rejects_terraform() {
+        assert_err_contains(
+            execute_run_command(AgentMode::Safe, "terraform", &["plan".to_string()]),
+            "command not allowed",
         );
     }
 
