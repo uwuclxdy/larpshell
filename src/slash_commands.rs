@@ -1,5 +1,6 @@
 use crate::cli::{PromptAction, PromptKind};
 use crate::config::AgentMode;
+use crate::vocab;
 
 pub struct SlashCommand {
     pub name: &'static str,
@@ -11,73 +12,76 @@ pub struct ArgChoice {
     pub description: &'static str,
 }
 
+// Argument-value strings come from `vocab` so this table cannot silently drift
+// from the CLI and the generated shell completions; only the descriptions live
+// here. Each array's ordering matches its source slice in `vocab`.
 static PROMPT_KINDS: &[ArgChoice] = &[
     ArgChoice {
-        value: "system",
+        value: vocab::PROMPT_KINDS[0],
         description: "system prompt",
     },
     ArgChoice {
-        value: "explain",
+        value: vocab::PROMPT_KINDS[1],
         description: "explain prompt",
     },
     ArgChoice {
-        value: "agent",
+        value: vocab::PROMPT_KINDS[2],
         description: "agent (unrestricted) prompt",
     },
     ArgChoice {
-        value: "agent-safe",
+        value: vocab::PROMPT_KINDS[3],
         description: "agent (safe/restricted) prompt",
     },
 ];
 
 static PROMPT_ACTIONS: &[ArgChoice] = &[
     ArgChoice {
-        value: "show",
+        value: vocab::PROMPT_ACTIONS[0],
         description: "print current value",
     },
     ArgChoice {
-        value: "edit",
+        value: vocab::PROMPT_ACTIONS[1],
         description: "open in editor",
     },
     ArgChoice {
-        value: "reset",
+        value: vocab::PROMPT_ACTIONS[2],
         description: "restore default and back up current",
     },
 ];
 
 static HISTORY_TOGGLES: &[ArgChoice] = &[
     ArgChoice {
-        value: "on",
+        value: vocab::BOOL_TOGGLES[0],
         description: "save prompts across sessions",
     },
     ArgChoice {
-        value: "off",
+        value: vocab::BOOL_TOGGLES[1],
         description: "stop saving history",
     },
 ];
 
 static TOOL_OUTPUT_TOGGLES: &[ArgChoice] = &[
     ArgChoice {
-        value: "on",
+        value: vocab::BOOL_TOGGLES[0],
         description: "show expanded agent tool output",
     },
     ArgChoice {
-        value: "off",
+        value: vocab::BOOL_TOGGLES[1],
         description: "show tool output summaries only",
     },
 ];
 
 static AGENT_TOGGLES: &[ArgChoice] = &[
     ArgChoice {
-        value: "off",
+        value: vocab::AGENT_TOGGLES[0],
         description: "disable agent mode",
     },
     ArgChoice {
-        value: "safe",
+        value: vocab::AGENT_TOGGLES[1],
         description: "enable restricted agent tool mode",
     },
     ArgChoice {
-        value: "on",
+        value: vocab::AGENT_TOGGLES[2],
         description: "enable unrestricted agent tool mode",
     },
 ];
@@ -577,5 +581,28 @@ mod tests {
     #[test]
     fn arg_completions_too_many_args_returns_none() {
         assert!(arg_completions("/prompt system edit ").is_none());
+    }
+
+    fn values(choices: &[ArgChoice]) -> Vec<&'static str> {
+        choices.iter().map(|c| c.value).collect()
+    }
+
+    #[test]
+    fn arg_choice_values_match_vocab() {
+        assert_eq!(values(PROMPT_KINDS), vocab::PROMPT_KINDS);
+        assert_eq!(values(PROMPT_ACTIONS), vocab::PROMPT_ACTIONS);
+        assert_eq!(values(HISTORY_TOGGLES), vocab::BOOL_TOGGLES);
+        assert_eq!(values(TOOL_OUTPUT_TOGGLES), vocab::BOOL_TOGGLES);
+        assert_eq!(values(AGENT_TOGGLES), vocab::AGENT_TOGGLES);
+    }
+
+    #[test]
+    fn every_cli_subcommand_has_a_slash_command() {
+        for &name in vocab::SUBCOMMANDS {
+            assert!(
+                COMMANDS.iter().any(|c| c.name == name),
+                "vocab subcommand {name:?} missing from slash COMMANDS table"
+            );
+        }
     }
 }

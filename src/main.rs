@@ -14,6 +14,7 @@ mod shell_integration;
 mod slash_commands;
 mod uninstall;
 mod update;
+mod vocab;
 
 use std::io::IsTerminal;
 use std::process::ExitCode;

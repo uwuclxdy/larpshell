@@ -91,84 +91,88 @@ pub enum PromptAction {
     Reset,
 }
 
+#[derive(clap::Parser)]
+#[command(name = "larpshell")]
+#[command(version)]
+#[command(disable_help_subcommand = true)]
+#[command(override_usage = "larpshell [REQUEST]\n       larpshell <COMMAND>")]
+struct Cli {
+    #[arg(
+        value_name = "REQUEST",
+        help = "Natural language request to convert to a shell command"
+    )]
+    command: Vec<String>,
+
+    #[command(subcommand)]
+    subcommand: Option<Commands>,
+}
+
+// clap requires real `ValueEnum` variants, so this vocabulary is spelled out
+// rather than sourced from `vocab` directly. The `#[cfg(test)] clap_*_matches_vocab`
+// guards at the bottom of this file assert each enum's `ValueEnum` value strings
+// equal the matching `vocab` slice, turning any drift into a test failure.
+#[derive(clap::Subcommand)]
+enum Commands {
+    /// Manage the API key for the active provider
+    Api,
+    /// Remove larpshell and its shell integration
+    Uninstall,
+    /// Enable or disable command history logging
+    History {
+        #[arg(value_enum)]
+        toggle: Option<ClapBoolToggle>,
+    },
+    /// Enable or disable verbose agent tool output
+    Verbose {
+        #[arg(value_enum)]
+        toggle: Option<ClapBoolToggle>,
+    },
+    /// View or edit system prompts
+    Prompt {
+        #[arg(value_enum, default_value_t = ClapPromptKind::System)]
+        kind: ClapPromptKind,
+        #[arg(value_enum, default_value_t = ClapPromptAction::Show)]
+        action: ClapPromptAction,
+    },
+    /// Explain what a shell command does
+    Explain { command: Vec<String> },
+    /// Enable or disable agent mode
+    Agent {
+        #[arg(value_enum)]
+        toggle: Option<ClapAgentToggle>,
+    },
+}
+
+#[derive(clap::ValueEnum, Clone)]
+enum ClapBoolToggle {
+    On,
+    Off,
+}
+
+#[derive(clap::ValueEnum, Clone)]
+enum ClapPromptKind {
+    System,
+    Explain,
+    Agent,
+    AgentSafe,
+}
+
+#[derive(clap::ValueEnum, Clone)]
+enum ClapPromptAction {
+    Show,
+    Edit,
+    Reset,
+}
+
+#[derive(clap::ValueEnum, Clone)]
+enum ClapAgentToggle {
+    Off,
+    Safe,
+    On,
+}
+
 pub fn parse_cli_args() -> CliArgs {
-    use clap::{Parser, Subcommand};
-
-    #[derive(Parser)]
-    #[command(name = "larpshell")]
-    #[command(version)]
-    #[command(disable_help_subcommand = true)]
-    #[command(override_usage = "larpshell [REQUEST]\n       larpshell <COMMAND>")]
-    struct Cli {
-        #[arg(
-            value_name = "REQUEST",
-            help = "Natural language request to convert to a shell command"
-        )]
-        command: Vec<String>,
-
-        #[command(subcommand)]
-        subcommand: Option<Commands>,
-    }
-
-    #[derive(Subcommand)]
-    enum Commands {
-        /// Manage the API key for the active provider
-        Api,
-        /// Remove larpshell and its shell integration
-        Uninstall,
-        /// Enable or disable command history logging
-        History {
-            #[arg(value_enum)]
-            toggle: Option<ClapBoolToggle>,
-        },
-        /// Enable or disable verbose agent tool output
-        Verbose {
-            #[arg(value_enum)]
-            toggle: Option<ClapBoolToggle>,
-        },
-        /// View or edit system prompts
-        Prompt {
-            #[arg(value_enum, default_value_t = ClapPromptKind::System)]
-            kind: ClapPromptKind,
-            #[arg(value_enum, default_value_t = ClapPromptAction::Show)]
-            action: ClapPromptAction,
-        },
-        /// Explain what a shell command does
-        Explain { command: Vec<String> },
-        /// Enable or disable agent mode
-        Agent {
-            #[arg(value_enum)]
-            toggle: Option<ClapAgentToggle>,
-        },
-    }
-
-    #[derive(clap::ValueEnum, Clone)]
-    enum ClapBoolToggle {
-        On,
-        Off,
-    }
-
-    #[derive(clap::ValueEnum, Clone)]
-    enum ClapPromptKind {
-        System,
-        Explain,
-        Agent,
-        AgentSafe,
-    }
-
-    #[derive(clap::ValueEnum, Clone)]
-    enum ClapPromptAction {
-        Show,
-        Edit,
-        Reset,
-    }
-
-    #[derive(clap::ValueEnum, Clone)]
-    enum ClapAgentToggle {
-        Off,
-        Safe,
-        On,
-    }
+    use clap::Parser;
 
     let cli = Cli::parse();
 
@@ -291,3 +295,64 @@ pub fn prompt_input(prompt: &str, default: Option<&str>) -> Result<String, Larps
 }
 
 pub use crate::common::home_dir;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::vocab;
+    use clap::{CommandFactory, ValueEnum};
+
+    /// Value strings clap derives for a `ValueEnum`, in declaration order.
+    fn enum_values<T: ValueEnum>() -> Vec<String> {
+        T::value_variants()
+            .iter()
+            .map(|v| {
+                v.to_possible_value()
+                    .expect("variant has no possible value")
+                    .get_name()
+                    .to_string()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn clap_bool_toggle_matches_vocab() {
+        assert_eq!(enum_values::<ClapBoolToggle>(), vocab::BOOL_TOGGLES);
+    }
+
+    #[test]
+    fn clap_agent_toggle_matches_vocab() {
+        assert_eq!(enum_values::<ClapAgentToggle>(), vocab::AGENT_TOGGLES);
+    }
+
+    #[test]
+    fn clap_prompt_kind_matches_vocab() {
+        assert_eq!(enum_values::<ClapPromptKind>(), vocab::PROMPT_KINDS);
+    }
+
+    #[test]
+    fn clap_prompt_action_matches_vocab() {
+        assert_eq!(enum_values::<ClapPromptAction>(), vocab::PROMPT_ACTIONS);
+    }
+
+    #[test]
+    fn clap_subcommands_match_vocab() {
+        let names: Vec<String> = Cli::command()
+            .get_subcommands()
+            .map(|sub| sub.get_name().to_string())
+            .collect();
+        // Order differs from the bash first-word list, so compare as sets.
+        for &want in vocab::SUBCOMMANDS {
+            assert!(
+                names.iter().any(|n| n == want),
+                "clap subcommand {want:?} missing from CLI"
+            );
+        }
+        assert_eq!(
+            names.len(),
+            vocab::SUBCOMMANDS.len(),
+            "clap subcommand count {names:?} differs from vocab {:?}",
+            vocab::SUBCOMMANDS
+        );
+    }
+}

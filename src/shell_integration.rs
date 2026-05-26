@@ -651,6 +651,118 @@ fn migrate_nlsh_rs_zsh_comment() -> Result<bool, LarpshellError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::vocab;
+
+    // These guards pin the hand-written completion strings to `vocab`, so a
+    // token added to or removed from `vocab` fails here unless every generator
+    // is updated in lockstep. Bash's `history|verbose` arm lists the bool
+    // toggles in `off on` order (cosmetic, differs from `vocab::BOOL_TOGGLES`),
+    // so its tokens are checked for membership rather than exact order.
+
+    #[test]
+    fn autocomplete_subcommands_match_vocab() {
+        // bash first-word list: all subcommands then the help/version flags.
+        let bash = generate_bash_autocomplete();
+        let expected = format!("{} --help --version", vocab::SUBCOMMANDS.join(" "));
+        assert!(
+            bash.contains(&expected),
+            "bash first-word completion drifted from vocab::SUBCOMMANDS"
+        );
+        // zsh and fish list each subcommand on its own line.
+        let zsh = generate_zsh_autocomplete();
+        let fish = generate_fish_autocomplete();
+        for &name in vocab::SUBCOMMANDS {
+            assert!(zsh.contains(&format!("'{name}:")), "zsh missing {name:?}");
+            assert!(
+                fish.contains(&format!("-a {name} ")),
+                "fish missing {name:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn autocomplete_agent_toggles_match_vocab() {
+        let joined = vocab::AGENT_TOGGLES.join(" ");
+        assert!(
+            generate_bash_autocomplete().contains(&format!("compgen -W \"{joined}\"")),
+            "bash agent toggles drifted from vocab"
+        );
+        assert!(
+            generate_fish_autocomplete().contains(&format!("-a \"{joined}\"")),
+            "fish agent toggles drifted from vocab"
+        );
+        for &t in vocab::AGENT_TOGGLES {
+            assert!(
+                generate_zsh_autocomplete().contains(&format!("'{t}:")),
+                "zsh agent toggle {t:?} missing"
+            );
+        }
+    }
+
+    #[test]
+    fn autocomplete_bool_toggles_match_vocab() {
+        // Membership only: completion order is cosmetic and differs per shell.
+        for &t in vocab::BOOL_TOGGLES {
+            assert!(
+                generate_bash_autocomplete().contains(t),
+                "bash bool toggle {t:?} missing"
+            );
+            assert!(
+                generate_fish_autocomplete().contains(t),
+                "fish bool toggle {t:?} missing"
+            );
+        }
+    }
+
+    #[test]
+    fn autocomplete_prompt_kinds_match_vocab() {
+        let joined = vocab::PROMPT_KINDS.join(" ");
+        assert!(
+            generate_bash_autocomplete().contains(&format!("compgen -W \"{joined}\"")),
+            "bash prompt kinds drifted from vocab"
+        );
+        for &k in vocab::PROMPT_KINDS {
+            assert!(
+                generate_fish_autocomplete().contains(&format!("-a {k} ")),
+                "fish prompt kind {k:?} missing"
+            );
+            assert!(
+                generate_zsh_autocomplete().contains(&format!("'{k}:")),
+                "zsh prompt kind {k:?} missing"
+            );
+        }
+    }
+
+    #[test]
+    fn autocomplete_prompt_actions_match_vocab() {
+        let joined = vocab::PROMPT_ACTIONS.join(" ");
+        assert!(
+            generate_bash_autocomplete().contains(&format!("compgen -W \"{joined}\"")),
+            "bash prompt actions drifted from vocab"
+        );
+        assert!(
+            generate_fish_autocomplete().contains(&format!("-a \"{joined}\"")),
+            "fish prompt actions drifted from vocab"
+        );
+        for &a in vocab::PROMPT_ACTIONS {
+            assert!(
+                generate_zsh_autocomplete().contains(&format!("'{a}:")),
+                "zsh prompt action {a:?} missing"
+            );
+        }
+    }
+
+    #[test]
+    fn wrapper_passthroughs_cover_vocab_subcommands() {
+        // The bash/fish wrapper functions pass every subcommand straight through
+        // to `command larpshell` instead of eval'ing the output.
+        let bash = generate_bash_function();
+        let fish = generate_fish_function();
+        for &name in vocab::SUBCOMMANDS {
+            assert!(bash.contains(name), "bash wrapper missing {name:?}");
+            assert!(fish.contains(name), "fish wrapper missing {name:?}");
+        }
+    }
 
     #[test]
     fn bash_autocomplete_has_verbose_subcommand() {
