@@ -301,25 +301,28 @@ where
     let mut editor_lock = EDITOR
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let editor = editor_lock.get_or_insert_with(|| {
-        let mut ed = Editor::<NlshHelper, DefaultHistory>::with_config(
+    if editor_lock.is_none() {
+        let mut editor = Editor::<NlshHelper, DefaultHistory>::with_config(
             Config::builder()
                 .completion_type(CompletionType::Circular)
                 .build(),
         )
-        .expect("failed to initialize rustyline editor");
-        ed.set_helper(Some(NlshHelper));
-        ed.bind_sequence(
+        .map_err(io::Error::other)?;
+        editor.set_helper(Some(NlshHelper));
+        editor.bind_sequence(
             Event::Any,
             EventHandler::Conditional(Box::new(SlashPreviewHandler)),
         );
         if config::history_enabled()
             && let Ok(path) = config::history_path()
         {
-            let _ = ed.load_history(&path);
+            let _ = editor.load_history(&path);
         }
-        ed
-    });
+        *editor_lock = Some(editor);
+    }
+    let Some(editor) = editor_lock.as_mut() else {
+        return Err(io::Error::other("failed to initialize rustyline editor"));
+    };
     let cwd = current_directory_display();
     let prompt = format!(
         "{}:{}{} ",

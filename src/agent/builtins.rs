@@ -412,12 +412,12 @@ fn fetch_url_tool() -> RegisteredTool {
     )
 }
 
-static FETCH_CLIENT: LazyLock<reqwest::blocking::Client> = LazyLock::new(|| {
+static FETCH_CLIENT: LazyLock<Result<reqwest::blocking::Client, String>> = LazyLock::new(|| {
     reqwest::blocking::Client::builder()
         .user_agent(concat!("larpshell/", env!("CARGO_PKG_VERSION")))
         .timeout(Duration::from_secs(10))
         .build()
-        .expect("failed to build HTTP client for fetch_url")
+        .map_err(|error| format!("cannot initialize HTTP client: {error}"))
 });
 
 fn execute_fetch_url(url: &str) -> Result<String, String> {
@@ -426,6 +426,8 @@ fn execute_fetch_url(url: &str) -> Result<String, String> {
     }
 
     let response = FETCH_CLIENT
+        .as_ref()
+        .map_err(String::clone)?
         .get(url)
         .send()
         .map_err(|error| format!("cannot fetch URL: {error}"))?;

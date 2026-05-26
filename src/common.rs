@@ -6,7 +6,6 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::LazyLock;
 
-use nix::libc;
 use strip_ansi_escapes::strip;
 use unicode_width::UnicodeWidthStr;
 
@@ -190,21 +189,6 @@ pub fn flush_stderr() {
 }
 
 /// Gets the terminal width in columns.
-#[cfg(unix)]
-pub fn terminal_width() -> usize {
-    // SAFETY: `winsize` is a POD C struct; zeroing it is a valid initialised
-    // state. `ioctl` writes into `ws` only on success (return value 0), and
-    // we check that before reading `ws_col`.
-    unsafe {
-        let mut ws: libc::winsize = std::mem::zeroed();
-        if libc::ioctl(libc::STDERR_FILENO, libc::TIOCGWINSZ, &mut ws) == 0 && ws.ws_col > 0 {
-            return ws.ws_col as usize;
-        }
-    }
-    80
-}
-
-#[cfg(not(unix))]
 pub fn terminal_width() -> usize {
     Command::new("tput")
         .arg("cols")
