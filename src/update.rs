@@ -1,13 +1,9 @@
-use std::sync::OnceLock;
-
 use colored::Colorize;
 use serde::Deserialize;
 use tokio::task::JoinHandle;
 
 use crate::common::CTP_PRIMARY;
 use crate::confirmation::style_message_markup;
-
-static UPDATE_RESULT: OnceLock<bool> = OnceLock::new();
 
 #[derive(Deserialize)]
 struct CrateInfo {
@@ -72,9 +68,7 @@ pub async fn is_update_available() -> bool {
     let Ok(info) = response.json::<CrateInfo>().await else {
         return false;
     };
-    let available = info.krate.newest_version != env!("CARGO_PKG_VERSION");
-    UPDATE_RESULT.set(available).ok();
-    available
+    info.krate.newest_version != env!("CARGO_PKG_VERSION")
 }
 
 fn print_notice() {
