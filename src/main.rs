@@ -16,7 +16,7 @@ mod uninstall;
 mod update;
 mod vocab;
 
-use std::io::IsTerminal;
+use std::io::{IsTerminal, Write};
 use std::process::ExitCode;
 use tokio::io::AsyncReadExt;
 use tokio::task::JoinHandle;
@@ -608,8 +608,8 @@ fn prompt_spec(kind: &PromptKind) -> PromptSpec {
             load: config::load_agent_prompt,
             save: config::save_agent_prompt,
             default: DEFAULT_AGENT_PROMPT,
-            validate: validate_sys_prompt,
-            invalid_message: "agent prompt must contain the {request} placeholder.",
+            validate: |_| true,
+            invalid_message: "",
             warn_only: true,
         },
         PromptKind::AgentSafe => PromptSpec {
@@ -617,8 +617,8 @@ fn prompt_spec(kind: &PromptKind) -> PromptSpec {
             load: config::load_agent_safe_prompt,
             save: config::save_agent_safe_prompt,
             default: DEFAULT_AGENT_SAFE_PROMPT,
-            validate: validate_sys_prompt,
-            invalid_message: "agent-safe prompt must contain the {request} placeholder.",
+            validate: |_| true,
+            invalid_message: "",
             warn_only: true,
         },
     }
@@ -665,12 +665,7 @@ fn edit_prompt(spec: &PromptSpec) -> Result<(), LarpshellError> {
 fn reset_prompt(spec: &PromptSpec) -> Result<(), LarpshellError> {
     let path = (spec.path)()?;
     if path.exists() {
-        let bak_ext = match path.extension() {
-            Some(ext) => format!("{}.bak", ext.to_string_lossy()),
-            None => "bak".to_string(),
-        };
-        let bak = path.with_extension(bak_ext);
-        std::fs::rename(&path, &bak).map_err(LarpshellError::IoError)?;
+        let bak = backup_prompt_file(&path)?;
         (spec.save)(spec.default)?;
         cli::print_ok(&format!(
             "Reset to default (backup saved as {})",
@@ -681,6 +676,55 @@ fn reset_prompt(spec: &PromptSpec) -> Result<(), LarpshellError> {
         cli::print_ok("Reset to default.");
     }
     Ok(())
+}
+
+fn backup_prompt_file(path: &std::path::Path) -> Result<std::path::PathBuf, LarpshellError> {
+    let mut source = std::fs::File::open(path)?;
+    let mut backup = create_unique_backup(path)?;
+    std::io::copy(&mut source, &mut backup)?;
+    backup.flush()?;
+    Ok(backup.path)
+}
+
+struct PromptBackup {
+    file: std::fs::File,
+    path: std::path::PathBuf,
+}
+
+impl Write for PromptBackup {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.file.write(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.file.flush()
+    }
+}
+
+fn create_unique_backup(path: &std::path::Path) -> Result<PromptBackup, LarpshellError> {
+    for attempt in 0..100 {
+        let bak = backup_path(path, attempt);
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&bak)
+        {
+            Ok(file) => return Ok(PromptBackup { file, path: bak }),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(LarpshellError::IoError(error)),
+        }
+    }
+    Err(LarpshellError::ConfigError(
+        "failed to create unique prompt backup".to_string(),
+    ))
+}
+
+fn backup_path(path: &std::path::Path, attempt: u32) -> std::path::PathBuf {
+    let bak_ext = match path.extension() {
+        Some(ext) => format!("{}.bak.{attempt}", ext.to_string_lossy()),
+        None => format!("bak.{attempt}"),
+    };
+    path.with_extension(bak_ext)
 }
 
 fn open_in_editor(path: &std::path::Path) -> Result<(), LarpshellError> {

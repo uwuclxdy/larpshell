@@ -2,9 +2,13 @@ use colored::Colorize;
 use inquire::{Confirm, Text};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::fs;
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::cli::{print_error, print_ok_bold, prompt_input, prompt_select};
+use crate::cli::{print_error, print_ok_bold, print_warning, prompt_input, prompt_select};
 use crate::common::{CTP_GREEN, clear_line};
 use crate::confirmation::style_message_markup;
 use crate::error::LarpshellError;
@@ -189,14 +193,32 @@ pub struct OpenAIConfig {
     pub model: String,
 }
 
-fn migrate_txt_prompt(md_path: &std::path::Path) {
+fn migrate_txt_prompt(md_path: &Path) {
     let txt_path = md_path.with_extension("txt");
-    if txt_path.exists() && !md_path.exists() {
-        let _ =
-            fs::rename(&txt_path, md_path).or_else(|_| fs::copy(&txt_path, md_path).map(|_| ()));
-        if md_path.exists() {
-            let _ = fs::remove_file(&txt_path);
-        }
+    if !txt_path.exists() || md_path.exists() {
+        return;
+    }
+
+    let remove_source = match fs::rename(&txt_path, md_path) {
+        Ok(()) => false,
+        Err(rename_error) => match fs::copy(&txt_path, md_path) {
+            Ok(_) => true,
+            Err(copy_error) => {
+                print_warning(&format!(
+                    "failed to migrate {} to {}: {rename_error}; copy fallback failed: {copy_error}",
+                    txt_path.display(),
+                    md_path.display()
+                ));
+                false
+            }
+        },
+    };
+
+    if remove_source && let Err(error) = fs::remove_file(&txt_path) {
+        print_warning(&format!(
+            "failed to remove migrated prompt {}: {error}",
+            txt_path.display()
+        ));
     }
 }
 
@@ -353,16 +375,41 @@ pub fn load_config() -> Result<Config, LarpshellError> {
     }
 }
 
-/// Writes `contents` to `path` atomically: writes to a sibling `*.tmp` file
-/// first, then renames it over the target so a crash between the two steps
-/// leaves the original intact.
+static ATOMIC_WRITE_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+fn atomic_temp_path(path: &Path) -> PathBuf {
+    let mut name = path
+        .file_name()
+        .map_or_else(|| "config".into(), |name| name.to_os_string());
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_nanos());
+    name.push(format!(
+        ".{}.{}.tmp",
+        std::process::id(),
+        now + u128::from(ATOMIC_WRITE_COUNTER.fetch_add(1, Ordering::Relaxed))
+    ));
+    path.with_file_name(name)
+}
+
+/// Writes `contents` to `path` atomically via an exclusive same-directory temp file.
 pub(crate) fn atomic_write(path: &Path, contents: &str) -> Result<(), LarpshellError> {
-    let tmp = path.with_extension("tmp");
-    if let Err(e) = fs::write(&tmp, contents) {
+    let tmp = atomic_temp_path(path);
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&tmp)
+        .map_err(|e| LarpshellError::ConfigError(format!("failed to create temp config: {e}")))?;
+    if let Err(e) = file
+        .write_all(contents.as_bytes())
+        .and_then(|()| file.sync_all())
+    {
+        let _ = fs::remove_file(&tmp);
         return Err(LarpshellError::ConfigError(format!(
             "failed to write temp config: {e}"
         )));
     }
+    drop(file);
     if let Err(e) = fs::rename(&tmp, path) {
         let _ = fs::remove_file(&tmp);
         return Err(LarpshellError::ConfigError(format!(
@@ -447,14 +494,18 @@ fn colored_provider_options(current_provider: Option<ActiveProvider>) -> Vec<Str
         .collect()
 }
 
-const fn provider_has_saved_credentials(
+fn provider_has_saved_credentials(
     providers: &MultiProviderConfig,
     selected_variant: ActiveProvider,
 ) -> bool {
     match selected_variant {
         ActiveProvider::Gemini => providers.gemini.is_some(),
         ActiveProvider::Ollama => providers.ollama.is_some(),
-        ActiveProvider::OpenRouter => providers.openrouter.is_some(),
+        ActiveProvider::OpenRouter => providers
+            .openrouter
+            .as_ref()
+            .and_then(|config| config.api_key.as_deref())
+            .is_some_and(|api_key| !api_key.trim().is_empty()),
         ActiveProvider::OpenAI => providers.openai.is_some(),
     }
 }
@@ -562,11 +613,10 @@ fn configure_openrouter(
     let url_default = existing.map_or("https://openrouter.ai/api/v1", |e| e.base_url.as_str());
     let base_url = prompt_input("OpenRouter base URL", Some(url_default))?;
 
-    let api_key = prompt_optional_api_key(
+    let api_key = Some(prompt_api_key(
         "OpenRouter API key",
-        "Required for OpenRouter requests",
         existing.and_then(|e| e.api_key.as_deref()),
-    )?;
+    )?);
 
     let model_default = existing.map_or("openrouter/auto", |e| e.model.as_str());
     let model = prompt_input("Model name", Some(model_default))?;
@@ -619,7 +669,13 @@ fn prompt_api_key(label: &str, saved: Option<&str>) -> Result<String, LarpshellE
         }
         Ok(input)
     } else {
-        Ok(prompt_input(label, None)?)
+        loop {
+            let input = prompt_input(label, None)?;
+            if !input.trim().is_empty() {
+                return Ok(input);
+            }
+            print_error("API key cannot be empty");
+        }
     }
 }
 
@@ -696,6 +752,57 @@ mod tests {
             .position(|(_, v)| *v == ActiveProvider::OpenAI)
             .unwrap_or(0);
         assert_eq!(idx, 3);
+    }
+
+    #[test]
+    fn openrouter_saved_credentials_require_api_key() {
+        let providers = MultiProviderConfig {
+            openrouter: Some(OpenRouterConfig {
+                base_url: "https://openrouter.ai/api/v1".to_string(),
+                api_key: None,
+                model: "openrouter/auto".to_string(),
+            }),
+            ..Default::default()
+        };
+
+        assert!(!provider_has_saved_credentials(
+            &providers,
+            ActiveProvider::OpenRouter
+        ));
+    }
+
+    #[test]
+    fn openrouter_saved_credentials_reject_blank_api_key() {
+        let providers = MultiProviderConfig {
+            openrouter: Some(OpenRouterConfig {
+                base_url: "https://openrouter.ai/api/v1".to_string(),
+                api_key: Some("   ".to_string()),
+                model: "openrouter/auto".to_string(),
+            }),
+            ..Default::default()
+        };
+
+        assert!(!provider_has_saved_credentials(
+            &providers,
+            ActiveProvider::OpenRouter
+        ));
+    }
+
+    #[test]
+    fn openrouter_saved_credentials_accept_saved_api_key() {
+        let providers = MultiProviderConfig {
+            openrouter: Some(OpenRouterConfig {
+                base_url: "https://openrouter.ai/api/v1".to_string(),
+                api_key: Some("sk-or-v1-test".to_string()),
+                model: "openrouter/auto".to_string(),
+            }),
+            ..Default::default()
+        };
+
+        assert!(provider_has_saved_credentials(
+            &providers,
+            ActiveProvider::OpenRouter
+        ));
     }
 
     #[test]
