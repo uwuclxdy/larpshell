@@ -126,11 +126,9 @@ pub struct MultiProviderConfig {
     pub openai: Option<OpenAIConfig>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Clone)]
 pub struct ProviderConfig {
-    #[serde(rename = "type")]
     pub provider_type: ActiveProvider,
-    #[serde(flatten)]
     pub config: ProviderSpecificConfig,
 }
 
@@ -237,7 +235,11 @@ pub fn explain_prompt_path() -> Result<PathBuf, LarpshellError> {
 pub fn load_explain_prompt() -> Option<String> {
     let path = explain_prompt_path().ok()?;
     migrate_txt_prompt(&path);
-    let _ = migration::migrate_explain_prompt();
+    // migrate_explain_prompt reads the file; if it migrated, return the new
+    // content directly to avoid a second read.
+    if let Some(migrated) = migration::migrate_explain_prompt().ok().flatten() {
+        return Some(migrated);
+    }
     fs::read_to_string(path).ok()
 }
 

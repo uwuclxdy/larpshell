@@ -56,21 +56,24 @@ fn can_migrate_explain_prompt(content: &str) -> bool {
     matches!(content, OLD_EXPLAIN_PROMPT_V1 | OLD_EXPLAIN_PROMPT_V2)
 }
 
-pub fn migrate_explain_prompt() -> Result<bool, LarpshellError> {
+/// Migrates the explain prompt if it matches a known old version.
+/// Returns `Some(new_content)` when migration ran (caller need not re-read),
+/// `None` when no migration was needed, or an error.
+pub fn migrate_explain_prompt() -> Result<Option<String>, LarpshellError> {
     let explain_prompt_path = explain_prompt_path()?;
 
     if !explain_prompt_path.exists() {
-        return Ok(false);
+        return Ok(None);
     }
 
     let content = fs::read_to_string(&explain_prompt_path)?;
 
     if can_migrate_explain_prompt(&content) {
         atomic_write(&explain_prompt_path, DEFAULT_EXPLAIN_PROMPT)?;
-        return Ok(true);
+        return Ok(Some(DEFAULT_EXPLAIN_PROMPT.to_string()));
     }
 
-    Ok(false)
+    Ok(None)
 }
 
 pub fn migrate_config(config_path: &Path) -> Result<bool, LarpshellError> {
