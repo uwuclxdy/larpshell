@@ -465,12 +465,14 @@ fn build_tool_registry(agent_mode: AgentMode) -> ToolRegistry {
                     continue;
                 }
                 match client.list_tools() {
-                    Ok(tools) => {
-                        for tool in tools {
-                            registry.register_mcp_tool(tool);
+                    Ok(tools) => match registry.add_mcp_client(client) {
+                        Ok(()) => {
+                            for tool in tools {
+                                registry.register_mcp_tool(tool);
+                            }
                         }
-                        registry.add_mcp_client(client);
-                    }
+                        Err(error) => print_warning(&error),
+                    },
                     Err(error) => {
                         print_warning(&format!("MCP server '{}': {error}", mcp_config.name));
                     }

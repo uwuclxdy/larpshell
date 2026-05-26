@@ -283,6 +283,7 @@ impl StdioMcpClient {
 impl Drop for StdioMcpClient {
     fn drop(&mut self) {
         let _ = self.child.kill();
+        let _ = self.child.wait();
     }
 }
 

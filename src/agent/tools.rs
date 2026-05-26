@@ -48,6 +48,16 @@ struct McpClientEntry {
     client: Mutex<crate::agent::mcp::StdioMcpClient>,
 }
 
+fn mcp_prefix_collision_error(existing_prefix: &str, prefix: &str) -> Option<String> {
+    (existing_prefix.starts_with(prefix) || prefix.starts_with(existing_prefix)).then(|| {
+        format!(
+            "MCP server name collision: '{}' and '{}' share a prefix; one would shadow the other during tool routing",
+            existing_prefix.trim_end_matches('_'),
+            prefix.trim_end_matches('_'),
+        )
+    })
+}
+
 pub struct ToolRegistry {
     tools: Vec<RegisteredTool>,
     mcp_clients: Vec<McpClientEntry>,
@@ -71,25 +81,16 @@ impl ToolRegistry {
         self.tools.push(RegisteredTool::Mcp { definition });
     }
 
-    pub fn add_mcp_client(&mut self, client: crate::agent::mcp::StdioMcpClient) {
+    pub fn add_mcp_client(
+        &mut self,
+        client: crate::agent::mcp::StdioMcpClient,
+    ) -> Result<(), String> {
         let mut prefix = client.server_name().to_owned();
         prefix.push('_');
 
-        // Reject server names that are a prefix of an existing server name (or vice-versa),
-        // because `try_execute_mcp_tool` routes by `starts_with` and would mis-route tool
-        // calls (e.g. "git_status" would match both "git_" and "github_" if "git" is
-        // registered before "github"). Panic at registration so the misconfiguration is
-        // caught during startup rather than silently mislabelling calls at runtime.
         for existing in &self.mcp_clients {
-            let a = &existing.prefix;
-            let b = &prefix;
-            if a.starts_with(b.as_str()) || b.starts_with(a.as_str()) {
-                panic!(
-                    "MCP server name collision: '{}' and '{}' share a prefix — \
-                     one would shadow the other during tool routing",
-                    a.trim_end_matches('_'),
-                    b.trim_end_matches('_'),
-                );
+            if let Some(error) = mcp_prefix_collision_error(&existing.prefix, &prefix) {
+                return Err(error);
             }
         }
 
@@ -97,6 +98,7 @@ impl ToolRegistry {
             prefix,
             client: Mutex::new(client),
         });
+        Ok(())
     }
 
     pub fn definitions(&self) -> Vec<ToolDefinition> {
@@ -175,6 +177,13 @@ mod tests {
         for name in expected_names {
             assert!(names.contains(&name.to_string()));
         }
+    }
+
+    #[test]
+    fn mcp_prefix_collision_is_reported_as_error() {
+        let error = mcp_prefix_collision_error("git_", "git_local_").unwrap();
+
+        assert!(error.contains("MCP server name collision: 'git' and 'git_local'"));
     }
 
     #[test]

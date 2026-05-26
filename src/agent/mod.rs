@@ -74,6 +74,7 @@ enum Key {
     Char(char),
     CtrlC,
     Other,
+    Eof,
 }
 
 fn string_argument<'a>(
@@ -466,7 +467,7 @@ fn confirm_tool_call() -> ToolConfirmResult {
                 clear_line();
                 return ToolConfirmResult::Deny;
             }
-            Key::CtrlC => {
+            Key::CtrlC | Key::Eof => {
                 clear_line();
                 return ToolConfirmResult::Cancel;
             }
@@ -485,26 +486,24 @@ const fn parse_byte(b: u8) -> Key {
 }
 
 fn read_key() -> Key {
+    read_key_from(&mut std::io::stdin().lock())
+}
+
+fn read_key_from(reader: &mut impl std::io::Read) -> Key {
     #[cfg(unix)]
     if let Some(_guard) = RawModeGuard::enter() {
-        let mut buffer = [0u8; 1];
-        // I/O error is treated as EOF: read_key cannot propagate errors, and
-        // returning Key::Other lets the confirm loop spin until valid input arrives.
-        let key =
-            if std::io::Read::read(&mut std::io::stdin().lock(), &mut buffer).unwrap_or(0) == 0 {
-                Key::Other
-            } else {
-                parse_byte(buffer[0])
-            };
-        return key; // _guard drops here, restoring termios
+        return read_byte(reader); // _guard drops here, restoring termios
     }
 
+    read_byte(reader)
+}
+
+fn read_byte(reader: &mut impl std::io::Read) -> Key {
     let mut buffer = [0u8; 1];
-    // Same EOF-on-error rationale as above.
-    if std::io::Read::read(&mut std::io::stdin().lock(), &mut buffer).unwrap_or(0) == 0 {
-        return Key::Other;
+    match reader.read(&mut buffer) {
+        Ok(0) | Err(_) => Key::Eof,
+        Ok(_) => parse_byte(buffer[0]),
     }
-    parse_byte(buffer[0])
 }
 
 fn command_not_allowed_tip(error: &str) -> Option<String> {
@@ -1023,6 +1022,13 @@ mod tests {
 
         assert!(matches!(response.kind, FinalResponseKind::Message));
         assert_eq!(response.content, "done");
+    }
+
+    #[test]
+    fn read_key_from_returns_eof_on_closed_input() {
+        let mut input = std::io::empty();
+
+        assert!(matches!(read_key_from(&mut input), Key::Eof));
     }
 
     #[test]
