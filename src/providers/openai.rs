@@ -177,6 +177,7 @@ impl OpenAICompatibleProvider {
         body.choices
             .first()
             .and_then(|choice| choice.message.content.clone())
+            .filter(|content| !content.is_empty())
             .ok_or_else(|| {
                 LarpshellError::InvalidResponse(format!("no response from {}", self.provider_slug))
             })
@@ -278,9 +279,14 @@ impl OpenAICompatibleProvider {
             return Ok(ChatResponse::ToolCalls(calls));
         }
 
-        let content = choice.message.content.clone().ok_or_else(|| {
-            LarpshellError::InvalidResponse(format!("no content from {}", self.provider_slug))
-        })?;
+        let content = choice
+            .message
+            .content
+            .clone()
+            .filter(|content| !content.is_empty())
+            .ok_or_else(|| {
+                LarpshellError::InvalidResponse(format!("no content from {}", self.provider_slug))
+            })?;
 
         Ok(ChatResponse::Message(content))
     }

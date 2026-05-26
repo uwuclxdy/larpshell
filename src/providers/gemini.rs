@@ -16,6 +16,8 @@ pub struct GeminiProvider {
 #[derive(Serialize)]
 struct GeminiRequest {
     contents: Vec<Content>,
+    #[serde(rename = "systemInstruction", skip_serializing_if = "Option::is_none")]
+    system_instruction: Option<Content>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<Vec<GeminiToolDeclaration>>,
 }
@@ -122,20 +124,31 @@ impl GeminiProvider {
                     thought_signature: None,
                 }],
             }],
+            system_instruction: None,
             tools: None,
         }
     }
 
-    fn parse_generate_error(status: reqwest::StatusCode, response_text: &str) -> LarpshellError {
+    fn parse_generate_error(
+        status: reqwest::StatusCode,
+        response_text: &str,
+        retry_after_header: Option<&str>,
+    ) -> LarpshellError {
         if let Ok(error_response) = serde_json::from_str::<GeminiErrorResponse>(response_text) {
-            return LarpshellError::from_http_status(
+            return LarpshellError::from_http_status_with_retry_header(
                 reqwest::StatusCode::from_u16(error_response.error.code).unwrap_or(status),
                 "gemini",
                 &error_response.error.message,
+                retry_after_header,
             );
         }
 
-        LarpshellError::from_http_status(status, "gemini", response_text)
+        LarpshellError::from_http_status_with_retry_header(
+            status,
+            "gemini",
+            response_text,
+            retry_after_header,
+        )
     }
 
     fn parse_generate_response(response_text: &str) -> Result<GeminiResponse, LarpshellError> {
@@ -210,13 +223,22 @@ impl GeminiProvider {
             .map_err(|e| LarpshellError::from_reqwest(&e, "gemini"))?;
 
         let status = response.status();
+        let retry_after = response
+            .headers()
+            .get(reqwest::header::RETRY_AFTER)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
         let response_text = response
             .text()
             .await
             .map_err(|e| LarpshellError::InvalidResponse(e.to_string()))?;
 
         if !status.is_success() {
-            return Err(Self::parse_generate_error(status, &response_text));
+            return Err(Self::parse_generate_error(
+                status,
+                &response_text,
+                retry_after.as_deref(),
+            ));
         }
 
         Self::parse_generate_response(&response_text)
@@ -276,6 +298,25 @@ impl GeminiProvider {
         };
 
         Ok(Content { role, parts })
+    }
+
+    fn system_instruction(messages: &[ChatMessage]) -> Option<Content> {
+        let text = messages
+            .iter()
+            .filter(|message| message.role == Role::System)
+            .filter_map(|message| message.content.as_deref())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        (!text.is_empty()).then(|| Content {
+            role: None,
+            parts: vec![Part {
+                text: Some(text),
+                function_call: None,
+                function_response: None,
+                thought_signature: None,
+            }],
+        })
     }
 
     fn tool_declarations(tools: &[ToolDefinition]) -> Option<Vec<GeminiToolDeclaration>> {
@@ -366,6 +407,7 @@ impl AIProvider for GeminiProvider {
                 .filter(|message| message.role != Role::System)
                 .map(Self::message_content)
                 .collect::<Result<Vec<_>, _>>()?,
+            system_instruction: Self::system_instruction(messages),
             tools: Self::tool_declarations(tools),
         };
 
@@ -451,6 +493,47 @@ mod tests {
                 );
             }
             other => panic!("expected InvalidResponse, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn gemini_request_serializes_system_instruction() {
+        let messages = [
+            ChatMessage::system("Use tools before answering".to_string()),
+            ChatMessage::user("show disk usage".to_string()),
+        ];
+        let request = GeminiRequest {
+            contents: messages
+                .iter()
+                .filter(|message| message.role != Role::System)
+                .map(GeminiProvider::message_content)
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap(),
+            system_instruction: GeminiProvider::system_instruction(&messages),
+            tools: None,
+        };
+
+        let json = serde_json::to_value(request).unwrap();
+        assert_eq!(
+            json["systemInstruction"]["parts"][0]["text"],
+            "Use tools before answering"
+        );
+        assert_eq!(json["contents"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn gemini_generate_error_preserves_retry_after_header() {
+        let err = GeminiProvider::parse_generate_error(
+            reqwest::StatusCode::TOO_MANY_REQUESTS,
+            r#"{"error":{"code":429,"message":"quota exceeded"}}"#,
+            Some("17"),
+        );
+
+        match err {
+            LarpshellError::RateLimitExceeded { retry_after } => {
+                assert_eq!(retry_after, Some(17));
+            }
+            other => panic!("expected RateLimitExceeded, got {other:?}"),
         }
     }
 }

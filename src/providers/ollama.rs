@@ -80,7 +80,7 @@ impl OllamaProvider {
     pub fn new(config: &OllamaConfig) -> Result<Self, LarpshellError> {
         Ok(Self {
             base: BaseProvider::new()?,
-            base_url: config.base_url.clone(),
+            base_url: config.base_url.trim_end_matches('/').to_string(),
             model: config.model.clone(),
         })
     }
@@ -261,5 +261,16 @@ mod tests {
         let response: OllamaChatResponse = serde_json::from_str(json).unwrap();
         // filter(|s| !s.is_empty()) turns "" into None → error path
         assert!(response.message.content.filter(|s| !s.is_empty()).is_none());
+    }
+
+    #[test]
+    fn new_normalizes_trailing_base_url_slash() {
+        let provider = OllamaProvider::new(&OllamaConfig {
+            base_url: "http://localhost:11434/".to_string(),
+            model: "llama3".to_string(),
+        })
+        .unwrap();
+
+        assert_eq!(provider.base_url, "http://localhost:11434");
     }
 }
