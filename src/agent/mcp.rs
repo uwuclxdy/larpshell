@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const MCP_REQUEST_TIMEOUT_SECS: u64 = 30;
 
@@ -155,10 +155,12 @@ impl StdioMcpClient {
         // A spec-compliant server may emit notifications (messages with no `id`, or an
         // `id` that doesn't match our request) before sending the real response. Keep
         // reading until we get a message whose `id` matches `self.request_id`.
-        // Each recv_timeout call covers one line; the full loop is bounded by the timeout.
-        let timeout = Duration::from_secs(MCP_REQUEST_TIMEOUT_SECS);
+        // One deadline is set for the entire loop; each iteration gets only the
+        // remaining budget so the total wait is bounded by MCP_REQUEST_TIMEOUT_SECS.
+        let deadline = Instant::now() + Duration::from_secs(MCP_REQUEST_TIMEOUT_SECS);
         loop {
-            let line = match self.receiver.recv_timeout(timeout) {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            let line = match self.receiver.recv_timeout(remaining) {
                 Ok(Ok(line)) => line,
                 Ok(Err(error)) => {
                     return Err(format!("read from MCP server '{}': {error}", self.name));
