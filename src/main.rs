@@ -834,41 +834,52 @@ async fn generate_with_cancellation(
 /// In single-command mode, Ctrl-C cancels generation and returns
 /// `LarpshellError::Cancelled` so the caller can drop `Runtime` (and with it
 /// any MCP children) before exiting with `EXIT_SIGINT`.
+///
+/// The generation body is identical to interactive mode; the two differ only in
+/// how the caller treats `Cancelled` (interactive re-prompts, single-shot exits).
 async fn generate_single_shot(
     provider: &dyn AIProvider,
     prompt: &str,
 ) -> Result<String, LarpshellError> {
-    #[cfg(unix)]
-    let saved_echo = common::disable_terminal_echo();
-
-    let cancel_token = CancellationToken::new();
-    let cancel_clone = cancel_token.clone();
-    let ctrl_c = tokio::spawn(async move {
-        tokio::signal::ctrl_c().await.ok();
-        cancel_clone.cancel();
-    });
-
-    let result = tokio::select! {
-        res = provider.generate(prompt) => {
-            ctrl_c.abort();
-            res
-        }
-        () = cancel_token.cancelled() => {
-            ctrl_c.abort();
-            Err(LarpshellError::Cancelled)
-        }
-    };
-
-    clear_line();
-    show_cursor();
-    #[cfg(unix)]
-    if let Some(saved) = saved_echo.as_ref() {
-        common::restore_terminal_echo(saved);
-    }
-    result
+    generate_with_cancellation(provider, prompt).await
 }
 
 // ── confirmation loop ───────────────────────────────────────────────────────
+
+/// What the confirmation loop should do next after a non-`Explain` choice.
+enum ConfirmStep {
+    /// Stop the loop without cancelling (Yes after execute, or No).
+    Done,
+    /// Cancel was chosen; the loop maps this to its `CommandMode`.
+    Cancel,
+    /// Edit was chosen (and possibly applied); re-prompt with the command.
+    Retry,
+}
+
+/// Handles the `Yes`/`No`/`Cancel`/`Edit` arms shared by the with-explain prompt
+/// and the post-explanation prompt. `Explain` is handled by the caller.
+fn resolve_confirm(
+    result: ConfirmResult,
+    command: &mut String,
+) -> Result<ConfirmStep, LarpshellError> {
+    match result {
+        ConfirmResult::Yes => {
+            execute_or_print(command)?;
+            Ok(ConfirmStep::Done)
+        }
+        ConfirmResult::No => Ok(ConfirmStep::Done),
+        ConfirmResult::Cancel => Ok(ConfirmStep::Cancel),
+        ConfirmResult::Edit => {
+            if let Some(new_cmd) = edit_command(command) {
+                *command = new_cmd;
+            }
+            Ok(ConfirmStep::Retry)
+        }
+        // Explain is handled by the caller (with-explain) and not offered by the
+        // post-explanation prompt (Simple mode).
+        ConfirmResult::Explain => unreachable!(),
+    }
+}
 
 async fn confirm_loop(
     mut command: String,
@@ -879,43 +890,25 @@ async fn confirm_loop(
 ) -> Result<Option<String>, LarpshellError> {
     let cancelled = 'outer: loop {
         let cmd_lines = display_response(&command, response_style);
-        match confirm_with_explain(cmd_lines) {
-            ConfirmResult::Yes => {
-                execute_or_print(&command)?;
-                break 'outer false;
-            }
-            ConfirmResult::No => break 'outer false,
-            ConfirmResult::Cancel => match mode {
+        let result = confirm_with_explain(cmd_lines);
+
+        // The post-explanation prompt is the only path that isn't a plain
+        // non-Explain choice; everything else funnels through `resolve_confirm`.
+        let step = if let ConfirmResult::Explain = result {
+            let explanation = get_explanation(&command, provider).await?;
+            let expl_lines = display_explanation(&explanation);
+            resolve_confirm(confirm_execution(cmd_lines, expl_lines), &mut command)?
+        } else {
+            resolve_confirm(result, &mut command)?
+        };
+
+        match step {
+            ConfirmStep::Done => break 'outer false,
+            ConfirmStep::Retry => {}
+            ConfirmStep::Cancel => match mode {
                 CommandMode::Interactive => break 'outer true,
                 CommandMode::Single => return Err(LarpshellError::Cancelled),
             },
-            ConfirmResult::Edit => {
-                if let Some(new_cmd) = edit_command(&command) {
-                    command = new_cmd;
-                }
-            }
-            ConfirmResult::Explain => {
-                let explanation = get_explanation(&command, provider).await?;
-                let expl_lines = display_explanation(&explanation);
-                match confirm_execution(cmd_lines, expl_lines) {
-                    ConfirmResult::Yes => {
-                        execute_or_print(&command)?;
-                        break 'outer false;
-                    }
-                    ConfirmResult::No => break 'outer false,
-                    // Explain is not offered by confirm_execution (Simple mode).
-                    ConfirmResult::Explain => unreachable!(),
-                    ConfirmResult::Cancel => match mode {
-                        CommandMode::Interactive => break 'outer true,
-                        CommandMode::Single => return Err(LarpshellError::Cancelled),
-                    },
-                    ConfirmResult::Edit => {
-                        if let Some(new_cmd) = edit_command(&command) {
-                            command = new_cmd;
-                        }
-                    }
-                }
-            }
         }
     };
 
