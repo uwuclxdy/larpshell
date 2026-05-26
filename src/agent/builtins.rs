@@ -18,49 +18,9 @@ const MAX_FILE_SIZE: usize = 100 * 1024;
 const MAX_FETCH_SIZE: usize = 100 * 1024;
 const MAX_SEARCH_MATCHES: usize = 50;
 const SAFE_COMMANDS: &[&str] = &[
-    "ls",
-    "cat",
-    "echo",
-    "grep",
-    "find",
-    "ps",
-    "whoami",
-    "uname",
-    "date",
-    "pwd",
-    "env",
-    "printenv",
-    "which",
-    "whereis",
-    "file",
-    "stat",
-    "id",
-    "groups",
-    "hostname",
-    "uptime",
-    "free",
-    "df",
-    "du",
-    "top",
-    "htop",
-    "vmstat",
-    "iostat",
-    "mpstat",
-    "sar",
-    "netstat",
-    "ss",
-    "ip",
-    "ifconfig",
-    "route",
-    "ping",
-    "traceroute",
-    "mtr",
-    "dig",
-    "nslookup",
-    "host",
-    "git",
-    "svn",
-    "hg",
+    "ls", "cat", "echo", "grep", "ps", "whoami", "uname", "date", "pwd", "env", "printenv",
+    "which", "whereis", "file", "stat", "id", "groups", "hostname", "uptime", "free", "df", "du",
+    "vmstat", "iostat", "mpstat", "sar", "netstat", "ss", "dig", "nslookup", "host", "git",
 ];
 const DANGEROUS_FLAG_PREFIXES: &[&str] = &["--delete", "--remove", "--force"];
 const DANGEROUS_ARGUMENT_TOKENS: &[&str] = &["rm", "mv", "cp", "chmod", "chown"];
@@ -363,7 +323,8 @@ fn execute_search_files(pattern: &str, directory_path: &str) -> Result<String, S
     let mut matches: Vec<String> = Vec::new();
     let mut truncated = false;
 
-    for entry in walker.flatten() {
+    for entry in walker {
+        let entry = entry.map_err(|error| format!("error traversing directory: {error}"))?;
         if matches.len() >= MAX_SEARCH_MATCHES {
             truncated = true;
             break;
@@ -383,7 +344,9 @@ fn execute_search_files(pattern: &str, directory_path: &str) -> Result<String, S
             truncated: &mut truncated,
         };
 
-        let _ = searcher.search_path(&matcher, entry_path, &mut sink);
+        searcher
+            .search_path(&matcher, entry_path, &mut sink)
+            .map_err(|error| format!("error searching {}: {error}", entry_path.display()))?;
     }
 
     if matches.is_empty() {
@@ -517,7 +480,7 @@ fn run_command_tool(agent_mode: AgentMode) -> RegisteredTool {
         },
         Box::new(move |args| {
             let command = args["command"].as_str().ok_or("command must be a string")?;
-            let command_args = command_args(args);
+            let command_args = command_args(args)?;
             execute_run_command(agent_mode, command, &command_args)
         }),
     )
@@ -533,33 +496,29 @@ const fn run_command_description(agent_mode: AgentMode) -> &'static str {
     }
 }
 
-fn command_args(args: &serde_json::Value) -> Vec<String> {
-    args.get("args")
-        .and_then(|value| value.as_array())
-        .map(|values| {
-            values
-                .iter()
-                .filter_map(|value| value.as_str())
+fn command_args(args: &serde_json::Value) -> Result<Vec<String>, String> {
+    let Some(value) = args.get("args") else {
+        return Ok(Vec::new());
+    };
+
+    let values = value.as_array().ok_or("args must be an array")?;
+    values
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
                 .map(ToString::to_string)
-                .collect::<Vec<_>>()
+                .ok_or_else(|| "args entries must be strings".to_string())
         })
-        .unwrap_or_default()
+        .collect()
 }
 
 fn split_command(command: &str, args: &[String]) -> Result<(String, Vec<String>), String> {
-    if !args.is_empty() {
-        return Ok((command.to_string(), args.to_vec()));
+    if command.is_empty() {
+        return Err("command must not be empty".to_string());
     }
 
-    let mut parts = command.split_whitespace();
-    let executable = parts
-        .next()
-        .ok_or_else(|| "command must not be empty".to_string())?;
-
-    Ok((
-        executable.to_string(),
-        parts.map(ToString::to_string).collect(),
-    ))
+    Ok((command.to_string(), args.to_vec()))
 }
 
 fn has_shell_metacharacters(arg: &str) -> bool {
@@ -653,16 +612,23 @@ fn git_command_is_read_only(args: &[String]) -> bool {
 }
 
 fn validate_safe_run_command(command: &str, args: &[String]) -> Result<(), String> {
-    let command_base = Path::new(command)
-        .file_stem()
-        .and_then(|segment| segment.to_str())
-        .unwrap_or(command);
+    if command.is_empty() {
+        return Err("command must not be empty".to_string());
+    }
 
-    if !SAFE_COMMANDS.contains(&command_base) {
+    if Path::new(command)
+        .file_name()
+        .and_then(|segment| segment.to_str())
+        != Some(command)
+    {
+        return Err(format!("path-qualified commands not allowed: {command}"));
+    }
+
+    if !SAFE_COMMANDS.contains(&command) {
         return Err(format!("command not allowed: {command}"));
     }
 
-    if command_base == "git" && !git_command_is_read_only(args) {
+    if command == "git" && !git_command_is_read_only(args) {
         return Err("dangerous git subcommand detected".to_string());
     }
 
@@ -680,15 +646,21 @@ fn execute_run_command(
     command: &str,
     args: &[String],
 ) -> Result<String, String> {
-    let is_shell_expr = args.is_empty() && has_shell_metacharacters(command);
+    let has_command_arguments = command.chars().any(char::is_whitespace);
+    let should_use_shell = args.is_empty() && has_command_arguments && !agent_mode.is_safe();
 
-    if is_shell_expr && agent_mode.is_safe() {
-        return Err(format!(
-            "shell expressions not allowed in safe mode: {command}"
-        ));
+    if agent_mode.is_safe() {
+        if has_shell_metacharacters(command) {
+            return Err(format!(
+                "shell expressions not allowed in safe mode: {command}"
+            ));
+        }
+        if has_command_arguments {
+            return Err("safe mode requires command arguments in args".to_string());
+        }
     }
 
-    let (cmd, cmd_args) = if is_shell_expr {
+    let (cmd, cmd_args) = if should_use_shell {
         (
             "sh".to_string(),
             vec!["-c".to_string(), command.to_string()],
@@ -707,8 +679,20 @@ fn execute_run_command(
         .map_err(|error| format!("failed to execute command: {error}"))?;
 
     if !output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("command failed: {}", stderr.trim()));
+        let mut message = format!("command failed with status {}", output.status);
+        let stdout = stdout.trim();
+        let stderr = stderr.trim();
+        if !stdout.is_empty() {
+            message.push_str("\nstdout:\n");
+            message.push_str(stdout);
+        }
+        if !stderr.is_empty() {
+            message.push_str("\nstderr:\n");
+            message.push_str(stderr);
+        }
+        return Err(message);
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
@@ -730,6 +714,8 @@ mod tests {
     use std::fs;
     use std::io::{Read, Write};
     use std::net::TcpListener;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
     use std::thread;
 
     fn test_dir(name: &str) -> std::path::PathBuf {
@@ -935,6 +921,21 @@ mod tests {
         assert!(result.contains("showing first 50 matches; refine your pattern to see more"));
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn search_files_surfaces_traversal_errors() {
+        let dir = test_dir("search_error");
+        let private = dir.join("private");
+        fs::create_dir_all(&private).unwrap();
+        fs::write(private.join("secret.txt"), "match\n").unwrap();
+        fs::set_permissions(&private, fs::Permissions::from_mode(0o000)).unwrap();
+
+        let result = execute_search_files("match", dir.to_str().unwrap());
+
+        fs::set_permissions(&private, fs::Permissions::from_mode(0o700)).unwrap();
+        assert_err_contains(result, "error traversing directory");
+    }
+
     #[test]
     fn fetch_url_returns_response_body() {
         let url = test_http_server(Box::leak(
@@ -983,10 +984,10 @@ mod tests {
     }
 
     #[test]
-    fn run_command_safe_accepts_combined_command_string() {
-        assert_ok_trimmed(
+    fn run_command_safe_rejects_combined_command_string() {
+        assert_err_contains(
             execute_run_command(AgentMode::Safe, "echo hello world", &[]),
-            "hello world",
+            "safe mode requires command arguments in args",
         );
     }
 
@@ -999,10 +1000,37 @@ mod tests {
     }
 
     #[test]
-    fn run_command_safe_rejects_dangerous_combined_command_string() {
+    fn run_command_safe_rejects_path_qualified_executable() {
         assert_err_contains(
-            execute_run_command(AgentMode::Safe, "ls --force", &[]),
-            "dangerous argument",
+            execute_run_command(AgentMode::Safe, "/tmp/git", &["status".to_string()]),
+            "path-qualified commands not allowed",
+        );
+    }
+
+    #[test]
+    fn run_command_safe_rejects_path_qualified_executable_with_extension() {
+        assert_err_contains(
+            execute_run_command(AgentMode::Safe, "/tmp/git.sh", &["status".to_string()]),
+            "path-qualified commands not allowed",
+        );
+    }
+
+    #[test]
+    fn run_command_rejects_non_string_args() {
+        let tool = run_command_tool(AgentMode::Safe);
+        let result = tool.execute(&serde_json::json!({
+            "command": "echo",
+            "args": ["ok", false]
+        }));
+
+        assert_err_contains(result, "args entries must be strings");
+    }
+
+    #[test]
+    fn run_command_safe_rejects_quoted_combined_command_string() {
+        assert_err_contains(
+            execute_run_command(AgentMode::Safe, r#"grep "two words" file.txt"#, &[]),
+            "safe mode requires command arguments in args",
         );
     }
 
@@ -1077,6 +1105,14 @@ mod tests {
     }
 
     #[test]
+    fn run_command_on_preserves_quoted_combined_command_string() {
+        assert_ok_trimmed(
+            execute_run_command(AgentMode::On, r#"printf '%s' "two words""#, &[]),
+            "two words",
+        );
+    }
+
+    #[test]
     fn run_command_on_allows_previously_blocked_args() {
         assert_ok_trimmed(
             execute_run_command(AgentMode::On, "echo", &["--force".to_string()]),
@@ -1094,6 +1130,23 @@ bar",
     }
 
     #[test]
+    fn run_command_failure_includes_status_stdout_and_stderr() {
+        let result = execute_run_command(
+            AgentMode::On,
+            "sh",
+            &[
+                "-c".to_string(),
+                "echo out; echo err >&2; exit 7".to_string(),
+            ],
+        );
+
+        let error = result.unwrap_err();
+        assert!(error.contains("status exit status: 7"));
+        assert!(error.contains("stdout:\nout"));
+        assert!(error.contains("stderr:\nerr"));
+    }
+
+    #[test]
     fn run_command_safe_rejects_compound_shell_expression() {
         assert_err_contains(
             execute_run_command(AgentMode::Safe, "echo foo && echo bar", &[]),
@@ -1102,6 +1155,51 @@ bar",
     }
 
     // ── safe-mode allowlist: write-capable / state-mutating commands ─────────
+
+    #[test]
+    fn run_command_safe_rejects_find_delete() {
+        assert_err_contains(
+            execute_run_command(
+                AgentMode::Safe,
+                "find",
+                &[".".to_string(), "-delete".to_string()],
+            ),
+            "command not allowed",
+        );
+    }
+
+    #[test]
+    fn run_command_safe_rejects_ip_link_set() {
+        assert_err_contains(
+            execute_run_command(
+                AgentMode::Safe,
+                "ip",
+                &[
+                    "link".to_string(),
+                    "set".to_string(),
+                    "lo".to_string(),
+                    "down".to_string(),
+                ],
+            ),
+            "command not allowed",
+        );
+    }
+
+    #[test]
+    fn run_command_safe_rejects_svn_commit() {
+        assert_err_contains(
+            execute_run_command(AgentMode::Safe, "svn", &["commit".to_string()]),
+            "command not allowed",
+        );
+    }
+
+    #[test]
+    fn run_command_safe_rejects_hg_commit() {
+        assert_err_contains(
+            execute_run_command(AgentMode::Safe, "hg", &["commit".to_string()]),
+            "command not allowed",
+        );
+    }
 
     #[test]
     fn run_command_safe_rejects_curl() {
