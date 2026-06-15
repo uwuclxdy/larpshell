@@ -292,7 +292,9 @@ pub fn restore_terminal_after_panic() {
         use nix::sys::termios::{LocalFlags, SetArg, tcgetattr, tcsetattr};
         let stdin = std::io::stdin();
         if let Ok(mut termios) = tcgetattr(&stdin) {
-            termios.local_flags.insert(LocalFlags::ECHO | LocalFlags::ECHOE);
+            termios
+                .local_flags
+                .insert(LocalFlags::ECHO | LocalFlags::ECHOE);
             let _ = tcsetattr(&stdin, SetArg::TCSANOW, &termios);
         }
     }

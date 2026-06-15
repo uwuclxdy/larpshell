@@ -120,7 +120,8 @@ pub fn draw_slash_preview(line: &str) {
     for i in 0..max_lines {
         seq.push_str("\n\x1b[K"); // move down one line, erase it
         if let Some(cmd) = matches.get(i) {
-            let row = format_preview_row(&format!("/{}", cmd.name), typed_len, cmd.description, width);
+            let row =
+                format_preview_row(&format!("/{}", cmd.name), typed_len, cmd.description, width);
             seq.push('\r');
             seq.push_str(&row);
         }
