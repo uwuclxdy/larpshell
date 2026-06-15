@@ -1,11 +1,13 @@
+use std::fmt::Write as _;
+
 use colored::Colorize;
 
 use crate::cli::is_interactive_terminal;
 #[cfg(unix)]
 use crate::common::RawModeGuard;
 use crate::common::{
-    ANSI_CLEAR_LINE, CTP_BLUE, CTP_GREEN, CTP_PRIMARY, CTP_RED, CTP_TEXT, CTP_YELLOW,
-    clear_n_lines, count_visual_lines, flush_stderr, show_cursor, terminal_width,
+    CTP_BLUE, CTP_GREEN, CTP_PRIMARY, CTP_RED, CTP_TEXT, CTP_YELLOW, clear_n_lines,
+    count_visual_lines, cursor_row_offset, flush_stderr, show_cursor, terminal_width,
 };
 
 pub enum ConfirmResult {
@@ -583,110 +585,112 @@ fn confirmation_prompt(mode: ConfirmPromptMode) -> usize {
 /// confirmation prompt lines from the terminal. Returns the edited command on Enter,
 /// or exits with code 130 on Ctrl+C.
 pub fn edit_command(current: &str) -> Option<String> {
-    let width = terminal_width();
     let mut buf: Vec<char> = current.chars().collect();
     let mut pos = buf.len();
 
-    let hint_text = format!(
+    let hint = format!(
         "[{}] to confirm, [{}] to cancel",
         "Enter".custom_color(CTP_PRIMARY).bold(),
         "Ctrl+C".custom_color(CTP_PRIMARY).bold()
     );
-    let hint_rows = count_visual_lines("[Enter] to confirm, [Ctrl+C] to cancel", width);
 
-    // Draw: command on current line (no newline), hint on the line below.
-    // Then move cursor back up to the command line.
-    let init: String = buf.iter().collect();
-    eprint!(
-        "{} {}",
-        "$".custom_color(CTP_PRIMARY),
-        init.custom_color(CTP_TEXT).bold()
-    );
-    eprintln!(); // move to hint line
-    eprint!("{}", hint_text.custom_color(CTP_BLUE));
-    // cursor up 1 line, then set absolute column: "$ " = 2 visible chars, 1-indexed
-    eprint!("\x1b[1A\x1b[{}G", 3 + pos);
-    flush_stderr();
+    // Row offset (from the region's first row) where the edit cursor currently
+    // sits. Lets the next redraw walk back to the top before erasing.
+    let mut cursor_row = 0usize;
 
-    // clear the editor display (command + hint) from the terminal.
-    // cursor is on the first command row; move to last hint row then clear upward.
-    let clear_editor = |buf: &[char]| {
-        let cmd_text = format!("$ {}", buf.iter().collect::<String>());
-        let cmd_rows = count_visual_lines(&cmd_text, width);
-        let total = cmd_rows + hint_rows;
-        // move cursor from first command row to last hint row
-        for _ in 0..total.saturating_sub(1) {
-            eprint!("\x1b[1B");
+    // Redraw the whole editor region and leave the cursor at the edit point.
+    // The terminal does the wrapping, so a command that wraps, contains wide
+    // (CJK/emoji) characters, or spans multiple lines all render correctly.
+    let draw = |buf: &[char], pos: usize, cursor_row: &mut usize| {
+        let width = terminal_width();
+        let prefix: String = buf[..pos].iter().collect();
+        let rest: String = buf[pos..].iter().collect();
+
+        // Walk to the region's top-left, then clear it and everything below.
+        let mut seq = String::new();
+        if *cursor_row > 0 {
+            let _ = write!(seq, "\x1b[{cursor_row}A");
         }
-        clear_n_lines(total);
+        seq.push_str("\r\x1b[J");
+        eprint!("{seq}");
+
+        // "$ " + text before the cursor, save the cursor, then the rest + hint.
+        eprint!(
+            "{} {}",
+            "$".custom_color(CTP_PRIMARY),
+            prefix.custom_color(CTP_TEXT).bold()
+        );
+        eprint!("\x1b7"); // DECSC: save cursor at the edit point
+        eprint!(
+            "{}\n{}\x1b8", // remainder, hint on next line, DECRC back to edit point
+            rest.custom_color(CTP_TEXT).bold(),
+            hint.custom_color(CTP_BLUE)
+        );
+        flush_stderr();
+
+        *cursor_row = cursor_row_offset(&format!("$ {prefix}"), width);
     };
 
-    let redraw = |buf: &[char], pos: usize| {
-        let s: String = buf.iter().collect();
-        // cursor is on the command line; clear it and redraw
-        eprint!(
-            "{}{} {}",
-            ANSI_CLEAR_LINE,
-            "$".custom_color(CTP_PRIMARY),
-            s.custom_color(CTP_TEXT).bold()
-        );
-        eprint!("\x1b[{}G", 3 + pos);
+    // Erase the editor region, leaving the cursor at its top-left.
+    let clear_editor = |cursor_row: usize| {
+        let mut seq = String::new();
+        if cursor_row > 0 {
+            let _ = write!(seq, "\x1b[{cursor_row}A");
+        }
+        seq.push_str("\r\x1b[J");
+        eprint!("{seq}");
         flush_stderr();
     };
+
+    draw(&buf, pos, &mut cursor_row);
 
     loop {
         match read_key_event() {
             KeyEvent::Enter => {
-                clear_editor(&buf);
-                flush_stderr();
+                clear_editor(cursor_row);
                 return Some(buf.into_iter().collect());
             }
             KeyEvent::CtrlC | KeyEvent::Eof => {
-                clear_editor(&buf);
-                flush_stderr();
+                clear_editor(cursor_row);
                 return None;
             }
             KeyEvent::Backspace => {
                 if pos > 0 {
                     buf.remove(pos - 1);
                     pos -= 1;
-                    redraw(&buf, pos);
+                    draw(&buf, pos, &mut cursor_row);
                 }
             }
             KeyEvent::Delete => {
                 if pos < buf.len() {
                     buf.remove(pos);
-                    redraw(&buf, pos);
+                    draw(&buf, pos, &mut cursor_row);
                 }
             }
             KeyEvent::Left => {
                 if pos > 0 {
                     pos -= 1;
-                    eprint!("\x1b[1D");
-                    flush_stderr();
+                    draw(&buf, pos, &mut cursor_row);
                 }
             }
             KeyEvent::Right => {
                 if pos < buf.len() {
                     pos += 1;
-                    eprint!("\x1b[1C");
-                    flush_stderr();
+                    draw(&buf, pos, &mut cursor_row);
                 }
             }
             KeyEvent::Home => {
                 pos = 0;
-                eprint!("\x1b[3G"); // column 3: after "$ "
-                flush_stderr();
+                draw(&buf, pos, &mut cursor_row);
             }
             KeyEvent::End => {
                 pos = buf.len();
-                eprint!("\x1b[{}G", 3 + pos);
-                flush_stderr();
+                draw(&buf, pos, &mut cursor_row);
             }
             KeyEvent::Char(c) => {
                 buf.insert(pos, c);
                 pos += 1;
-                redraw(&buf, pos);
+                draw(&buf, pos, &mut cursor_row);
             }
             KeyEvent::ArrowUp | KeyEvent::Other => {}
         }

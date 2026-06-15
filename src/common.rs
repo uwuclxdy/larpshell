@@ -242,6 +242,34 @@ fn visual_rows(line: &str, width: usize) -> usize {
     rows
 }
 
+/// Row offset (0-indexed, from the start of `text`) on which the cursor lands
+/// after printing `text` to a terminal `width` columns wide. Honors hard
+/// newlines and the same wrap model as [`count_visual_lines`]. Used to walk the
+/// cursor back to the top of a redrawn region. Expects plain text (no ANSI).
+pub fn cursor_row_offset(text: &str, width: usize) -> usize {
+    let width = width.max(1);
+    let mut row = 0usize;
+    let mut col = 0usize;
+    for ch in text.chars() {
+        if ch == '\n' {
+            row += 1;
+            col = 0;
+            continue;
+        }
+        let cells = char_cells(ch, col, width);
+        if cells == 0 {
+            continue;
+        }
+        if col + cells > width {
+            row += 1;
+            col = cells.min(width);
+        } else {
+            col += cells;
+        }
+    }
+    row
+}
+
 /// Display cells one char occupies at 0-indexed column `col`. Tabs advance to
 /// the next multiple of 8 (clamped to `width`); control/zero-width chars are 0.
 fn char_cells(ch: char, col: usize, width: usize) -> usize {
