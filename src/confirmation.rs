@@ -82,7 +82,35 @@ pub fn parse_key_from_reader(reader: &mut impl std::io::Read) -> KeyEvent {
             }
         }
         c @ 32..=126 => KeyEvent::Char(c as char),
+        // UTF-8 lead byte: pull the continuation bytes and assemble the char so
+        // accented/CJK/emoji input survives (e.g. while editing a command).
+        lead @ 0x80.. => read_utf8_char(reader, lead),
         _ => KeyEvent::Other,
+    }
+}
+
+/// Reads the continuation bytes of a multibyte UTF-8 char whose `lead` byte was
+/// already consumed, returning the assembled [`KeyEvent::Char`]. Stray
+/// continuation bytes or invalid sequences map to [`KeyEvent::Other`].
+fn read_utf8_char(reader: &mut impl std::io::Read, lead: u8) -> KeyEvent {
+    let extra = match lead {
+        0xC0..=0xDF => 1,
+        0xE0..=0xEF => 2,
+        0xF0..=0xF7 => 3,
+        _ => return KeyEvent::Other,
+    };
+    let mut bytes = [0u8; 4];
+    bytes[0] = lead;
+    for slot in bytes.iter_mut().take(1 + extra).skip(1) {
+        let mut byte = [0u8; 1];
+        if reader.read(&mut byte).unwrap_or(0) == 0 {
+            return KeyEvent::Eof;
+        }
+        *slot = byte[0];
+    }
+    match std::str::from_utf8(&bytes[..1 + extra]) {
+        Ok(text) => text.chars().next().map_or(KeyEvent::Other, KeyEvent::Char),
+        Err(_) => KeyEvent::Other,
     }
 }
 

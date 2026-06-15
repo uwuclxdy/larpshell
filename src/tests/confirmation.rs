@@ -204,6 +204,27 @@ fn parse_key_from_reader_maps_eof() {
 }
 
 #[test]
+fn parse_key_from_reader_assembles_multibyte_utf8() {
+    // 2-byte (é), 3-byte (ば), and 4-byte (😺) sequences each yield one char.
+    for expected in ['é', 'ば', '😺'] {
+        let mut buf = [0u8; 4];
+        let encoded = expected.encode_utf8(&mut buf);
+        let mut input = std::io::Cursor::new(encoded.as_bytes().to_vec());
+        assert!(matches!(
+            parse_key_from_reader(&mut input),
+            KeyEvent::Char(c) if c == expected
+        ));
+    }
+}
+
+#[test]
+fn parse_key_from_reader_truncated_multibyte_is_eof() {
+    // Lead byte of a 3-byte sequence with no continuation bytes available.
+    let mut input = std::io::Cursor::new(vec![0xE3]);
+    assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::Eof));
+}
+
+#[test]
 fn confirm_from_reader_with_explain_on_enter_returns_yes() {
     let mut keys = vec![KeyEvent::Enter].into_iter();
     let result = confirm_from_reader(
