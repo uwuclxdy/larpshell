@@ -17,7 +17,11 @@ use rustyline::{
     EventHandler, Helper, KeyCode, KeyEvent, Modifiers, RepeatCount,
 };
 
-use crate::common::{CTP_BLUE, CTP_OVERLAY0, CTP_PRIMARY, current_directory_display, show_cursor};
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+
+use crate::common::{
+    CTP_BLUE, CTP_OVERLAY0, CTP_PRIMARY, current_directory_display, show_cursor, terminal_width,
+};
 use crate::config;
 use crate::slash_commands;
 
@@ -28,17 +32,50 @@ static SHELL_MODE: AtomicBool = AtomicBool::new(false);
 // "uninstall" = 9 chars. Column = 2 (indent) + 1 (/) + 9 (name) + 4 (gap) = 16
 const PREVIEW_DESC_COL: usize = 16;
 
-pub fn format_preview_row(cmd_name: &str, typed_len: usize, description: &str) -> String {
+pub fn format_preview_row(
+    cmd_name: &str,
+    typed_len: usize,
+    description: &str,
+    max_width: usize,
+) -> String {
     let split = typed_len.min(cmd_name.len());
     let (typed, untyped) = cmd_name.split_at(split);
     let pad = PREVIEW_DESC_COL.saturating_sub(cmd_name.len() + 3);
+    let gap = pad + 4;
+    // Truncate the description so the row never exceeds one terminal row; a
+    // wrapped row would throw off the line count used to erase the preview.
+    let prefix_cols = 2 + cmd_name.width() + gap;
+    let description = truncate_to_width(description, max_width.saturating_sub(prefix_cols));
     format!(
         "  {}{}{}{}",
         typed.custom_color(CTP_PRIMARY).bold(),
         untyped.custom_color(CTP_OVERLAY0),
-        " ".repeat(pad + 4),
-        description.custom_color(CTP_OVERLAY0),
+        " ".repeat(gap),
+        description.as_ref().custom_color(CTP_OVERLAY0),
     )
+}
+
+/// Truncates `text` to at most `max` display columns, appending `…` when cut.
+fn truncate_to_width(text: &str, max: usize) -> Cow<'_, str> {
+    if max == 0 {
+        return Cow::Borrowed("");
+    }
+    if text.width() <= max {
+        return Cow::Borrowed(text);
+    }
+    let budget = max.saturating_sub(1).max(1); // leave a column for the ellipsis
+    let mut out = String::new();
+    let mut cols = 0usize;
+    for ch in text.chars() {
+        let w = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if cols + w > budget {
+            break;
+        }
+        out.push(ch);
+        cols += w;
+    }
+    out.push('…');
+    Cow::Owned(out)
 }
 
 /// Erase all currently-drawn preview lines below the prompt.
@@ -76,13 +113,14 @@ pub fn draw_slash_preview(line: &str) {
     }
 
     let typed_len = line.len();
+    let width = terminal_width();
     let mut seq = String::new();
 
     // Erase old lines and write new ones in a single downward pass.
     for i in 0..max_lines {
         seq.push_str("\n\x1b[K"); // move down one line, erase it
         if let Some(cmd) = matches.get(i) {
-            let row = format_preview_row(&format!("/{}", cmd.name), typed_len, cmd.description);
+            let row = format_preview_row(&format!("/{}", cmd.name), typed_len, cmd.description, width);
             seq.push('\r');
             seq.push_str(&row);
         }
@@ -111,6 +149,7 @@ fn draw_arg_preview(line: &str) {
         return;
     }
 
+    let width = terminal_width();
     let mut seq = String::new();
     for i in 0..max_lines {
         seq.push_str("\n\x1b[K");
@@ -120,6 +159,7 @@ fn draw_arg_preview(line: &str) {
                 choice.value,
                 partial_len,
                 choice.description,
+                width,
             ));
         }
     }

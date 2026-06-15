@@ -3,7 +3,7 @@ use rustyline::highlight::{CmdKind, Highlighter};
 
 fn format_preview_row_plain(cmd_name: &str, typed_len: usize, description: &str) -> String {
     colored::control::set_override(false);
-    let r = format_preview_row(cmd_name, typed_len, description);
+    let r = format_preview_row(cmd_name, typed_len, description, usize::MAX);
     strip_ansi_escapes::strip_str(&r)
 }
 
@@ -44,4 +44,15 @@ fn format_preview_row_pads_to_column() {
     let desc_pos1 = row.find("configure").unwrap();
     let desc_pos2 = row2.find("uninstall larpshell").unwrap();
     assert_eq!(desc_pos1, desc_pos2, "descriptions must align");
+}
+
+#[test]
+fn format_preview_row_truncates_to_width() {
+    // Strips ANSI below, so it stays agnostic to the process-global color
+    // override other tests may have toggled.
+    let width = 24;
+    let row = format_preview_row("/uninstall", 0, "uninstall larpshell completely", width);
+    let plain = strip_ansi_escapes::strip_str(&row);
+    assert!(plain.chars().count() <= width, "row too wide: {plain:?}");
+    assert!(plain.ends_with('…'), "expected ellipsis: {plain:?}");
 }
