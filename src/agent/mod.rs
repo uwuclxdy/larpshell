@@ -372,10 +372,14 @@ fn success_summary_string(output: &str) -> String {
 
 fn expanded_output_line_string(line: &str, is_first: bool) -> String {
     let prefix = if is_first { "  └ " } else { "    " };
+    // This is raw command output, not markdown. Strip any ANSI the tool emitted
+    // (so it can't override the dim styling) and print it verbatim — running it
+    // through the markdown styler mangled underscores in paths, `*` globs, etc.
+    let clean = String::from_utf8_lossy(&strip_ansi_escapes::strip(line.as_bytes())).into_owned();
     format!(
         "{}{}",
         prefix.custom_color(CTP_OVERLAY0),
-        style_message_markup(line).custom_color(CTP_OVERLAY0)
+        clean.custom_color(CTP_OVERLAY0)
     )
 }
 
