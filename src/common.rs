@@ -7,7 +7,7 @@ use std::process::Command;
 use std::sync::LazyLock;
 
 use strip_ansi_escapes::strip;
-use unicode_width::UnicodeWidthStr;
+use unicode_width::UnicodeWidthChar;
 
 pub const EXIT_SIGINT: i32 = 130;
 pub const DEFAULT_PROVIDER_TIMEOUT_SECS: u64 = 30;
@@ -189,34 +189,67 @@ pub fn flush_stderr() {
 }
 
 /// Gets the terminal width in columns.
+///
+/// Queries the live window size of the stderr fd (all TUI output goes to
+/// stderr), so it tracks resizes without a `SIGWINCH` handler. Falls back to
+/// `$COLUMNS`, then 80. Never returns 0, so callers can divide by it safely.
+///
+/// Note: deliberately *not* `tput cols` — `Command::output` captures tput's
+/// stdout into a pipe, so tput sees a non-tty and reports the static terminfo
+/// width (usually 80) instead of the real terminal size.
 pub fn terminal_width() -> usize {
-    Command::new("tput")
-        .arg("cols")
-        .output()
+    if let Some((terminal_size::Width(cols), _)) = terminal_size::terminal_size_of(io::stderr())
+        && cols > 0
+    {
+        return cols as usize;
+    }
+    env::var("COLUMNS")
         .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .and_then(|s| s.trim().parse().ok())
+        .and_then(|s| s.trim().parse::<usize>().ok())
+        .filter(|&cols| cols > 0)
         .unwrap_or(80)
 }
 
-/// Counts the number of visual lines a string will occupy when printed to terminal.
+/// Counts the number of visual rows a string occupies when printed to a
+/// terminal `width` columns wide. Accounts for ANSI escapes (zero width), wide
+/// characters (CJK/emoji take two cells and never split across the wrap
+/// column), tabs (advance to the next 8-column stop), and hard newlines.
 pub fn count_visual_lines(text: &str, width: usize) -> usize {
-    text.lines()
-        .map(|line| {
-            if line.is_empty() {
-                1
-            } else {
-                // Strip ANSI escape codes to get only visible characters
-                let stripped = strip(line.as_bytes());
-                let visible_line = String::from_utf8_lossy(&stripped);
-                // Calculate visual width accounting for wide characters.
-                // A non-empty line that strips to zero visible width (e.g. ANSI-only)
-                // still occupies one terminal row.
-                let visual_width = visible_line.width().max(1);
-                visual_width.div_ceil(width)
-            }
-        })
-        .sum()
+    let width = width.max(1);
+    text.lines().map(|line| visual_rows(line, width)).sum()
+}
+
+/// Visual rows a single logical line (containing no `\n`) wraps into.
+fn visual_rows(line: &str, width: usize) -> usize {
+    let stripped = strip(line.as_bytes());
+    let visible = String::from_utf8_lossy(&stripped);
+
+    let mut rows = 1usize;
+    let mut col = 0usize;
+    for ch in visible.chars() {
+        let cells = char_cells(ch, col, width);
+        if cells == 0 {
+            continue; // combining marks, control chars, leftover escapes
+        }
+        if col + cells > width {
+            // Doesn't fit on the current row; the terminal wraps it down.
+            rows += 1;
+            col = cells.min(width);
+        } else {
+            col += cells;
+        }
+    }
+    rows
+}
+
+/// Display cells one char occupies at 0-indexed column `col`. Tabs advance to
+/// the next multiple of 8 (clamped to `width`); control/zero-width chars are 0.
+fn char_cells(ch: char, col: usize, width: usize) -> usize {
+    if ch == '\t' {
+        let next_stop = (col / 8 + 1) * 8;
+        return next_stop.min(width).saturating_sub(col).max(1);
+    }
+    UnicodeWidthChar::width(ch).unwrap_or(0)
 }
 
 /// Sets up terminal to hide control characters.

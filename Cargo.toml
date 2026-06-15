@@ -31,6 +31,7 @@ strip-ansi-escapes = "0.2.1"
 grep-regex = "0.1.14"
 grep-searcher = "0.1.16"
 ignore = "0.4.25"
+terminal_size = "0.4.4"
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.31.2", features = ["term"] }

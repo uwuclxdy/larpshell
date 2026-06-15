@@ -1015,6 +1015,7 @@ dependencies = [
  "serde",
  "serde_json",
  "strip-ansi-escapes",
+ "terminal_size",
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
@@ -1790,6 +1791,16 @@ checksum = "8e1d1b10ced5ca923a1fcb8d03e96b8d3268065d724548c0211415ff6ac6bac4"
 dependencies = [
  "core-foundation-sys",
  "libc",
+]
+
+[[package]]
+name = "terminal_size"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "230a1b821ccbd75b185820a1f1ff7b14d21da1e442e22c0863ea5f08771a8874"
+dependencies = [
+ "rustix",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
