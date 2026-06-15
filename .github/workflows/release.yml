@@ -6,6 +6,10 @@ on:
       - 'v*'
   workflow_dispatch:
 
+# Third-party Actions are SHA-pinned: the aur-publish job holds AUR_SSH_PRIVATE_KEY, so a
+# tag-only pin (@v6) would let a compromised upstream tag exfiltrate that secret. Bump the SHA
+# and the trailing version comment together when updating.
+
 jobs:
   # ── Job 1: compile binary, create GitHub release ─────────────────────────
   build-and-release:
@@ -19,7 +23,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
         with:
           fetch-depth: 0
 
@@ -44,10 +48,12 @@ jobs:
           echo "version=${VER}" >> "$GITHUB_OUTPUT"
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9  # master
+        with:
+          toolchain: stable
 
       - name: Cache cargo registry
-        uses: actions/cache@v5
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
         with:
           path: |
             ~/.cargo/registry
@@ -62,7 +68,7 @@ jobs:
           CARGO_TARGET_DIR: target
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2.6.2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           files: target/release/larpshell
@@ -84,7 +90,7 @@ jobs:
         run: pacman -Syu --noconfirm git openssh pacman-contrib
 
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
         with:
           ref: mommy
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -94,11 +100,23 @@ jobs:
         env:
           AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
         run: |
+          set -Eeuo pipefail
           AUR_KEY=/tmp/aur_ssh_key
-          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > "$AUR_KEY"
-          chmod 600 "$AUR_KEY"
-          echo "GIT_SSH_COMMAND=ssh -i ${AUR_KEY} -o StrictHostKeyChecking=accept-new" >> "$GITHUB_ENV"
-          ssh -i "$AUR_KEY" -o StrictHostKeyChecking=accept-new -T aur@aur.archlinux.org 2>&1 || true
+          KNOWN_HOSTS=/tmp/aur_known_hosts
+          # install -m 600 /dev/stdin writes at mode 600 atomically -- no mode-666 window like
+          # `printf > file && chmod`. Strip stray CR so a CRLF-pasted secret still loads.
+          printf '%s\n' "${AUR_SSH_PRIVATE_KEY//$'\r'/}" | install -m 600 /dev/stdin "$AUR_KEY"
+          ssh-keygen -y -f "$AUR_KEY" >/dev/null   # fail fast on a malformed key
+          # Pinned AUR host keys -- no accept-new TOFU/MITM window. Fingerprints verified against
+          # https://wiki.archlinux.org/title/AUR:
+          #   ED25519 SHA256:RFzBCUItH9LZS0cKB5UE6ceAYhBD5C8GeOBip8Z11+4
+          #   RSA     SHA256:5s5cIyReIfNNVGRFdDbe3hdYiI5OelHGpw2rOUud3Q8
+          cat > "$KNOWN_HOSTS" <<'PIN'
+          aur.archlinux.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEuBKrPzbawxA/k2g6NcyV5jmqwJ2s+zpgZGZ7tpLIcN
+          aur.archlinux.org ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDKF9vAFWdgm9Bi8uc+tYRBmXASBb5cB5iZsB7LOWWFeBrLp3r14w0/9S2vozjgqY5sJLDPONWoTTaVTbhe3vwO8CBKZTEt1AcWxuXNlRnk9FliR1/eNB9uz/7y1R0+c1Md+P98AJJSJWKN12nqIDIhjl2S1vOUvm7FNY43fU2knIhEbHybhwWeg+0wxpKwcAd/JeL5i92Uv03MYftOToUijd1pqyVFdJvQFhqD4v3M157jxS5FTOBrccAEjT+zYmFyD8WvKUa9vUclRddNllmBJdy4NyLB8SvVZULUPrP3QOlmzemeKracTlVOUG1wsDbxknF1BwSCU7CmU6UFP90kpWIyz66bP0bl67QAvlIc52Yix7pKJPbw85+zykvnfl2mdROsaT8p8R9nwCdFsBc9IiD0NhPEHcyHRwB8fokXTajk2QnGhL+zP5KnkmXnyQYOCUYo3EKMXIlVOVbPDgRYYT/XqvBuzq5S9rrU70KoI/S5lDnFfx/+lPLdtcnnEPk=
+          PIN
+          chmod 600 "$KNOWN_HOSTS"
+          echo "GIT_SSH_COMMAND=ssh -i ${AUR_KEY} -o UserKnownHostsFile=${KNOWN_HOSTS} -o StrictHostKeyChecking=yes" >> "$GITHUB_ENV"
 
       - name: Setup non-root user
         run: |
