@@ -280,6 +280,24 @@ fn char_cells(ch: char, col: usize, width: usize) -> usize {
     UnicodeWidthChar::width(ch).unwrap_or(0)
 }
 
+/// Best-effort terminal restore for a panic hook: re-show the cursor and
+/// re-enable echo. Generation hides the cursor (and on unix disables echo)
+/// without a RAII guard, so a panic there would otherwise leave the terminal
+/// with an invisible cursor and silent input.
+pub fn restore_terminal_after_panic() {
+    eprint!("{ANSI_SHOW_CURSOR}");
+    flush_stderr();
+    #[cfg(unix)]
+    {
+        use nix::sys::termios::{LocalFlags, SetArg, tcgetattr, tcsetattr};
+        let stdin = std::io::stdin();
+        if let Ok(mut termios) = tcgetattr(&stdin) {
+            termios.local_flags.insert(LocalFlags::ECHO | LocalFlags::ECHOE);
+            let _ = tcsetattr(&stdin, SetArg::TCSANOW, &termios);
+        }
+    }
+}
+
 /// Sets up terminal to hide control characters.
 #[cfg(unix)]
 pub fn setup_terminal() {

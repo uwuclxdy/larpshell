@@ -142,6 +142,14 @@ async fn run() -> Result<(), LarpshellError> {
 // ── startup ─────────────────────────────────────────────────────────────────
 
 fn setup_environment() {
+    // Restore the cursor and echo if we panic mid-generation (cursor hidden,
+    // echo disabled) — there's no RAII guard covering that window.
+    let previous_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        common::restore_terminal_after_panic();
+        previous_hook(info);
+    }));
+
     #[cfg(unix)]
     setup_terminal();
 
