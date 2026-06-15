@@ -257,7 +257,6 @@ async fn run_repl(runtime: &mut Runtime) -> Result<(), LarpshellError> {
     let mut sigint_exit = false;
 
     loop {
-        interactive::reserve_preview_space();
         let user_input = match read_next_input(prefill.take()) {
             Ok(Some(input)) => input,
             Ok(None) => continue,

@@ -171,18 +171,6 @@ fn draw_arg_preview(line: &str) {
     let _ = io::stdout().flush();
 }
 
-/// Print blank lines below the current cursor to guarantee preview space.
-pub fn reserve_preview_space() {
-    let n = slash_commands::COMMANDS.len();
-    let mut seq = String::new();
-    for _ in 0..n {
-        seq.push('\n');
-    }
-    let _ = write!(seq, "\x1b[{n}A");
-    print!("{seq}");
-    let _ = io::stdout().flush();
-}
-
 pub struct NlshHelper;
 
 impl Helper for NlshHelper {}
