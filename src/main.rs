@@ -145,7 +145,16 @@ fn setup_environment() {
     #[cfg(unix)]
     setup_terminal();
 
-    if std::io::stderr().is_terminal() {
+    // Color is keyed off stderr (all styled output goes there; colored's own
+    // default inspects stdout). The NO_COLOR / CLICOLOR_FORCE conventions take
+    // precedence over tty detection.
+    let no_color = std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty());
+    let force_color = std::env::var("CLICOLOR_FORCE").is_ok_and(|v| !v.is_empty() && v != "0");
+    if force_color {
+        colored::control::set_override(true);
+    } else if no_color {
+        colored::control::set_override(false);
+    } else if std::io::stderr().is_terminal() {
         colored::control::set_override(true);
     }
 
