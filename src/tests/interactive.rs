@@ -1,4 +1,6 @@
-use crate::interactive::{NlshHelper, format_preview_row, next_cycle_index, preview_items};
+use crate::interactive::{
+    NlshHelper, format_preview_row, next_cycle_index, preview_items, selection_ghost,
+};
 use rustyline::highlight::{CmdKind, Highlighter};
 use unicode_width::UnicodeWidthStr;
 
@@ -128,4 +130,19 @@ fn preview_items_prefill_arguments_preserve_prefix() {
 #[test]
 fn preview_items_empty_for_non_slash() {
     assert!(preview_items("list files").is_empty());
+}
+
+#[test]
+fn selection_ghost_is_untyped_suffix() {
+    // base "/" lists all commands; index 1 is `/agent` (after `/api`).
+    assert_eq!(selection_ghost("/", "/", 1).as_deref(), Some("agent"));
+    // The typed prefix is stripped, leaving only the part to suggest.
+    assert_eq!(selection_ghost("/ag", "/ag", 0).as_deref(), Some("ent"));
+    // No ghost once the selection is fully typed.
+    assert_eq!(selection_ghost("/agent", "/agent", 0), None);
+    // Argument selections ghost the value tail too.
+    assert_eq!(
+        selection_ghost("/agent ", "/agent ", 0).as_deref(),
+        Some("off")
+    );
 }

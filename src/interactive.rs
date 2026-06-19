@@ -14,7 +14,7 @@ use rustyline::history::DefaultHistory;
 use rustyline::validate::Validator;
 use rustyline::{
     Cmd, CompletionType, ConditionalEventHandler, Config, Editor, Event, EventContext,
-    EventHandler, Helper, KeyCode, KeyEvent, Modifiers, Movement, RepeatCount,
+    EventHandler, Helper, KeyCode, KeyEvent, Modifiers, RepeatCount,
 };
 
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
@@ -190,8 +190,8 @@ fn render_preview(items: &[PreviewItem], selected: Option<usize>) {
 }
 
 /// Draw a filtered command or argument preview below the current prompt line.
-/// While cycling, the candidate set is locked to the stem typed before the
-/// first arrow so the prefilled selection doesn't collapse the list.
+/// While cycling, the selected row is marked; the candidate set tracks the
+/// typed line (which doesn't change during cycling).
 pub fn draw_slash_preview(line: &str) {
     let (source, selected) = match cycle_lock().as_ref() {
         Some(c) => (c.base.clone(), Some(c.index)),
@@ -201,8 +201,12 @@ pub fn draw_slash_preview(line: &str) {
 }
 
 /// Selection state while the arrow keys cycle the slash preview.
+///
+/// The buffer itself is never mutated while cycling (which would drop the
+/// cursor to column 0); instead the selection is shown as a ghost hint after
+/// the cursor and committed on submit. `base` is therefore the live buffer.
 struct CycleState {
-    /// The line typed before cycling began; defines the candidate set.
+    /// The typed line that defines the candidate set (equals the live buffer).
     base: String,
     index: usize,
 }
@@ -231,27 +235,47 @@ pub(crate) fn next_cycle_index(current: Option<usize>, count: usize, forward: bo
     }
 }
 
-/// Move the slash-preview selection by one and prefill it into the buffer.
-/// Returns `None` (falling back to history navigation) when `line` isn't a
-/// slash command or has no completions.
+/// Move the slash-preview selection by one and repaint so the ghost hint and
+/// highlighted row update. Returns `None` (falling back to history navigation)
+/// when `line` isn't a slash command or has no completions.
 fn cycle_slash_preview(line: &str, forward: bool) -> Option<Cmd> {
     if !line.starts_with('/') {
         reset_cycle();
         return None;
     }
     let mut guard = cycle_lock();
-    let base = guard
-        .as_ref()
-        .map_or_else(|| line.to_string(), |c| c.base.clone());
-    let items = preview_items(&base);
+    // The buffer is left untouched while cycling, so the candidate set is the
+    // live line itself.
+    let items = preview_items(line);
     if items.is_empty() {
         *guard = None;
         return None;
     }
     let index = next_cycle_index(guard.as_ref().map(|c| c.index), items.len(), forward);
-    let replacement = items[index].replacement.clone();
-    *guard = Some(CycleState { base, index });
-    Some(Cmd::Replace(Movement::WholeLine, Some(replacement)))
+    *guard = Some(CycleState {
+        base: line.to_string(),
+        index,
+    });
+    Some(Cmd::Repaint)
+}
+
+/// The full line the current cycle selection commits to, if any.
+fn selected_replacement() -> Option<String> {
+    let guard = cycle_lock();
+    let c = guard.as_ref()?;
+    preview_items(&c.base)
+        .into_iter()
+        .nth(c.index)
+        .map(|i| i.replacement)
+}
+
+/// Ghost suffix to show after the cursor: the selected completion with the
+/// typed `line` stripped off. `None` when nothing is selected or already typed
+/// in full.
+pub(crate) fn selection_ghost(line: &str, base: &str, index: usize) -> Option<String> {
+    let item = preview_items(base).into_iter().nth(index)?;
+    let ghost = item.replacement.strip_prefix(line)?;
+    (!ghost.is_empty()).then(|| ghost.to_string())
 }
 
 pub struct NlshHelper;
@@ -300,6 +324,16 @@ impl Completer for NlshHelper {
 
 impl Hinter for NlshHelper {
     type Hint = String;
+
+    fn hint(&self, line: &str, pos: usize, _ctx: &rustyline::Context<'_>) -> Option<String> {
+        // Hints only render at end of line; the cursor stays there while cycling.
+        if pos != line.len() {
+            return None;
+        }
+        let guard = cycle_lock();
+        let c = guard.as_ref()?;
+        selection_ghost(line, &c.base, c.index)
+    }
 }
 
 impl Validator for NlshHelper {}
@@ -344,6 +378,10 @@ impl Highlighter for NlshHelper {
         }
     }
 
+    fn highlight_hint<'h>(&self, hint: &'h str) -> Cow<'h, str> {
+        Cow::Owned(hint.custom_color(CTP_OVERLAY0).to_string())
+    }
+
     fn highlight_char(&self, line: &str, _pos: usize, _kind: CmdKind) -> bool {
         // Derive shell mode from buffer content so history restore works automatically.
         let shell = line.starts_with("! ");
@@ -372,8 +410,9 @@ impl ConditionalEventHandler for SlashPreviewHandler {
             return None;
         }
 
-        // Arrow keys cycle the slash preview and prefill the selection;
-        // outside slash mode they fall through to history navigation.
+        // Arrow keys cycle the slash preview and ghost the selection; outside
+        // slash mode they fall through to history navigation. Enter keeps the
+        // cycle state so the selection is committed on submit.
         if let Event::KeySeq(keys) = evt {
             match keys.first() {
                 Some(KeyEvent(KeyCode::Down, Modifiers::NONE)) => {
@@ -382,6 +421,7 @@ impl ConditionalEventHandler for SlashPreviewHandler {
                 Some(KeyEvent(KeyCode::Up, Modifiers::NONE)) => {
                     return cycle_slash_preview(line, false);
                 }
+                Some(KeyEvent(KeyCode::Enter, _)) => return None,
                 _ => {}
             }
         }
@@ -464,6 +504,9 @@ where
     match readline_fn(editor, &prompt) {
         Ok(line) => {
             clear_slash_preview();
+            // A live cycle selection commits its full command, not the typed stem.
+            let line = selected_replacement().unwrap_or(line);
+            reset_cycle();
             let trimmed = line.trim();
             if trimmed.is_empty() {
                 Ok(None)
