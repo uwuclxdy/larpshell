@@ -14,6 +14,7 @@ mod prompt;
 mod providers;
 mod shell_integration;
 mod slash_commands;
+mod status;
 mod uninstall;
 mod update;
 mod vocab;
@@ -30,9 +31,7 @@ use cli::{PromptAction, PromptKind, execute_shell_command, parse_cli_args, print
 use colored::Colorize;
 #[cfg(unix)]
 use common::setup_terminal;
-use common::{
-    CTP_BLUE, CTP_OVERLAY0, EXIT_SIGINT, clear_line, eprint_flush, hide_cursor, show_cursor,
-};
+use common::{CTP_BLUE, EXIT_SIGINT, clear_line, eprint_flush, show_cursor};
 use config::{AgentMode, Config, interactive_setup, load_config};
 use confirmation::style_message_markup;
 use confirmation::{
@@ -49,6 +48,7 @@ use prompt::{
 use providers::{AIProvider, create_provider};
 use shell_integration::{auto_setup_shell_function, migrate_nlsh_rs_shell};
 use slash_commands::SlashCmd;
+use status::StatusLine;
 use uninstall::uninstall_larpshell;
 
 /// Differentiates interactive (REPL) vs single-command mode.
@@ -788,8 +788,7 @@ async fn process_command(
     mode: CommandMode,
 ) -> Result<Option<String>, LarpshellError> {
     let model_name = config.provider_config()?.config.model().to_string();
-    hide_cursor();
-    eprint_status(&format!("using {model_name}..."));
+    let status = StatusLine::start(&format!("generating with {model_name}"));
 
     let effective_sys = config::load_sys_prompt().filter(|prompt| validate_sys_prompt(prompt));
     let prompt = create_system_prompt(user_input, effective_sys.as_deref());
@@ -798,6 +797,7 @@ async fn process_command(
         CommandMode::Interactive => generate_with_cancellation(provider, &prompt).await?,
         CommandMode::Single => generate_single_shot(provider, &prompt).await?,
     };
+    status.finish();
 
     let command = normalize_model_output(&response);
     if command.trim().is_empty() {
@@ -893,8 +893,6 @@ async fn generate_with_cancellation(
         }
         () = cancel_token.cancelled() => Err(LarpshellError::Cancelled),
     };
-    clear_line();
-    show_cursor();
     #[cfg(unix)]
     if let Some(saved) = saved_echo.as_ref() {
         common::restore_terminal_echo(saved);
@@ -995,10 +993,6 @@ fn execute_or_print(command: &str) -> Result<(), LarpshellError> {
     Ok(())
 }
 
-fn eprint_status(message: &str) {
-    eprint_flush(&message.custom_color(CTP_OVERLAY0).to_string());
-}
-
 // ── explanation helper ──────────────────────────────────────────────────────
 
 async fn get_explanation(
@@ -1008,9 +1002,9 @@ async fn get_explanation(
     let effective = config::load_explain_prompt().filter(|prompt| validate_explain_prompt(prompt));
     let query = create_explain_prompt(command, effective.as_deref());
 
-    hide_cursor();
-    eprint_status("explaining...");
-
+    let status = StatusLine::start("explaining");
     let result = generate_with_cancellation(provider, &query).await?;
+    status.finish();
+
     Ok(prompt::clean_explanation(&result, command))
 }

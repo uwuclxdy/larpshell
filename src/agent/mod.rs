@@ -8,8 +8,7 @@ use crate::cli::print_warning;
 #[cfg(unix)]
 use crate::common::RawModeGuard;
 use crate::common::{
-    CTP_BLUE, CTP_GREEN, CTP_OVERLAY0, CTP_PRIMARY, CTP_RED, CTP_YELLOW, clear_line, eprint_flush,
-    hide_cursor, show_cursor,
+    CTP_BLUE, CTP_GREEN, CTP_OVERLAY0, CTP_PRIMARY, CTP_RED, CTP_YELLOW, clear_line,
 };
 use crate::config::{
     AgentMode, Config, load_agent_prompt, load_agent_safe_prompt, load_sys_prompt,
@@ -21,6 +20,7 @@ use crate::prompt::{
     parse_labeled_response, validate_sys_prompt,
 };
 use crate::providers::{AIProvider, ChatMessage, ChatResponse, ToolCall};
+use crate::status::StatusLine;
 use tools::ToolRegistry;
 
 const MAX_AGENT_ITERATIONS: usize = 25;
@@ -198,32 +198,15 @@ fn initial_agent_messages(user_input: &str, config: &Config) -> Vec<ChatMessage>
     ]
 }
 
-fn show_agent_start(config: &Config) -> Result<(), LarpshellError> {
-    let model_name = config.provider_config()?.config.model().to_string();
-    hide_cursor();
-    eprint_flush(
-        &format!("using {model_name} (agent)...")
-            .custom_color(CTP_OVERLAY0)
-            .to_string(),
-    );
-    Ok(())
-}
-
-fn clear_agent_status() {
-    clear_line();
-    show_cursor();
-}
-
-async fn next_agent_response(
-    provider: &dyn AIProvider,
-    messages: &[ChatMessage],
-    tool_definitions: &[crate::providers::ToolDefinition],
-) -> Result<ChatResponse, LarpshellError> {
-    let response = provider
-        .generate_with_tools(messages, tool_definitions)
-        .await;
-    clear_agent_status();
-    response
+fn agent_context(
+    user_input: &str,
+    config: &Config,
+    tool_registry: &ToolRegistry,
+) -> (Vec<ChatMessage>, Vec<crate::providers::ToolDefinition>) {
+    (
+        initial_agent_messages(user_input, config),
+        tool_registry.definitions(),
+    )
 }
 
 fn handle_tool_calls<F>(
@@ -268,13 +251,6 @@ where
     messages.extend(pending_messages);
 
     Ok(())
-}
-
-fn show_next_iteration_prompt(iteration: usize) {
-    if iteration < MAX_AGENT_ITERATIONS - 1 {
-        hide_cursor();
-        eprint_flush(&"thinking...".custom_color(CTP_OVERLAY0).to_string());
-    }
 }
 
 fn parse_final_response(text: &str) -> FinalResponse {
@@ -333,18 +309,6 @@ where
             Ok(None)
         }
     }
-}
-
-fn agent_context(
-    user_input: &str,
-    config: &Config,
-    tool_registry: &ToolRegistry,
-) -> Result<(Vec<ChatMessage>, Vec<crate::providers::ToolDefinition>), LarpshellError> {
-    show_agent_start(config)?;
-    Ok((
-        initial_agent_messages(user_input, config),
-        tool_registry.definitions(),
-    ))
 }
 
 fn tool_line_string(tool_call: &ToolCall) -> String {
@@ -526,10 +490,23 @@ async fn run_agent_loop_with_confirm<F>(
 where
     F: FnMut(&ToolCall) -> ToolConfirmResult,
 {
-    let (mut messages, tool_definitions) = agent_context(user_input, config, tool_registry)?;
+    let model = config.provider_config()?.config.model().to_string();
+    let (mut messages, tool_definitions) = agent_context(user_input, config, tool_registry);
 
     for iteration in 0..MAX_AGENT_ITERATIONS {
-        let response = next_agent_response(provider, &messages, &tool_definitions).await?;
+        let label = if iteration == 0 {
+            format!("agent · {model}")
+        } else {
+            "thinking".to_string()
+        };
+        let status = StatusLine::start(&label);
+
+        let response = provider
+            .generate_with_tools(&messages, &tool_definitions)
+            .await;
+        status.finish();
+
+        let response = response?;
 
         if let Some(text) = handle_agent_response(
             response,
@@ -540,8 +517,6 @@ where
         )? {
             return Ok(text);
         }
-
-        show_next_iteration_prompt(iteration);
     }
 
     Err(LarpshellError::AgentMaxIterations(MAX_AGENT_ITERATIONS))
