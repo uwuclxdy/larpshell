@@ -178,7 +178,7 @@ Interactive mode supports:
 - `/quit`
 - `/uninstall`
 
-Typing `/` shows a live hint list below the prompt. Arrow Up/Down cycle through the matches (commands, then their arguments) and prefill the highlighted one; Tab still completes.
+Typing `/` shows a live hint list below the prompt. Arrow Up/Down cycle through the matches (commands, then their arguments), highlighting one in the list and showing it as a dimmed suggestion after the cursor; Enter runs the highlighted match, Right or Tab fills it into the line.
 
 In the REPL, `! <command>` runs a shell command directly.
 
