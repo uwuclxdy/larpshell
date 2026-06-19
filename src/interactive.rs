@@ -14,13 +14,14 @@ use rustyline::history::DefaultHistory;
 use rustyline::validate::Validator;
 use rustyline::{
     Cmd, CompletionType, ConditionalEventHandler, Config, Editor, Event, EventContext,
-    EventHandler, Helper, KeyCode, KeyEvent, Modifiers, RepeatCount,
+    EventHandler, Helper, KeyCode, KeyEvent, Modifiers, Movement, RepeatCount,
 };
 
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::common::{
-    CTP_BLUE, CTP_OVERLAY0, CTP_PRIMARY, current_directory_display, show_cursor, terminal_width,
+    CTP_BLUE, CTP_OVERLAY0, CTP_PRIMARY, CTP_TEXT, current_directory_display, show_cursor,
+    terminal_width,
 };
 use crate::config;
 use crate::slash_commands;
@@ -37,6 +38,7 @@ pub fn format_preview_row(
     typed_len: usize,
     description: &str,
     max_width: usize,
+    selected: bool,
 ) -> String {
     let split = typed_len.min(cmd_name.len());
     let (typed, untyped) = cmd_name.split_at(split);
@@ -46,12 +48,24 @@ pub fn format_preview_row(
     // wrapped row would throw off the line count used to erase the preview.
     let prefix_cols = 2 + cmd_name.width() + gap;
     let description = truncate_to_width(description, max_width.saturating_sub(prefix_cols));
+    // The selected row gets a marker and brighter text; both indents are 2 cols
+    // wide so column alignment is identical either way.
+    let (indent, untyped_color, desc_color) = if selected {
+        (
+            "❯ ".custom_color(CTP_PRIMARY).to_string(),
+            CTP_TEXT,
+            CTP_TEXT,
+        )
+    } else {
+        ("  ".to_string(), CTP_OVERLAY0, CTP_OVERLAY0)
+    };
     format!(
-        "  {}{}{}{}",
+        "{}{}{}{}{}",
+        indent,
         typed.custom_color(CTP_PRIMARY).bold(),
-        untyped.custom_color(CTP_OVERLAY0),
+        untyped.custom_color(untyped_color),
         " ".repeat(gap),
-        description.as_ref().custom_color(CTP_OVERLAY0),
+        description.as_ref().custom_color(desc_color),
     )
 }
 
@@ -95,35 +109,76 @@ pub fn clear_slash_preview() {
     let _ = io::stdout().flush();
 }
 
-/// Draw a filtered command or argument preview below the current prompt line.
-/// Redraws from scratch: erases old lines, writes new ones, returns cursor to prompt line.
-pub fn draw_slash_preview(line: &str) {
-    if line.contains(' ') {
-        draw_arg_preview(line);
-        return;
+/// One previewed completion row plus the full line that selecting it yields.
+pub(crate) struct PreviewItem {
+    /// Row label: `/command` for command names, the bare value for arguments.
+    pub(crate) name: String,
+    description: &'static str,
+    /// Leading chars of `name` the user has already typed (rendered bold).
+    typed_len: usize,
+    /// Buffer contents if this item is selected.
+    pub(crate) replacement: String,
+}
+
+/// Build the completion rows for `source` (command names or argument values).
+/// Returns empty when there is nothing to preview.
+pub(crate) fn preview_items(source: &str) -> Vec<PreviewItem> {
+    if !source.starts_with('/') {
+        return Vec::new();
     }
+    if source.contains(' ') {
+        let Some((start, choices)) = slash_commands::arg_completions(source) else {
+            return Vec::new();
+        };
+        let typed_len = source.len() - start;
+        let prefix = &source[..start];
+        return choices
+            .iter()
+            .map(|c| PreviewItem {
+                name: c.value.to_string(),
+                description: c.description,
+                typed_len,
+                replacement: format!("{prefix}{}", c.value),
+            })
+            .collect();
+    }
+    slash_commands::filter(source)
+        .iter()
+        .map(|cmd| {
+            let name = format!("/{}", cmd.name);
+            PreviewItem {
+                description: cmd.description,
+                typed_len: source.len(),
+                replacement: name.clone(),
+                name,
+            }
+        })
+        .collect()
+}
 
-    let matches = slash_commands::filter(line);
+/// Redraw the preview from scratch: erase old lines, write `items` (marking
+/// `selected`), and return the cursor to the prompt line.
+fn render_preview(items: &[PreviewItem], selected: Option<usize>) {
     let prev_count = PREVIEW_LINE_COUNT.load(Ordering::Relaxed);
-    let new_count = matches.len();
+    let new_count = items.len();
     let max_lines = prev_count.max(new_count);
-
     if max_lines == 0 {
         return;
     }
 
-    let typed_len = line.len();
     let width = terminal_width();
     let mut seq = String::new();
-
-    // Erase old lines and write new ones in a single downward pass.
     for i in 0..max_lines {
         seq.push_str("\n\x1b[K"); // move down one line, erase it
-        if let Some(cmd) = matches.get(i) {
-            let row =
-                format_preview_row(&format!("/{}", cmd.name), typed_len, cmd.description, width);
+        if let Some(item) = items.get(i) {
             seq.push('\r');
-            seq.push_str(&row);
+            seq.push_str(&format_preview_row(
+                &item.name,
+                item.typed_len,
+                item.description,
+                width,
+                selected == Some(i),
+            ));
         }
     }
     // Return cursor to the prompt line.
@@ -134,41 +189,69 @@ pub fn draw_slash_preview(line: &str) {
     let _ = io::stdout().flush();
 }
 
-fn draw_arg_preview(line: &str) {
-    let prev_count = PREVIEW_LINE_COUNT.load(Ordering::Relaxed);
-
-    let Some((start, choices)) = slash_commands::arg_completions(line) else {
-        clear_slash_preview();
-        return;
+/// Draw a filtered command or argument preview below the current prompt line.
+/// While cycling, the candidate set is locked to the stem typed before the
+/// first arrow so the prefilled selection doesn't collapse the list.
+pub fn draw_slash_preview(line: &str) {
+    let (source, selected) = match cycle_lock().as_ref() {
+        Some(c) => (c.base.clone(), Some(c.index)),
+        None => (line.to_string(), None),
     };
+    render_preview(&preview_items(&source), selected);
+}
 
-    let partial_len = line.len() - start;
-    let new_count = choices.len();
-    let max_lines = prev_count.max(new_count);
+/// Selection state while the arrow keys cycle the slash preview.
+struct CycleState {
+    /// The line typed before cycling began; defines the candidate set.
+    base: String,
+    index: usize,
+}
 
-    if max_lines == 0 {
-        return;
+static CYCLE: Mutex<Option<CycleState>> = Mutex::new(None);
+
+fn cycle_lock() -> std::sync::MutexGuard<'static, Option<CycleState>> {
+    CYCLE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+fn reset_cycle() {
+    *cycle_lock() = None;
+}
+
+/// Next selection index when cycling `count` items. With no current selection,
+/// forward starts at the top and backward at the bottom; otherwise it steps and
+/// wraps around either end.
+pub(crate) fn next_cycle_index(current: Option<usize>, count: usize, forward: bool) -> usize {
+    debug_assert!(count > 0);
+    match current {
+        Some(i) => (i as i64 + if forward { 1 } else { -1 }).rem_euclid(count as i64) as usize,
+        None if forward => 0,
+        None => count - 1,
     }
+}
 
-    let width = terminal_width();
-    let mut seq = String::new();
-    for i in 0..max_lines {
-        seq.push_str("\n\x1b[K");
-        if let Some(choice) = choices.get(i) {
-            seq.push('\r');
-            seq.push_str(&format_preview_row(
-                choice.value,
-                partial_len,
-                choice.description,
-                width,
-            ));
-        }
+/// Move the slash-preview selection by one and prefill it into the buffer.
+/// Returns `None` (falling back to history navigation) when `line` isn't a
+/// slash command or has no completions.
+fn cycle_slash_preview(line: &str, forward: bool) -> Option<Cmd> {
+    if !line.starts_with('/') {
+        reset_cycle();
+        return None;
     }
-    let _ = write!(seq, "\x1b[{max_lines}A\r");
-
-    PREVIEW_LINE_COUNT.store(new_count, Ordering::Relaxed);
-    print!("{seq}");
-    let _ = io::stdout().flush();
+    let mut guard = cycle_lock();
+    let base = guard
+        .as_ref()
+        .map_or_else(|| line.to_string(), |c| c.base.clone());
+    let items = preview_items(&base);
+    if items.is_empty() {
+        *guard = None;
+        return None;
+    }
+    let index = next_cycle_index(guard.as_ref().map(|c| c.index), items.len(), forward);
+    let replacement = items[index].replacement.clone();
+    *guard = Some(CycleState { base, index });
+    Some(Cmd::Replace(Movement::WholeLine, Some(replacement)))
 }
 
 pub struct NlshHelper;
@@ -284,9 +367,27 @@ impl ConditionalEventHandler for SlashPreviewHandler {
 
         // Suppress slash preview in shell mode.
         if line.starts_with("! ") {
+            reset_cycle();
             clear_slash_preview();
             return None;
         }
+
+        // Arrow keys cycle the slash preview and prefill the selection;
+        // outside slash mode they fall through to history navigation.
+        if let Event::KeySeq(keys) = evt {
+            match keys.first() {
+                Some(KeyEvent(KeyCode::Down, Modifiers::NONE)) => {
+                    return cycle_slash_preview(line, true);
+                }
+                Some(KeyEvent(KeyCode::Up, Modifiers::NONE)) => {
+                    return cycle_slash_preview(line, false);
+                }
+                _ => {}
+            }
+        }
+
+        // Any other key ends an active cycle so editing resumes from the buffer.
+        reset_cycle();
 
         // Compute what the line will look like after this keypress,
         // so we can clear preview early when switching away from /commands.
@@ -327,6 +428,7 @@ where
     F: FnOnce(&mut NlshEditor, &str) -> rustyline::Result<String>,
 {
     SHELL_MODE.store(false, Ordering::Relaxed);
+    reset_cycle();
     let mut editor_lock = EDITOR
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
