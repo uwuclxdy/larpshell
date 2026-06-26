@@ -4,9 +4,9 @@
 
 Why learn shell commands when you can just larp ts? Takuji and larptok approved.
 
-[![Crates.io](https://img.shields.io/crates/v/larpshell)](https://crates.io/crates/larpshell)
+[![Crates.io](https://shields.uwuclxdy.dev/crates/v/larpshell)](https://crates.io/crates/larpshell)
 [![Release](https://github.com/uwuclxdy/larpshell/actions/workflows/release.yml/badge.svg)](https://github.com/uwuclxdy/larpshell/actions/workflows/release.yml)
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+[![License: GPL v3](https://shields.uwuclxdy.dev/badge/License-GPLv3-blue.svg)](LICENSE)
 
 ---
 
