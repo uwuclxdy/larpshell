@@ -11,9 +11,11 @@ on:
 # and the trailing version comment together when updating.
 
 jobs:
-  # ── Job 1: compile binary, create GitHub release ─────────────────────────
-  build-and-release:
-    name: Build and Release
+  # ── Job 1: resolve version, create the release page up front ─────────────
+  # The page exists the moment the tag lands; notes are NOT auto-generated
+  # (the release script writes them), the binary attaches when the build finishes.
+  create-release:
+    name: Create Release
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -47,6 +49,24 @@ jobs:
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "version=${VER}" >> "$GITHUB_OUTPUT"
 
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2.6.2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          generate_release_notes: false
+
+  # ── Job 2: compile binary, attach it to the release ───────────────────────
+  build-and-release:
+    name: Build and Release
+    needs: create-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9  # master
         with:
@@ -67,18 +87,17 @@ jobs:
         env:
           CARGO_TARGET_DIR: target
 
-      - name: Create GitHub Release
+      - name: Upload release binary
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2.6.2
         with:
-          tag_name: ${{ steps.version.outputs.tag }}
+          tag_name: ${{ needs.create-release.outputs.tag }}
           files: target/release/larpshell
-          generate_release_notes: true
           fail_on_unmatched_files: true
 
-  # ── Job 2: update AUR packages ────────────────────────────────────────────
+  # ── Job 3: update AUR packages ────────────────────────────────────────────
   aur-publish:
     name: Publish to AUR
-    needs: build-and-release
+    needs: [create-release, build-and-release]
     runs-on: ubuntu-latest
     container: archlinux:base-devel
 
@@ -126,7 +145,7 @@ jobs:
 
       - name: Update larpshell PKGBUILD
         env:
-          VER: ${{ needs.build-and-release.outputs.version }}
+          VER: ${{ needs.create-release.outputs.version }}
         run: |
           cd aur/larpshell
           sed -i "s/^pkgver=.*/pkgver=${VER}/" PKGBUILD
@@ -150,7 +169,7 @@ jobs:
         env:
           AUR_USERNAME: ${{ secrets.AUR_USERNAME }}
           AUR_EMAIL: ${{ secrets.AUR_EMAIL }}
-          VER: ${{ needs.build-and-release.outputs.version }}
+          VER: ${{ needs.create-release.outputs.version }}
         run: |
           git clone --depth 1 ssh://aur@aur.archlinux.org/larpshell.git /tmp/aur-larpshell
           cp aur/larpshell/PKGBUILD /tmp/aur-larpshell/PKGBUILD
@@ -183,7 +202,7 @@ jobs:
 
       - name: Commit updated AUR files to repo
         env:
-          VER: ${{ needs.build-and-release.outputs.version }}
+          VER: ${{ needs.create-release.outputs.version }}
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git config user.name "github-actions[bot]"
