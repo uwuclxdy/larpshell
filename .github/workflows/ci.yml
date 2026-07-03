@@ -23,3 +23,11 @@ jobs:
 
       - name: test
         run: cargo test --release --all-targets --all-features
+
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
