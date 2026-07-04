@@ -386,7 +386,7 @@ impl Highlighter for NlshHelper {
         let cwd = current_directory_display();
         Cow::Owned(format!(
             "{}:{}{} ",
-            "larpshell".custom_color(CTP_PRIMARY).bold(),
+            "larpshell".custom_color(CTP_PRIMARY),
             cwd.custom_color(CTP_OVERLAY0),
             "$".custom_color(CTP_BLUE).bold()
         ))
@@ -550,7 +550,7 @@ where
     let cwd = current_directory_display();
     let prompt = format!(
         "{}:{}{} ",
-        "larpshell".custom_color(CTP_PRIMARY).bold(),
+        "larpshell".custom_color(CTP_PRIMARY),
         cwd.custom_color(CTP_OVERLAY0),
         "❯".custom_color(CTP_BLUE)
     );
