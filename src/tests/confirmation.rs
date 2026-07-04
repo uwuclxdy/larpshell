@@ -218,10 +218,97 @@ fn parse_key_from_reader_assembles_multibyte_utf8() {
 }
 
 #[test]
-fn parse_key_from_reader_truncated_multibyte_is_eof() {
-    // Lead byte of a 3-byte sequence with no continuation bytes available.
+fn parse_key_from_reader_truncated_multibyte_is_noop() {
+    // Lead byte of a 3-byte sequence with no continuation bytes available: a
+    // truncated read is a no-op (Other), not a cancel-triggering Eof.
     let mut input = std::io::Cursor::new(vec![0xE3]);
-    assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::Eof));
+    assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::Other));
+}
+
+#[test]
+fn parse_key_from_reader_bare_esc_is_esc() {
+    // A lone 0x1b at EOF (no following byte) is Esc, not Eof/hang.
+    let mut input = std::io::Cursor::new(b"\x1b");
+    assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::Esc));
+}
+
+#[test]
+fn parse_key_from_reader_ctrl_up_maps_to_arrow_up_and_consumes_sequence() {
+    // ctrl+up = \x1b[1;5A → ArrowUp; the modifier params + final byte are fully
+    // consumed, so the trailing sentinel parses cleanly next (no leak).
+    let mut input = std::io::Cursor::new(b"\x1b[1;5Ax".to_vec());
+    assert!(matches!(
+        parse_key_from_reader(&mut input),
+        KeyEvent::ArrowUp
+    ));
+    assert!(matches!(
+        parse_key_from_reader(&mut input),
+        KeyEvent::Char('x')
+    ));
+}
+
+#[test]
+fn parse_key_from_reader_ctrl_left_maps_to_left_and_consumes_sequence() {
+    let mut input = std::io::Cursor::new(b"\x1b[1;5Dz".to_vec());
+    assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::Left));
+    assert!(matches!(
+        parse_key_from_reader(&mut input),
+        KeyEvent::Char('z')
+    ));
+}
+
+#[test]
+fn parse_key_from_reader_ctrl_delete_maps_to_delete_and_consumes_tilde() {
+    // ctrl+del = \x1b[3;5~ → Delete; the ~ terminator must not leak.
+    let mut input = std::io::Cursor::new(b"\x1b[3;5~q".to_vec());
+    assert!(matches!(
+        parse_key_from_reader(&mut input),
+        KeyEvent::Delete
+    ));
+    assert!(matches!(
+        parse_key_from_reader(&mut input),
+        KeyEvent::Char('q')
+    ));
+}
+
+#[test]
+fn parse_key_from_reader_pgup_is_other_and_consumes_tilde() {
+    // PgUp = \x1b[5~ → unsupported (Other), but the ~ must be consumed whole.
+    let mut input = std::io::Cursor::new(b"\x1b[5~w".to_vec());
+    assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::Other));
+    assert!(matches!(
+        parse_key_from_reader(&mut input),
+        KeyEvent::Char('w')
+    ));
+}
+
+#[test]
+fn parse_key_from_reader_insert_is_other_and_consumes_tilde() {
+    // Insert = \x1b[2~ → unsupported (Other), ~ consumed.
+    let mut input = std::io::Cursor::new(b"\x1b[2~w".to_vec());
+    assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::Other));
+    assert!(matches!(
+        parse_key_from_reader(&mut input),
+        KeyEvent::Char('w')
+    ));
+}
+
+#[test]
+fn parse_key_from_reader_tilde_home_and_end() {
+    let mut home = std::io::Cursor::new(b"\x1b[1~".to_vec());
+    assert!(matches!(parse_key_from_reader(&mut home), KeyEvent::Home));
+    let mut end = std::io::Cursor::new(b"\x1b[4~".to_vec());
+    assert!(matches!(parse_key_from_reader(&mut end), KeyEvent::End));
+}
+
+#[test]
+fn parse_key_from_reader_ss3_arrow_maps_to_arrow_up() {
+    // SS3 (application-mode) up = \x1bOA → ArrowUp.
+    let mut input = std::io::Cursor::new(b"\x1bOA".to_vec());
+    assert!(matches!(
+        parse_key_from_reader(&mut input),
+        KeyEvent::ArrowUp
+    ));
 }
 
 #[test]
@@ -270,6 +357,27 @@ fn confirm_from_reader_with_explain_on_n_returns_cancel() {
         0,
     );
     assert!(matches!(result, ConfirmResult::Cancel));
+}
+
+#[test]
+fn confirm_from_reader_on_esc_returns_cancel() {
+    let mut keys = vec![KeyEvent::Esc].into_iter();
+    let result = confirm_from_reader(
+        || keys.next().unwrap(),
+        ConfirmPromptMode::WithExplain,
+        1,
+        0,
+    );
+    assert!(matches!(result, ConfirmResult::Cancel));
+}
+
+#[test]
+fn confirm_from_reader_ignores_other_then_yes() {
+    // A no-op key (e.g. a truncated multibyte, now mapped to Other) is skipped
+    // rather than cancelling.
+    let mut keys = vec![KeyEvent::Other, KeyEvent::Enter].into_iter();
+    let result = confirm_from_reader(|| keys.next().unwrap(), ConfirmPromptMode::Simple, 1, 0);
+    assert!(matches!(result, ConfirmResult::Yes));
 }
 
 #[test]

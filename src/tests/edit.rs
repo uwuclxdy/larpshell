@@ -64,6 +64,16 @@ fn confirm_n_prints_nothing() {
     assert_eq!(stdout(&out), "");
 }
 
+// A bare ESC at the confirm prompt cancels like N (exit 130). On the piped test
+// path a lone 0x1b at EOF is delivered as Esc rather than swallowing the next key.
+#[test]
+fn confirm_esc_cancels() {
+    let (home, _) = setup("confirm_esc", &[CMD]);
+    let out = run(&home, b"\x1b");
+    assert_eq!(out.status.code(), Some(130));
+    assert_eq!(stdout(&out), "");
+}
+
 // ── edit: basic ──────────────────────────────────────────────────────────────
 
 // Arrow Up then Enter with no edits — command must stay identical.
@@ -143,6 +153,29 @@ fn edit_insert_at_start_delete_from_end() {
 fn edit_right_at_end_is_noop() {
     let (home, _) = setup("edit_right_noop", &[CMD]);
     let out = run(&home, b"\x1b[A\x1b[C\ny");
+    assert!(out.status.success());
+    assert_eq!(stdout(&out), "mock");
+}
+
+// ── edit: modified/extended escape sequences leak no stray chars ───────────────
+
+// ctrl+left (\x1b[1;5D) maps to a plain Left; the modifier params and final byte
+// are consumed whole, so the command runs unchanged. The old parser stopped at
+// the '1' and injected the leftover "5D" into the buffer.
+#[test]
+fn edit_ctrl_left_no_stray_chars() {
+    let (home, _) = setup("edit_ctrl_left", &[CMD]);
+    let out = run(&home, b"\x1b[A\x1b[1;5D\ny");
+    assert!(out.status.success());
+    assert_eq!(stdout(&out), "mock");
+}
+
+// PgUp (\x1b[5~) is an unsupported no-op whose '~' terminator must not leak. The
+// old parser left the '~' unconsumed, injecting it and producing "mock~".
+#[test]
+fn edit_pgup_is_noop_no_stray_chars() {
+    let (home, _) = setup("edit_pgup", &[CMD]);
+    let out = run(&home, b"\x1b[A\x1b[5~\ny");
     assert!(out.status.success());
     assert_eq!(stdout(&out), "mock");
 }

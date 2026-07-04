@@ -35,66 +35,156 @@ pub enum KeyEvent {
     Enter,
     CtrlC,
     ArrowUp,
+    Esc,
     Eof,
     Other,
+}
+
+/// One-byte input source for key parsing. Abstracts a plain byte stream (a pipe
+/// or the test `Cursor`) from a raw tty, where the byte *after* an ESC needs a
+/// short read timeout so a lone ESC press doesn't block on the next key.
+trait ByteSource {
+    /// Blocking read of the next byte; `None` on EOF or I/O error.
+    fn read_byte(&mut self) -> Option<u8>;
+    /// Byte immediately following an ESC. `None` means no sequence follows: a
+    /// bare ESC press (tty read timeout) or a lone `0x1b` at pipe EOF.
+    fn after_esc(&mut self) -> Option<u8> {
+        self.read_byte()
+    }
+}
+
+/// One byte from a reader; `None` on EOF or I/O error. I/O errors on a raw
+/// terminal (broken pipe, disconnected pty) are indistinguishable from EOF in
+/// practice, so both end input.
+fn read_one_byte(reader: &mut impl std::io::Read) -> Option<u8> {
+    let mut byte = [0u8; 1];
+    match reader.read(&mut byte) {
+        Ok(n) if n > 0 => Some(byte[0]),
+        _ => None,
+    }
+}
+
+/// Adapts any [`std::io::Read`] into a [`ByteSource`]; the byte after ESC is a
+/// plain read, so a lone `0x1b` at EOF becomes [`KeyEvent::Esc`].
+struct ReadSource<'a, R: std::io::Read>(&'a mut R);
+
+impl<R: std::io::Read> ByteSource for ReadSource<'_, R> {
+    fn read_byte(&mut self) -> Option<u8> {
+        read_one_byte(self.0)
+    }
 }
 
 /// Parse one logical key event from any `Read` source. Works on both raw-mode
 /// terminals and plain pipes (e.g. during tests with piped stdin).
 pub fn parse_key_from_reader(reader: &mut impl std::io::Read) -> KeyEvent {
-    let mut key_byte = [0u8; 1];
-    // I/O errors on a raw terminal (broken pipe, disconnected pty) are
-    // indistinguishable from EOF in practice; treat both as EOF.
-    if reader.read(&mut key_byte).unwrap_or(0) == 0 {
+    parse_key(&mut ReadSource(reader))
+}
+
+fn parse_key(src: &mut impl ByteSource) -> KeyEvent {
+    let Some(first) = src.read_byte() else {
         return KeyEvent::Eof;
-    }
-    match key_byte[0] {
+    };
+    match first {
         b'\n' | b'\r' => KeyEvent::Enter,
         b'\x03' => KeyEvent::CtrlC,
         127 | b'\x08' => KeyEvent::Backspace,
-        b'\x1b' => {
-            if reader.read(&mut key_byte).unwrap_or(0) == 0 {
-                return KeyEvent::Eof;
-            }
-            if key_byte[0] != b'[' {
-                return KeyEvent::Other;
-            }
-            if reader.read(&mut key_byte).unwrap_or(0) == 0 {
-                return KeyEvent::Eof;
-            }
-            match key_byte[0] {
-                b'A' => KeyEvent::ArrowUp,
-                b'C' => KeyEvent::Right,
-                b'D' => KeyEvent::Left,
-                b'H' => KeyEvent::Home,
-                b'F' => KeyEvent::End,
-                b'3' => {
-                    let _ = reader.read(&mut key_byte); // consume '~'
-                    KeyEvent::Delete
-                }
-                b'1' => {
-                    let _ = reader.read(&mut key_byte); // consume '~'
-                    KeyEvent::Home
-                }
-                b'4' => {
-                    let _ = reader.read(&mut key_byte); // consume '~'
-                    KeyEvent::End
-                }
-                _ => KeyEvent::Other,
-            }
-        }
+        b'\x1b' => parse_escape(src),
         c @ 32..=126 => KeyEvent::Char(c as char),
         // UTF-8 lead byte: pull the continuation bytes and assemble the char so
         // accented/CJK/emoji input survives (e.g. while editing a command).
-        lead @ 0x80.. => read_utf8_char(reader, lead),
+        lead @ 0x80.. => read_utf8_char(src, lead),
+        _ => KeyEvent::Other,
+    }
+}
+
+/// Dispatches on the byte after an ESC: `None` is a bare ESC, `[` opens a CSI
+/// sequence, `O` an SS3 sequence; anything else (Alt-<key>) is unsupported.
+fn parse_escape(src: &mut impl ByteSource) -> KeyEvent {
+    match src.after_esc() {
+        None => KeyEvent::Esc,
+        Some(b'[') => parse_csi(src),
+        Some(b'O') => parse_ss3(src),
+        Some(_) => KeyEvent::Other,
+    }
+}
+
+/// Consumes a full CSI sequence (`ESC [` already read): parameter bytes
+/// (`0x30..=0x3F`), then intermediates (`0x20..=0x2F`), then the final byte
+/// (`0x40..=0x7E`). Known keys are mapped; unsupported ones are discarded whole
+/// so no stray byte leaks (ctrl+arrow, ctrl+del, PgUp/PgDn/Insert).
+fn parse_csi(src: &mut impl ByteSource) -> KeyEvent {
+    let mut params = [0u8; 8];
+    let mut len = 0usize;
+    loop {
+        let Some(byte) = src.read_byte() else {
+            return KeyEvent::Eof;
+        };
+        match byte {
+            0x30..=0x3F => {
+                if len < params.len() {
+                    params[len] = byte;
+                    len += 1;
+                }
+            }
+            0x20..=0x2F => {} // intermediate bytes: consume and ignore
+            0x40..=0x7E => return map_csi(byte, &params[..len]),
+            _ => return KeyEvent::Other, // malformed; bail without leaking bytes
+        }
+    }
+}
+
+/// Maps a completed CSI sequence to a key by its final byte (and leading numeric
+/// parameter for the `~`-terminated family). Modifier params (e.g. `1;5` for
+/// ctrl) are ignored, so ctrl+arrow folds onto the plain arrow.
+fn map_csi(final_byte: u8, params: &[u8]) -> KeyEvent {
+    match final_byte {
+        b'A' => KeyEvent::ArrowUp,
+        b'C' => KeyEvent::Right,
+        b'D' => KeyEvent::Left,
+        b'H' => KeyEvent::Home,
+        b'F' => KeyEvent::End,
+        b'~' => match leading_param(params) {
+            1 | 7 => KeyEvent::Home,
+            3 => KeyEvent::Delete,
+            4 | 8 => KeyEvent::End,
+            _ => KeyEvent::Other, // Insert(2), PgUp(5), PgDn(6): unsupported
+        },
+        _ => KeyEvent::Other,
+    }
+}
+
+/// Leading decimal parameter of a CSI sequence (digits up to the first `;`), or
+/// 0 when there is none.
+fn leading_param(params: &[u8]) -> u32 {
+    let mut value = 0u32;
+    for &byte in params {
+        if byte.is_ascii_digit() {
+            value = value * 10 + u32::from(byte - b'0');
+        } else {
+            break;
+        }
+    }
+    value
+}
+
+/// Consumes an SS3 sequence (`ESC O` already read): a single final byte for the
+/// application-mode arrow/navigation keys some terminals emit.
+fn parse_ss3(src: &mut impl ByteSource) -> KeyEvent {
+    match src.read_byte() {
+        Some(b'A') => KeyEvent::ArrowUp,
+        Some(b'C') => KeyEvent::Right,
+        Some(b'D') => KeyEvent::Left,
+        Some(b'H') => KeyEvent::Home,
+        Some(b'F') => KeyEvent::End,
         _ => KeyEvent::Other,
     }
 }
 
 /// Reads the continuation bytes of a multibyte UTF-8 char whose `lead` byte was
-/// already consumed, returning the assembled [`KeyEvent::Char`]. Stray
-/// continuation bytes or invalid sequences map to [`KeyEvent::Other`].
-fn read_utf8_char(reader: &mut impl std::io::Read, lead: u8) -> KeyEvent {
+/// already consumed, returning the assembled [`KeyEvent::Char`]. A truncated
+/// sequence (stray continuation byte or EOF mid-char) maps to
+/// [`KeyEvent::Other`] so the edit/confirm loop treats it as a no-op.
+fn read_utf8_char(src: &mut impl ByteSource, lead: u8) -> KeyEvent {
     let extra = match lead {
         0xC0..=0xDF => 1,
         0xE0..=0xEF => 2,
@@ -104,11 +194,10 @@ fn read_utf8_char(reader: &mut impl std::io::Read, lead: u8) -> KeyEvent {
     let mut bytes = [0u8; 4];
     bytes[0] = lead;
     for slot in bytes.iter_mut().take(1 + extra).skip(1) {
-        let mut byte = [0u8; 1];
-        if reader.read(&mut byte).unwrap_or(0) == 0 {
-            return KeyEvent::Eof;
-        }
-        *slot = byte[0];
+        let Some(byte) = src.read_byte() else {
+            return KeyEvent::Other;
+        };
+        *slot = byte;
     }
     match std::str::from_utf8(&bytes[..1 + extra]) {
         Ok(text) => text.chars().next().map_or(KeyEvent::Other, KeyEvent::Char),
@@ -125,18 +214,73 @@ fn flush_stdin_input() {
 #[cfg(not(unix))]
 fn flush_stdin_input() {}
 
+/// Deciseconds to wait for the byte after an ESC before deciding the ESC was
+/// pressed alone. A CSI/SS3 tail from the terminal arrives well within this;
+/// only a bare ESC waits the full window.
 #[cfg(unix)]
-fn read_key_event() -> KeyEvent {
-    // Attempt raw mode; fall back to plain reads (e.g. piped stdin in tests).
-    if let Some(_guard) = RawModeGuard::enter() {
-        return parse_key_from_reader(&mut std::io::stdin().lock()); // _guard drops here
+const ESC_FOLLOW_TIMEOUT_DECISECONDS: u8 = 1;
+
+/// Byte after an ESC on a raw tty, read with a `VMIN=0`/`VTIME` timeout so a
+/// lone ESC returns `None` instead of blocking on the next key. Reads through
+/// the same buffered stdin as [`read_one_byte`], so a terminal that delivered
+/// the whole escape sequence in one burst still yields the buffered byte at once
+/// and only a genuinely lone ESC hits the timeout.
+#[cfg(unix)]
+fn read_esc_follow_byte(reader: &mut impl std::io::Read) -> Option<u8> {
+    use nix::sys::termios::{SetArg, SpecialCharacterIndices, tcgetattr, tcsetattr};
+    let stdin = std::io::stdin();
+    let Ok(saved) = tcgetattr(&stdin) else {
+        return read_one_byte(reader);
+    };
+    let mut timed = saved.clone();
+    timed.control_chars[SpecialCharacterIndices::VMIN as usize] = 0;
+    timed.control_chars[SpecialCharacterIndices::VTIME as usize] = ESC_FOLLOW_TIMEOUT_DECISECONDS;
+    if tcsetattr(&stdin, SetArg::TCSANOW, &timed).is_err() {
+        return read_one_byte(reader);
     }
-    parse_key_from_reader(&mut std::io::stdin().lock())
+    let byte = read_one_byte(reader);
+    let _ = tcsetattr(&stdin, SetArg::TCSANOW, &saved);
+    byte
+}
+
+/// Raw-tty [`ByteSource`]: a lone ESC is disambiguated with a short read timeout
+/// (see [`read_esc_follow_byte`]).
+#[cfg(unix)]
+struct TtySource<'a, R: std::io::Read>(&'a mut R);
+
+#[cfg(unix)]
+impl<R: std::io::Read> ByteSource for TtySource<'_, R> {
+    fn read_byte(&mut self) -> Option<u8> {
+        read_one_byte(self.0)
+    }
+    fn after_esc(&mut self) -> Option<u8> {
+        read_esc_follow_byte(self.0)
+    }
+}
+
+/// Runs `run` with a `read_key` closure over stdin, holding a single raw-mode
+/// guard for the whole confirm/edit interaction so keys are read without
+/// toggling the tty back to cooked mode between presses (a paste stays intact, a
+/// mid-redraw Ctrl-C parses as cancel instead of terminating the process). A
+/// non-tty (piped stdin in tests) falls back to plain buffered reads.
+#[cfg(unix)]
+fn read_confirm<T>(run: impl FnOnce(&mut dyn FnMut() -> KeyEvent) -> T) -> T {
+    if let Some(_guard) = RawModeGuard::enter() {
+        let mut stdin = std::io::stdin().lock();
+        let mut read = move || parse_key(&mut TtySource(&mut stdin));
+        run(&mut read)
+    } else {
+        let mut stdin = std::io::stdin().lock();
+        let mut read = move || parse_key_from_reader(&mut stdin);
+        run(&mut read)
+    }
 }
 
 #[cfg(not(unix))]
-fn read_key_event() -> KeyEvent {
-    parse_key_from_reader(&mut std::io::stdin().lock())
+fn read_confirm<T>(run: impl FnOnce(&mut dyn FnMut() -> KeyEvent) -> T) -> T {
+    let mut stdin = std::io::stdin().lock();
+    let mut read = move || parse_key_from_reader(&mut stdin);
+    run(&mut read)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -500,11 +644,7 @@ pub fn confirm_from_reader(
                 clear_n_lines(lines_to_clear);
                 return ConfirmResult::Edit;
             }
-            KeyEvent::Char('n' | 'N') => {
-                clear_n_lines(lines_to_clear);
-                return ConfirmResult::Cancel;
-            }
-            KeyEvent::CtrlC => {
+            KeyEvent::Char('n' | 'N') | KeyEvent::CtrlC | KeyEvent::Esc => {
                 clear_n_lines(lines_to_clear);
                 show_cursor();
                 return ConfirmResult::Cancel;
@@ -528,12 +668,14 @@ pub fn confirm_with_explain(cmd_line_count: usize) -> ConfirmResult {
     flush_stderr();
     flush_stdin_input();
 
-    confirm_from_reader(
-        read_key_event,
-        ConfirmPromptMode::WithExplain,
-        cmd_line_count,
-        0, // no ephemeral explanation lines in WithExplain mode
-    )
+    read_confirm(|read_key| {
+        confirm_from_reader(
+            read_key,
+            ConfirmPromptMode::WithExplain,
+            cmd_line_count,
+            0, // no ephemeral explanation lines in WithExplain mode
+        )
+    })
 }
 
 /// Prompt without the explain option.
@@ -547,12 +689,14 @@ pub fn confirm_execution(cmd_line_count: usize, expl_line_count: usize) -> Confi
     flush_stderr();
     flush_stdin_input();
 
-    confirm_from_reader(
-        read_key_event,
-        ConfirmPromptMode::Simple,
-        cmd_line_count,
-        expl_line_count,
-    )
+    read_confirm(|read_key| {
+        confirm_from_reader(
+            read_key,
+            ConfirmPromptMode::Simple,
+            cmd_line_count,
+            expl_line_count,
+        )
+    })
 }
 
 fn confirmation_prompt(mode: ConfirmPromptMode) -> usize {
@@ -583,8 +727,12 @@ fn confirmation_prompt(mode: ConfirmPromptMode) -> usize {
 
 /// Presents the command for inline editing. The caller must have already cleared the
 /// confirmation prompt lines from the terminal. Returns the edited command on Enter,
-/// or exits with code 130 on Ctrl+C.
+/// or `None` when the edit is cancelled (Ctrl+C, Esc, or EOF).
 pub fn edit_command(current: &str) -> Option<String> {
+    read_confirm(|read_key| edit_loop(current, read_key))
+}
+
+fn edit_loop(current: &str, read_key: &mut dyn FnMut() -> KeyEvent) -> Option<String> {
     let mut buf: Vec<char> = current.chars().collect();
     let mut pos = buf.len();
 
@@ -614,17 +762,35 @@ pub fn edit_command(current: &str) -> Option<String> {
         seq.push_str("\r\x1b[J");
         eprint!("{seq}");
 
-        // "$ " + text before the cursor, save the cursor, then the rest + hint.
+        // Draw the whole region: the command line, then the hint on the line
+        // below.
+        eprint!(
+            "{} {}{}\n{}",
+            "$".custom_color(CTP_PRIMARY),
+            prefix.custom_color(CTP_TEXT).bold(),
+            rest.custom_color(CTP_TEXT).bold(),
+            hint.custom_color(CTP_BLUE)
+        );
+
+        // Return to the edit point with relative moves only. The cursor now sits
+        // on the hint's last row; walk up to the region top and reprint the
+        // prefix to land back at the edit column. An absolute DECSC/DECRC save
+        // would drift here: printing the hint can scroll the screen and
+        // invalidate a saved position, whereas the row distance between two
+        // printed points survives a scroll.
+        let cmd_rows = count_visual_lines(&format!("$ {prefix}{rest}"), width);
+        let hint_rows = count_visual_lines(&hint, width);
+        let rows_to_top = cmd_rows.saturating_sub(1) + hint_rows;
+        let mut back = String::new();
+        if rows_to_top > 0 {
+            let _ = write!(back, "\x1b[{rows_to_top}A");
+        }
+        back.push('\r');
+        eprint!("{back}");
         eprint!(
             "{} {}",
             "$".custom_color(CTP_PRIMARY),
             prefix.custom_color(CTP_TEXT).bold()
-        );
-        eprint!("\x1b7"); // DECSC: save cursor at the edit point
-        eprint!(
-            "{}\n{}\x1b8", // remainder, hint on next line, DECRC back to edit point
-            rest.custom_color(CTP_TEXT).bold(),
-            hint.custom_color(CTP_BLUE)
         );
         flush_stderr();
 
@@ -645,12 +811,12 @@ pub fn edit_command(current: &str) -> Option<String> {
     draw(&buf, pos, &mut cursor_row);
 
     loop {
-        match read_key_event() {
+        match read_key() {
             KeyEvent::Enter => {
                 clear_editor(cursor_row);
                 return Some(buf.into_iter().collect());
             }
-            KeyEvent::CtrlC | KeyEvent::Eof => {
+            KeyEvent::CtrlC | KeyEvent::Eof | KeyEvent::Esc => {
                 clear_editor(cursor_row);
                 return None;
             }
