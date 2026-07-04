@@ -81,7 +81,7 @@ larpshell api
 $ larpshell show disk usage
 > df -h
 Run this?
-[Y/Enter] to execute, [E] to explain, [Arrow Up] to edit, [N] to cancel
+↵ execute   e explain   ↑ edit   n cancel
 ```
 
 ### Interactive REPL
@@ -91,7 +91,7 @@ $ larpshell
 larpshell> show disk usage
 > df -h
 Run this?
-[Y/Enter] to execute, [E] to explain, [Arrow Up] to edit, [N] to cancel
+↵ execute   e explain   ↑ edit   n cancel
 ```
 
 ### Stdin / pipe
@@ -109,7 +109,7 @@ $ larpshell explain df -h
 > df -h
 ✅ Displays free disk space of mounted filesystems in a human readable format.
 Run this?
-[Y/Enter] to execute, [Arrow Up] to edit, [N] to cancel
+↵ execute   ↑ edit   n cancel
 ```
 
 ### Edit before running
@@ -147,7 +147,7 @@ $ larpshell what's the largest file in this repo
   result (28 lines)
 > du -ah . | sort -rh | head -n 1
 Run this?
-[Y/Enter] to execute, [E] to explain, [Arrow Up] to edit, [N] to cancel
+↵ execute   e explain   ↑ edit   n cancel
 ```
 
 ### MCP servers
