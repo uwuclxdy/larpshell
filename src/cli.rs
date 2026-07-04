@@ -24,14 +24,6 @@ pub fn print_ok(message: &str) {
     );
 }
 
-pub fn print_ok_bold(message: &str) {
-    eprintln!(
-        "{} {}",
-        SYMBOL_CHECK.custom_color(CTP_GREEN),
-        style_message_markup(message).bold()
-    );
-}
-
 pub fn print_error(message: &str) {
     eprintln!(
         "{} {}",
@@ -307,6 +299,9 @@ pub fn render_config() -> inquire::ui::RenderConfig<'static> {
         .with_answered_prompt_prefix(Styled::new("?").with_fg(accent))
         .with_highlighted_option_prefix(Styled::new(">").with_fg(accent))
         .with_selected_option(Some(StyleSheet::new().with_fg(accent)))
+        // Persisted answer value: default theme leaves it inquire-cyan, off the
+        // sapphire accent every other prompt glyph uses. Pin it to the accent.
+        .with_answer(StyleSheet::new().with_fg(accent))
         .with_help_message(StyleSheet::empty().with_fg(Color::DarkGrey))
 }
 

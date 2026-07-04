@@ -126,6 +126,9 @@ fn render_config_uses_sapphire_accent_and_dim_help() {
     // selected row + cursor render sapphire, not the default cyan
     assert_eq!(cfg.selected_option, Some(StyleSheet::new().with_fg(accent)));
     assert_eq!(cfg.highlighted_option_prefix.style.fg, Some(accent));
+    // persisted answer value renders sapphire, not the default inquire cyan
+    assert_eq!(cfg.answer.fg, Some(accent));
+    assert_ne!(cfg.answer.fg, Some(Color::LightCyan));
     // help is dimmed
     assert_eq!(cfg.help_message.fg, Some(Color::DarkGrey));
 }

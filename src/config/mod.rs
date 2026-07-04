@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::cli::{
-    map_inquire_cancel, print_error, print_ok_bold, print_warning, prompt_input, prompt_select,
+    map_inquire_cancel, print_error, print_ok, print_warning, prompt_input, prompt_select,
     render_config,
 };
 use crate::common::clear_n_lines;
@@ -567,7 +567,7 @@ fn apply_provider_config(providers: &mut MultiProviderConfig, config: &ProviderC
 }
 
 fn display_config_summary(config: &Config, provider_name: &str) -> Result<(), LarpshellError> {
-    print_ok_bold("Configuration saved!");
+    print_ok("Configuration saved!");
     eprintln!();
     eprintln!(
         "{}",
