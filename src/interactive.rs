@@ -232,11 +232,12 @@ pub fn draw_slash_preview(line: &str) {
     render_preview(&preview_items(&source), selected);
 }
 
-/// Selection state while the arrow keys cycle the slash preview.
+/// Selection state while the arrows / tab cycle the slash preview.
 ///
-/// The buffer itself is never mutated while cycling (which would drop the
-/// cursor to column 0); instead the selection is shown as a ghost hint after
-/// the cursor and committed on submit. `base` is therefore the live buffer.
+/// The buffer itself is never mutated while cycling. Filling it would need
+/// `Cmd::Replace`, whose `edit_insert_text` path inserts without advancing the
+/// cursor, dropping it to column 0. Instead the selection shows as a ghost hint
+/// after the cursor and is committed on submit, so `base` equals the live buffer.
 struct CycleState {
     /// The typed line that defines the candidate set (equals the live buffer).
     base: String,
@@ -267,10 +268,13 @@ pub(crate) fn next_cycle_index(current: Option<usize>, count: usize, forward: bo
     }
 }
 
-/// Move the slash-preview selection by one and repaint so the ghost hint and
-/// highlighted row update. Returns `None` (falling back to history navigation)
-/// when `line` isn't a slash command or has no completions.
-fn cycle_slash_preview(line: &str, forward: bool) -> Option<Cmd> {
+/// Advance the slash-preview selection by one and repaint so the ghost hint and
+/// highlighted row update, without touching the buffer (which keeps the cursor
+/// at end). The picked command is committed on submit via `selected_replacement`.
+/// Returns `None` when `line` isn't a slash command or has no matches, so the key
+/// falls through to its default binding (history nav for the arrows, native
+/// completion for tab — a no-op here since the completer is empty off a match).
+pub(crate) fn cycle_slash_preview(line: &str, forward: bool) -> Option<Cmd> {
     if !line.starts_with('/') {
         reset_cycle();
         return None;
@@ -442,16 +446,30 @@ impl ConditionalEventHandler for SlashPreviewHandler {
             return None;
         }
 
-        // Arrow keys cycle the slash preview and ghost the selection; outside
-        // slash mode they fall through to history navigation. Enter keeps the
-        // cycle state so the selection is committed on submit.
+        // Arrow keys and tab/shift+tab cycle the slash preview and ghost the
+        // selection; outside slash mode they fall through to history navigation.
+        // Enter keeps the cycle state so the selection is committed on submit.
+        //
+        // Tab drives the same cycle instead of rustyline's built-in completion.
+        // The native completer runs a nested input loop of its own; on some
+        // terminals the keypress that ends it (Enter) is buffered there and
+        // replayed onto the next one, so the first Enter after tab-complete does
+        // nothing and both land on the second. Routing tab through the one
+        // preview cycle keeps a single input loop and commits on one Enter. On a
+        // non-slash line `cycle_slash_preview` returns `None`, so tab still falls
+        // through to the default binding there.
         if let Event::KeySeq(keys) = evt {
             match keys.first() {
-                Some(KeyEvent(KeyCode::Down, Modifiers::NONE)) => {
-                    return cycle_slash_preview(line, true);
+                Some(KeyEvent(KeyCode::Down | KeyCode::Tab, Modifiers::NONE)) => {
+                    if let Some(cmd) = cycle_slash_preview(line, true) {
+                        return Some(cmd);
+                    }
                 }
-                Some(KeyEvent(KeyCode::Up, Modifiers::NONE)) => {
-                    return cycle_slash_preview(line, false);
+                Some(KeyEvent(KeyCode::Up, Modifiers::NONE))
+                | Some(KeyEvent(KeyCode::BackTab, _)) => {
+                    if let Some(cmd) = cycle_slash_preview(line, false) {
+                        return Some(cmd);
+                    }
                 }
                 Some(KeyEvent(KeyCode::Enter, _)) => return None,
                 _ => {}

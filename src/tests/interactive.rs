@@ -1,8 +1,9 @@
 use crate::interactive::{
-    NlshHelper, clear_preview_sequence, format_preview_row, next_cycle_index, preview_items,
-    render_preview_sequence, selection_ghost,
+    NlshHelper, clear_preview_sequence, cycle_slash_preview, format_preview_row, next_cycle_index,
+    preview_items, render_preview_sequence, selection_ghost,
 };
 use crate::tests;
+use rustyline::Cmd;
 use rustyline::completion::Completer;
 use rustyline::highlight::{CmdKind, Highlighter};
 use unicode_width::UnicodeWidthStr;
@@ -309,4 +310,24 @@ fn format_preview_row_column_padding_uses_display_width_not_byte_length() {
         ascii_desc_col, multibyte_desc_col,
         "description column must align by display width, not byte length"
     );
+}
+
+// ── cycle keeps the cursor at line end ──────────────────────────────────────
+
+#[test]
+fn cycle_slash_preview_repaints_without_touching_the_buffer() {
+    // Regression: filling the buffer with the picked command (via `Cmd::Replace`)
+    // dropped the cursor to column 0, because rustyline's insert-text path never
+    // advances it. Cycling must only repaint the ghost + dropdown so the cursor
+    // stays where the user typed. A non-slash call first clears any leftover
+    // cycle state from other tests sharing the global.
+    assert_eq!(cycle_slash_preview("find files", true), None);
+    assert_eq!(
+        cycle_slash_preview("/", true),
+        Some(Cmd::Repaint),
+        "cycling a slash line must repaint, never emit a buffer-mutating command"
+    );
+    // No matches and non-slash lines fall through to the default key binding.
+    assert_eq!(cycle_slash_preview("/zzzznope", true), None);
+    assert_eq!(cycle_slash_preview("find files", false), None);
 }
