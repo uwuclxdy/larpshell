@@ -4,8 +4,8 @@ use serde::Deserialize;
 use std::fs;
 use std::process::Command;
 
-use crate::cli::{print_ok, print_warning};
-use crate::common::{CTP_GREEN, CTP_YELLOW, clear_line, show_cursor};
+use crate::cli::{map_inquire_cancel, print_ok, print_warning, render_config};
+use crate::common::{CTP_GREEN, CTP_YELLOW, clear_n_lines, show_cursor};
 use crate::confirmation::style_message_markup;
 use crate::error::LarpshellError;
 use crate::shell_integration::remove_shell_integration;
@@ -92,9 +92,11 @@ fn remove_config_optional() -> Result<(), LarpshellError> {
     show_cursor();
     let remove_config = Confirm::new("Remove configuration?")
         .with_default(false)
+        .with_render_config(render_config())
         .prompt()
-        .map_err(LarpshellError::InquireError)?;
-    clear_line();
+        .map_err(map_inquire_cancel)?;
+    // Erase the persisted answer line itself, not just the blank line below it.
+    clear_n_lines(2);
 
     if remove_config {
         let config_dir = dirs::config_dir()
@@ -134,9 +136,10 @@ fn remove_repo_optional() -> Result<(), LarpshellError> {
             show_cursor();
             let remove_repo = Confirm::new("Remove current directory (larpshell repository)?")
                 .with_default(false)
+                .with_render_config(render_config())
                 .prompt()
-                .map_err(LarpshellError::InquireError)?;
-            clear_line();
+                .map_err(map_inquire_cancel)?;
+            clear_n_lines(2);
 
             if remove_repo {
                 eprintln!(

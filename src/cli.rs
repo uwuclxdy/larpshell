@@ -7,7 +7,7 @@ use std::process::Command;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::common::{CTP_GREEN, CTP_RED, CTP_YELLOW};
+use crate::common::{CTP_BLUE, CTP_GREEN, CTP_RED, CTP_YELLOW};
 use crate::config::AgentMode;
 use crate::confirmation::style_message_markup;
 use crate::error::LarpshellError;
@@ -294,6 +294,34 @@ pub fn is_interactive_terminal() -> bool {
     std::io::stdin().is_terminal()
 }
 
+/// One shared inquire theme so every prompt renders on-palette: the sapphire
+/// accent (`common::CTP_BLUE`) marks the selected row and cursor, help text is
+/// dimmed, and there is no default green `?` prefix.
+pub fn render_config() -> inquire::ui::RenderConfig<'static> {
+    use inquire::ui::{Color, RenderConfig, StyleSheet, Styled};
+
+    let accent = Color::rgb(CTP_BLUE.r, CTP_BLUE.g, CTP_BLUE.b);
+
+    RenderConfig::default_colored()
+        .with_prompt_prefix(Styled::new("?").with_fg(accent))
+        .with_answered_prompt_prefix(Styled::new("?").with_fg(accent))
+        .with_highlighted_option_prefix(Styled::new(">").with_fg(accent))
+        .with_selected_option(Some(StyleSheet::new().with_fg(accent)))
+        .with_help_message(StyleSheet::empty().with_fg(Color::DarkGrey))
+}
+
+/// Maps inquire's cancel/interrupt (Esc / Ctrl-C) to a clean
+/// [`LarpshellError::Cancelled`]; every other inquire failure keeps its `#[from]`
+/// conversion so genuine errors still surface.
+pub(crate) fn map_inquire_cancel(err: inquire::InquireError) -> LarpshellError {
+    match err {
+        inquire::InquireError::OperationCanceled | inquire::InquireError::OperationInterrupted => {
+            LarpshellError::Cancelled
+        }
+        other => LarpshellError::from(other),
+    }
+}
+
 pub fn prompt_select(
     prompt: &str,
     items: &[String],
@@ -301,16 +329,19 @@ pub fn prompt_select(
 ) -> Result<usize, LarpshellError> {
     let selected = Select::new(prompt, items.to_vec())
         .with_starting_cursor(default)
-        .raw_prompt()?;
+        .with_render_config(render_config())
+        .raw_prompt()
+        .map_err(map_inquire_cancel)?;
     Ok(selected.index)
 }
 
 pub fn prompt_input(prompt: &str, default: Option<&str>) -> Result<String, LarpshellError> {
-    let mut text = Text::new(prompt);
+    let mut text = Text::new(prompt).with_render_config(render_config());
     if let Some(d) = default {
         text = text.with_default(d);
     }
-    Ok(text.prompt()?)
+    let input = text.prompt().map_err(map_inquire_cancel)?;
+    Ok(input.trim().to_owned())
 }
 
 pub use crate::common::home_dir;

@@ -110,3 +110,43 @@ fn regular_command_runs_via_shell() {
 fn multiline_command_runs_via_shell() {
     assert!(execute_shell_command("echo line1\necho line2").is_ok());
 }
+
+#[test]
+fn render_config_uses_sapphire_accent_and_dim_help() {
+    use crate::cli::render_config;
+    use crate::common::CTP_BLUE;
+    use inquire::ui::{Color, StyleSheet};
+
+    let cfg = render_config();
+    let accent = Color::rgb(CTP_BLUE.r, CTP_BLUE.g, CTP_BLUE.b);
+
+    // sapphire prompt prefix, never the default green
+    assert_eq!(cfg.prompt_prefix.style.fg, Some(accent));
+    assert_ne!(cfg.prompt_prefix.style.fg, Some(Color::LightGreen));
+    // selected row + cursor render sapphire, not the default cyan
+    assert_eq!(cfg.selected_option, Some(StyleSheet::new().with_fg(accent)));
+    assert_eq!(cfg.highlighted_option_prefix.style.fg, Some(accent));
+    // help is dimmed
+    assert_eq!(cfg.help_message.fg, Some(Color::DarkGrey));
+}
+
+#[test]
+fn inquire_cancel_and_interrupt_map_to_cancelled() {
+    use crate::cli::map_inquire_cancel;
+    use crate::error::LarpshellError;
+    use inquire::InquireError;
+
+    assert!(matches!(
+        map_inquire_cancel(InquireError::OperationCanceled),
+        LarpshellError::Cancelled
+    ));
+    assert!(matches!(
+        map_inquire_cancel(InquireError::OperationInterrupted),
+        LarpshellError::Cancelled
+    ));
+    // real inquire failures keep their normal conversion, not a silent cancel
+    assert!(matches!(
+        map_inquire_cancel(InquireError::NotTTY),
+        LarpshellError::InquireError(InquireError::NotTTY)
+    ));
+}

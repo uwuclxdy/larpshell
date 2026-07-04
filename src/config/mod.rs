@@ -1,5 +1,4 @@
-use colored::Colorize;
-use inquire::{Confirm, Text};
+use inquire::{Confirm, Password, PasswordDisplayMode};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::fs;
 use std::fs::OpenOptions;
@@ -8,8 +7,11 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::cli::{print_error, print_ok_bold, print_warning, prompt_input, prompt_select};
-use crate::common::{CTP_GREEN, clear_line};
+use crate::cli::{
+    map_inquire_cancel, print_error, print_ok_bold, print_warning, prompt_input, prompt_select,
+    render_config,
+};
+use crate::common::clear_n_lines;
 use crate::confirmation::style_message_markup;
 use crate::error::LarpshellError;
 mod migration;
@@ -445,7 +447,7 @@ pub fn interactive_setup() -> Result<(), LarpshellError> {
         .unwrap_or(0);
     let selection = prompt_select(
         "Select API Provider",
-        &colored_provider_options(current_provider),
+        &provider_options_with_marker(current_provider),
         default_index,
     )?;
     let (provider_display_name, selected_variant) = PROVIDER_OPTIONS[selection];
@@ -481,14 +483,17 @@ pub fn interactive_setup() -> Result<(), LarpshellError> {
     Ok(())
 }
 
-fn colored_provider_options(current_provider: Option<ActiveProvider>) -> Vec<String> {
+/// Provider labels for the select menu, marking the active one with a plain-text
+/// ` (current)` suffix. No ANSI is baked into the label so it neither overrides
+/// the shared selected-row color nor skews the fuzzy-filter score.
+fn provider_options_with_marker(current_provider: Option<ActiveProvider>) -> Vec<String> {
     PROVIDER_OPTIONS
         .iter()
         .map(|(name, variant)| {
             if Some(*variant) == current_provider {
-                name.custom_color(CTP_GREEN).to_string()
+                format!("{name} (current)")
             } else {
-                name.to_string()
+                (*name).to_string()
             }
         })
         .collect()
@@ -523,9 +528,12 @@ fn should_reuse_saved_credentials(
 
     let result = Confirm::new("Use saved credentials?")
         .with_default(true)
+        .with_render_config(render_config())
         .prompt()
-        .map_err(LarpshellError::InquireError)?;
-    clear_line();
+        .map_err(map_inquire_cancel)?;
+    // Move up over the persisted "? … Yes" answer line before erasing; a single
+    // clear would only wipe the blank line inquire leaves below it.
+    clear_n_lines(2);
     Ok(result)
 }
 
@@ -657,49 +665,74 @@ fn configure_openai(existing: Option<&OpenAIConfig>) -> Result<ProviderConfig, L
     })
 }
 
-/// Prompts for a required API key. When a saved key exists, shows a masked
-/// hint so the secret is not displayed; an empty submit retains the saved key.
+/// A masked, single-entry password prompt (no confirmation step) themed with the
+/// shared render config. Empty input is allowed so callers can implement the
+/// "leave blank to keep saved key" behavior.
+fn masked_password<'a>(label: &'a str, help: Option<&'a str>) -> Password<'a> {
+    let mut prompt = Password::new(label)
+        .with_display_mode(PasswordDisplayMode::Masked)
+        .without_confirmation()
+        .with_render_config(render_config());
+    if let Some(help) = help {
+        prompt = prompt.with_help_message(help);
+    }
+    prompt
+}
+
+/// A saved key is reusable only when it holds a non-blank secret. A blank saved
+/// key for a required provider must be re-entered rather than silently
+/// re-persisted.
+fn reusable_saved_key(saved: Option<&str>) -> Option<&str> {
+    saved.filter(|key| !key.trim().is_empty())
+}
+
+/// Prompts for a required API key with masked input. A non-blank saved key can
+/// be kept by submitting empty; otherwise a fresh, non-empty key is required.
 fn prompt_api_key(label: &str, saved: Option<&str>) -> Result<String, LarpshellError> {
-    if let Some(existing) = saved {
-        let input = Text::new(label)
-            .with_help_message("leave blank to keep saved key")
-            .prompt()?;
-        if input.trim().is_empty() {
+    if let Some(existing) = reusable_saved_key(saved) {
+        let input = masked_password(label, Some("leave blank to keep saved key"))
+            .prompt()
+            .map_err(map_inquire_cancel)?;
+        let trimmed = input.trim();
+        if trimmed.is_empty() {
             return Ok(existing.to_owned());
         }
-        Ok(input)
+        Ok(trimmed.to_owned())
     } else {
         loop {
-            let input = prompt_input(label, None)?;
-            if !input.trim().is_empty() {
-                return Ok(input);
+            let input = masked_password(label, None)
+                .prompt()
+                .map_err(map_inquire_cancel)?;
+            let trimmed = input.trim();
+            if !trimmed.is_empty() {
+                return Ok(trimmed.to_owned());
             }
             print_error("API key cannot be empty");
         }
     }
 }
 
-/// Prompts for an optional API key. When a saved key exists, shows a masked
-/// hint; an empty submit retains the saved key. No saved key → empty submits
-/// produce `None`.
+/// Prompts for an optional API key with masked input. When a saved key exists,
+/// an empty submit retains it; with no saved key an empty submit produces `None`.
 fn prompt_optional_api_key(
     label: &str,
     help: &str,
     saved: Option<&str>,
 ) -> Result<Option<String>, LarpshellError> {
-    let mut text = Text::new(label);
     let help_msg;
-    if saved.is_some() {
+    let help_text = if saved.is_some() {
         help_msg = format!("{help} — leave blank to keep saved key");
-        text = text.with_help_message(&help_msg);
+        help_msg.as_str()
     } else {
-        text = text.with_help_message(help);
-    }
-    let input = text.prompt_skippable()?;
+        help
+    };
+    let input = masked_password(label, Some(help_text))
+        .prompt_skippable()
+        .map_err(map_inquire_cancel)?;
     match input {
-        Some(ref s) if s.trim().is_empty() => Ok(saved.map(str::to_owned)),
+        Some(s) if s.trim().is_empty() => Ok(saved.map(str::to_owned)),
+        Some(s) => Ok(Some(s.trim().to_owned())),
         None => Ok(saved.map(str::to_owned)),
-        other => Ok(other),
     }
 }
 
@@ -803,6 +836,31 @@ mod tests {
             &providers,
             ActiveProvider::OpenRouter
         ));
+    }
+
+    #[test]
+    fn provider_options_mark_current_with_plain_text() {
+        let opts = provider_options_with_marker(Some(ActiveProvider::Ollama));
+        assert!(
+            opts[1].contains("(current)"),
+            "active provider labelled: {:?}",
+            opts[1]
+        );
+        assert!(!opts[0].contains("(current)"));
+        for opt in &opts {
+            assert!(
+                !opt.contains('\u{1b}'),
+                "labels must not bake in ANSI: {opt:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn reusable_saved_key_rejects_blank() {
+        assert_eq!(reusable_saved_key(Some("sk-live")), Some("sk-live"));
+        assert_eq!(reusable_saved_key(Some("   ")), None);
+        assert_eq!(reusable_saved_key(Some("")), None);
+        assert_eq!(reusable_saved_key(None), None);
     }
 
     #[test]
