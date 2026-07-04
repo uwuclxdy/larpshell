@@ -136,7 +136,11 @@ pub fn arg_completions(line: &str) -> Option<(usize, Vec<&'static ArgChoice>)> {
     let cmd = &line[..space_pos];
     let after_cmd = &line[space_pos + 1..];
 
-    let (prior_args, partial) = if line.ends_with(' ') {
+    // Any trailing whitespace (not just ASCII ' ') means the previous token
+    // is complete and the next arg starts empty; a tab/NBSP/other Unicode
+    // whitespace must be treated the same as a plain space here.
+    let ends_in_whitespace = line.chars().next_back().is_some_and(char::is_whitespace);
+    let (prior_args, partial) = if ends_in_whitespace {
         (after_cmd.split_whitespace().collect::<Vec<_>>(), "")
     } else {
         let mut parts: Vec<&str> = after_cmd.split_whitespace().collect();
@@ -174,7 +178,22 @@ pub fn arg_completions(line: &str) -> Option<(usize, Vec<&'static ArgChoice>)> {
         return None;
     }
 
-    Some((line.len() - partial.len(), candidates))
+    // Recover `partial`'s start by walking back over char boundaries instead
+    // of `line.len() - partial.len()`: that byte-length subtraction assumes
+    // nothing but `partial` itself trails the separator, which is false the
+    // moment the separator is a multi-byte whitespace char (NBSP, EM SPACE,
+    // ...) rather than a single byte one — it then lands the offset
+    // mid-character, panicking on the next slice.
+    let start = if partial.is_empty() {
+        line.len()
+    } else {
+        line.char_indices()
+            .rev()
+            .find(|&(_, ch)| ch.is_whitespace())
+            .map_or(space_pos + 1, |(i, ch)| i + ch.len_utf8())
+    };
+
+    Some((start, candidates))
 }
 
 /// Returns commands whose name is a prefix of `typed`.

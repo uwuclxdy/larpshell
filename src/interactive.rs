@@ -40,14 +40,31 @@ pub fn format_preview_row(
     max_width: usize,
     selected: bool,
 ) -> String {
+    // Indent is always 2 display columns, whether or not a row is selected.
+    const INDENT_COLS: usize = 2;
     let split = typed_len.min(cmd_name.len());
-    let (typed, untyped) = cmd_name.split_at(split);
-    let pad = PREVIEW_DESC_COL.saturating_sub(cmd_name.len() + 3);
+    let (typed_raw, untyped_raw) = cmd_name.split_at(split);
+    let pad = PREVIEW_DESC_COL.saturating_sub(cmd_name.width() + 3);
     let gap = pad + 4;
+
+    // Clamp the indent+name+gap prefix to max_width before sizing the
+    // description: on a narrow terminal the prefix alone can exceed the row
+    // budget, and an unclamped prefix would wrap the row onto a second
+    // terminal line no matter how far the description gets truncated,
+    // desyncing the preview's line count. Each half is truncated on its own
+    // budget (rather than truncating the combined name and re-splitting it),
+    // so a cut never lands inside the other half's own truncation ellipsis.
+    let name_budget = max_width.saturating_sub(INDENT_COLS);
+    let typed = truncate_to_width(typed_raw, name_budget);
+    let typed_cols = typed.width();
+    let untyped = truncate_to_width(untyped_raw, name_budget.saturating_sub(typed_cols));
+    let name_cols = typed_cols + untyped.width();
+    let gap = gap.min(max_width.saturating_sub(INDENT_COLS + name_cols));
+    let prefix_cols = INDENT_COLS + name_cols + gap;
     // Truncate the description so the row never exceeds one terminal row; a
     // wrapped row would throw off the line count used to erase the preview.
-    let prefix_cols = 2 + cmd_name.width() + gap;
     let description = truncate_to_width(description, max_width.saturating_sub(prefix_cols));
+
     // The selected row gets a marker and brighter text; both indents are 2 cols
     // wide so column alignment is identical either way.
     let (indent, untyped_color, desc_color) = if selected {
@@ -62,8 +79,8 @@ pub fn format_preview_row(
     format!(
         "{}{}{}{}{}",
         indent,
-        typed.custom_color(CTP_PRIMARY).bold(),
-        untyped.custom_color(untyped_color),
+        typed.as_ref().custom_color(CTP_PRIMARY).bold(),
+        untyped.as_ref().custom_color(untyped_color),
         " ".repeat(gap),
         description.as_ref().custom_color(desc_color),
     )
@@ -77,7 +94,7 @@ fn truncate_to_width(text: &str, max: usize) -> Cow<'_, str> {
     if text.width() <= max {
         return Cow::Borrowed(text);
     }
-    let budget = max.saturating_sub(1).max(1); // leave a column for the ellipsis
+    let budget = max.saturating_sub(1); // leave a column for the ellipsis; 0 when max == 1
     let mut out = String::new();
     let mut cols = 0usize;
     for ch in text.chars() {
@@ -92,6 +109,19 @@ fn truncate_to_width(text: &str, max: usize) -> Cow<'_, str> {
     Cow::Owned(out)
 }
 
+/// Builds the escape sequence that erases `n` preview lines below the prompt
+/// and returns the cursor to it. Column 0 must be reached before each erase:
+/// erasing from wherever the cursor already sits only clears to end-of-line,
+/// leaving the left half of the row on screen.
+pub(crate) fn clear_preview_sequence(n: usize) -> String {
+    let mut seq = String::new();
+    for _ in 0..n {
+        seq.push_str("\n\r\x1b[K");
+    }
+    let _ = write!(seq, "\x1b[{n}A\r");
+    seq
+}
+
 /// Erase all currently-drawn preview lines below the prompt.
 /// Must be called while the cursor is on the prompt line.
 pub fn clear_slash_preview() {
@@ -99,13 +129,7 @@ pub fn clear_slash_preview() {
     if n == 0 {
         return;
     }
-    // Move down to each preview line and erase it, then return to prompt line.
-    let mut seq = String::new();
-    for _ in 0..n {
-        seq.push_str("\n\x1b[K");
-    }
-    let _ = write!(seq, "\x1b[{n}A\r");
-    print!("{seq}");
+    print!("{}", clear_preview_sequence(n));
     let _ = io::stdout().flush();
 }
 
@@ -156,22 +180,19 @@ pub(crate) fn preview_items(source: &str) -> Vec<PreviewItem> {
         .collect()
 }
 
-/// Redraw the preview from scratch: erase old lines, write `items` (marking
-/// `selected`), and return the cursor to the prompt line.
-fn render_preview(items: &[PreviewItem], selected: Option<usize>) {
-    let prev_count = PREVIEW_LINE_COUNT.load(Ordering::Relaxed);
-    let new_count = items.len();
-    let max_lines = prev_count.max(new_count);
-    if max_lines == 0 {
-        return;
-    }
-
-    let width = terminal_width();
+/// Builds the escape sequence for a from-scratch preview redraw: `max_lines`
+/// rows are each erased (returning to column 0 first, for the same reason as
+/// `clear_preview_sequence`) and, for rows with an item, redrawn.
+pub(crate) fn render_preview_sequence(
+    items: &[PreviewItem],
+    selected: Option<usize>,
+    max_lines: usize,
+    width: usize,
+) -> String {
     let mut seq = String::new();
     for i in 0..max_lines {
-        seq.push_str("\n\x1b[K"); // move down one line, erase it
+        seq.push_str("\n\r\x1b[K");
         if let Some(item) = items.get(i) {
-            seq.push('\r');
             seq.push_str(&format_preview_row(
                 &item.name,
                 item.typed_len,
@@ -183,6 +204,21 @@ fn render_preview(items: &[PreviewItem], selected: Option<usize>) {
     }
     // Return cursor to the prompt line.
     let _ = write!(seq, "\x1b[{max_lines}A\r");
+    seq
+}
+
+/// Redraw the preview from scratch: erase old lines, write `items` (marking
+/// `selected`), and return the cursor to the prompt line.
+fn render_preview(items: &[PreviewItem], selected: Option<usize>) {
+    let prev_count = PREVIEW_LINE_COUNT.load(Ordering::Relaxed);
+    let new_count = items.len();
+    let max_lines = prev_count.max(new_count);
+    if max_lines == 0 {
+        return;
+    }
+
+    let width = terminal_width();
+    let seq = render_preview_sequence(items, selected, max_lines, width);
 
     PREVIEW_LINE_COUNT.store(new_count, Ordering::Relaxed);
     print!("{seq}");
@@ -484,9 +520,12 @@ where
             Event::Any,
             EventHandler::Conditional(Box::new(SlashPreviewHandler)),
         );
-        if config::history_enabled()
-            && let Ok(path) = config::history_path()
-        {
+        // Load unconditionally: a session that starts with history-saving
+        // disabled must still see prior entries, otherwise flipping it on
+        // mid-session (`/history on`) and saving would overwrite the file
+        // with only this session's entries, wiping everything earlier.
+        // Saving stays gated on the toggle (below).
+        if let Ok(path) = config::history_path() {
             let _ = editor.load_history(&path);
         }
         *editor_lock = Some(editor);

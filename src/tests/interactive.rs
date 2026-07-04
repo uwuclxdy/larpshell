@@ -1,6 +1,9 @@
 use crate::interactive::{
-    NlshHelper, format_preview_row, next_cycle_index, preview_items, selection_ghost,
+    NlshHelper, clear_preview_sequence, format_preview_row, next_cycle_index, preview_items,
+    render_preview_sequence, selection_ghost,
 };
+use crate::tests;
+use rustyline::completion::Completer;
 use rustyline::highlight::{CmdKind, Highlighter};
 use unicode_width::UnicodeWidthStr;
 
@@ -144,5 +147,166 @@ fn selection_ghost_is_untyped_suffix() {
     assert_eq!(
         selection_ghost("/agent ", "/agent ", 0).as_deref(),
         Some("off")
+    );
+}
+
+// ── history load/save ─────────────────────────────────────────────────────
+
+#[test]
+fn history_survives_enabling_mid_session_after_starting_disabled() {
+    // Regression: history load used to be skipped whenever history-saving
+    // was disabled at session start, so flipping it on mid-session
+    // (`/history on`) and submitting a line saved the in-memory history —
+    // missing every prior entry — straight over the on-disk file, wiping
+    // everything a previous session had written.
+    let home = tests::temp_home("interactive_history_reload");
+    let port = tests::mock_ollama(&[]);
+    tests::write_ollama_config(&home, port);
+
+    let config_dir = home.join("config").join("larpshell");
+    std::fs::write(config_dir.join(".history-disabled"), "").unwrap();
+    std::fs::write(config_dir.join(".history"), "prior session command\n").unwrap();
+
+    let out = tests::run_with_stdin_interactive(&home, &[], b"/history on\n/quit\n");
+    assert!(
+        out.status.success(),
+        "REPL session should exit cleanly; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let contents = std::fs::read_to_string(config_dir.join(".history")).unwrap();
+    assert!(
+        contents.contains("prior session command"),
+        "enabling history mid-session must not wipe prior entries: {contents:?}"
+    );
+}
+
+// ── preview clear/redraw escape sequences ───────────────────────────────────
+
+#[test]
+fn clear_preview_sequence_returns_to_column_zero_before_each_erase() {
+    // Regression: erasing without a leading `\r` only clears from wherever
+    // the cursor already sits to end-of-line, leaving the left half of a
+    // removed row on screen.
+    let seq = clear_preview_sequence(3);
+    assert_eq!(
+        seq.matches("\n\r\x1b[K").count(),
+        3,
+        "each erased line must return to column 0 first: {seq:?}"
+    );
+    assert!(
+        !seq.contains("\n\x1b[K"),
+        "no erase may happen without a preceding \\r: {seq:?}"
+    );
+}
+
+#[test]
+fn render_preview_sequence_returns_to_column_zero_before_each_erase() {
+    let items = preview_items("/");
+    assert!(!items.is_empty());
+    // A previous frame had more rows than this one (narrowing the candidate
+    // list), which exercises the erase-only rows too.
+    let max_lines = items.len() + 2;
+    let seq = render_preview_sequence(&items, None, max_lines, 80);
+    assert_eq!(
+        seq.matches("\n\r\x1b[K").count(),
+        max_lines,
+        "every row, with or without new content, must return to column 0 before erasing: {seq:?}"
+    );
+}
+
+// ── argument completion offset ──────────────────────────────────────────────
+
+#[test]
+fn preview_items_handles_trailing_non_ascii_whitespace_without_panicking() {
+    // Regression: only a trailing ASCII space was treated as "argument
+    // complete"; a trailing tab/NBSP desynced the byte offset used to slice
+    // the line, which could panic on a non-char-boundary slice.
+    assert!(preview_items("/agent on\t").is_empty());
+    assert!(preview_items("/agent on\u{a0}").is_empty());
+    assert!(preview_items("/agent on ").is_empty());
+}
+
+#[test]
+fn preview_items_handles_partial_before_trailing_multibyte_whitespace_without_panicking() {
+    // The exact panic case: a real partial ("s", a prefix of "safe" so the
+    // candidate list is non-empty) followed by a multi-byte trailing whitespace
+    // that split_whitespace strips but `ends_with(' ')` missed. The old
+    // `line.len() - partial.len()` offset then overshot into the NBSP/EM-SPACE
+    // bytes and panicked when the caller sliced the line.
+    assert!(preview_items("/agent s\u{a0}").is_empty());
+    assert!(preview_items("/agent s\u{2003}").is_empty());
+}
+
+#[test]
+fn completer_complete_handles_trailing_non_ascii_whitespace_without_panicking() {
+    let helper = NlshHelper;
+    let history = rustyline::history::DefaultHistory::new();
+    let ctx = rustyline::Context::new(&history);
+    let line = "/agent on\u{a0}";
+    let result = helper.complete(line, line.len(), &ctx);
+    let (start, candidates) = result.expect("must not panic or error");
+    assert_eq!(start, 0);
+    assert!(candidates.is_empty());
+}
+
+// ── narrow-terminal preview row ─────────────────────────────────────────────
+
+#[test]
+fn format_preview_row_description_ellipsis_fits_a_single_free_column() {
+    // Regression: the description truncation forced at least 1 real
+    // character before the ellipsis even when only 1 column was free,
+    // overflowing the row by a column.
+    let max_width = 20; // leaves exactly 1 free column for "/api"'s description
+    let row = format_preview_row("/api", 0, "configure API provider", max_width, false);
+    let plain = strip_ansi_escapes::strip_str(&row);
+    assert!(
+        UnicodeWidthStr::width(plain.as_str()) <= max_width,
+        "row must not exceed the terminal width: {plain:?}"
+    );
+    assert!(plain.ends_with('…'), "expected ellipsis: {plain:?}");
+}
+
+#[test]
+fn format_preview_row_clamps_prefix_on_narrow_terminal() {
+    // Regression: the fixed indent+name+gap prefix was never clamped, so on
+    // a narrow terminal it alone could exceed max_width and wrap the row
+    // onto a second terminal line no matter how far the description was cut.
+    let max_width = 5;
+    let row = format_preview_row("/uninstall", 0, "uninstall larpshell", max_width, false);
+    let plain = strip_ansi_escapes::strip_str(&row);
+    assert!(
+        UnicodeWidthStr::width(plain.as_str()) <= max_width,
+        "row must fit in {max_width} columns: {plain:?}"
+    );
+}
+
+#[test]
+fn format_preview_row_column_padding_uses_display_width_not_byte_length() {
+    // Regression: the padding was computed from the command name's byte
+    // length while every other width computation here uses display width,
+    // so a name with a multi-byte-but-narrow character misaligned its
+    // description column relative to an ASCII name of the same width.
+    colored::control::set_override(false);
+    // "café" is 5 bytes but 4 display columns, same as "abcd".
+    let ascii = strip_ansi_escapes::strip_str(format_preview_row(
+        "abcd",
+        0,
+        "same width as café",
+        usize::MAX,
+        false,
+    ));
+    let multibyte = strip_ansi_escapes::strip_str(format_preview_row(
+        "café",
+        0,
+        "same width as abcd",
+        usize::MAX,
+        false,
+    ));
+    let ascii_desc_col = UnicodeWidthStr::width(&ascii[..ascii.find("same").unwrap()]);
+    let multibyte_desc_col = UnicodeWidthStr::width(&multibyte[..multibyte.find("same").unwrap()]);
+    assert_eq!(
+        ascii_desc_col, multibyte_desc_col,
+        "description column must align by display width, not byte length"
     );
 }
