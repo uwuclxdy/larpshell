@@ -68,18 +68,14 @@ pub fn format_preview_row(
     // The selected row gets a marker and brighter text; both indents are 2 cols
     // wide so column alignment is identical either way.
     let (indent, untyped_color, desc_color) = if selected {
-        (
-            "❯ ".custom_color(CTP_PRIMARY).to_string(),
-            CTP_TEXT,
-            CTP_TEXT,
-        )
+        ("❯ ".custom_color(CTP_BLUE).to_string(), CTP_TEXT, CTP_TEXT)
     } else {
         ("  ".to_string(), CTP_OVERLAY0, CTP_OVERLAY0)
     };
     format!(
         "{}{}{}{}{}",
         indent,
-        typed.as_ref().custom_color(CTP_PRIMARY).bold(),
+        typed.as_ref().custom_color(CTP_BLUE).bold(),
         untyped.as_ref().custom_color(untyped_color),
         " ".repeat(gap),
         description.as_ref().custom_color(desc_color),
@@ -386,9 +382,9 @@ impl Highlighter for NlshHelper {
         let cwd = current_directory_display();
         Cow::Owned(format!(
             "{}:{}{} ",
-            "larpshell".custom_color(CTP_BLUE).bold(),
+            "larpshell".custom_color(CTP_PRIMARY).bold(),
             cwd.custom_color(CTP_OVERLAY0),
-            "$".custom_color(CTP_PRIMARY).bold()
+            "$".custom_color(CTP_BLUE).bold()
         ))
     }
 
@@ -396,11 +392,11 @@ impl Highlighter for NlshHelper {
         if SHELL_MODE.load(Ordering::Relaxed) {
             clear_slash_preview();
             // "! " stays in buffer for history/execution; dim it so it reads as a
-            // prompt-side indicator, then color the command in orange.
+            // prompt-side indicator, then color the command in the sapphire accent.
             if let Some(cmd) = line.strip_prefix("! ") {
                 return Cow::Owned(format!("{}{}", "! ".custom_color(CTP_OVERLAY0), cmd));
             }
-            return Cow::Owned(line.custom_color(CTP_PRIMARY).to_string());
+            return Cow::Owned(line.custom_color(CTP_BLUE).to_string());
         }
         if !line.starts_with('/') {
             clear_slash_preview();
@@ -536,7 +532,7 @@ where
     let cwd = current_directory_display();
     let prompt = format!(
         "{}:{}{} ",
-        "larpshell".custom_color(CTP_BLUE).bold(),
+        "larpshell".custom_color(CTP_PRIMARY).bold(),
         cwd.custom_color(CTP_OVERLAY0),
         "❯".custom_color(CTP_BLUE)
     );

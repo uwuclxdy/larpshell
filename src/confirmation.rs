@@ -6,7 +6,7 @@ use crate::cli::is_interactive_terminal;
 #[cfg(unix)]
 use crate::common::RawModeGuard;
 use crate::common::{
-    CTP_BLUE, CTP_GREEN, CTP_PRIMARY, CTP_RED, CTP_TEXT, CTP_YELLOW, clear_n_lines,
+    CTP_BLUE, CTP_GREEN, CTP_OVERLAY0, CTP_RED, CTP_TEXT, CTP_YELLOW, clear_n_lines,
     count_visual_lines, cursor_row_offset, flush_stderr, show_cursor, terminal_width,
 };
 
@@ -302,7 +302,7 @@ pub fn display_command(command: &str) -> usize {
         let visual = count_visual_lines(&format!("$ {command}"), width);
         eprintln!(
             "{} {}",
-            "$".custom_color(CTP_PRIMARY),
+            "$".custom_color(CTP_BLUE),
             command.custom_color(CTP_TEXT).bold()
         );
         visual
@@ -310,14 +310,14 @@ pub fn display_command(command: &str) -> usize {
         let mut visual = count_visual_lines("> multiline command:", width);
         eprintln!(
             "{} {}",
-            ">".custom_color(CTP_PRIMARY),
+            ">".custom_color(CTP_BLUE),
             "multiline command:".custom_color(CTP_TEXT).bold()
         );
         for line in command.lines() {
             visual += count_visual_lines(&format!("$ {line}"), width);
             eprintln!(
                 "{} {}",
-                "$".custom_color(CTP_PRIMARY),
+                "$".custom_color(CTP_BLUE),
                 line.custom_color(CTP_TEXT)
             );
         }
@@ -706,22 +706,29 @@ fn confirmation_prompt(mode: ConfirmPromptMode) -> usize {
     eprintln!("{header}");
     let hint = if matches!(mode, ConfirmPromptMode::WithExplain) {
         format!(
-            "[{}] to execute, [{}] to explain, [{}] to edit, [{}] to cancel",
-            "Y/Enter".custom_color(CTP_PRIMARY).bold(),
-            "E".custom_color(CTP_PRIMARY).bold(),
-            "Arrow Up".custom_color(CTP_PRIMARY).bold(),
-            "N".custom_color(CTP_PRIMARY).bold()
+            "{} {}   {} {}   {} {}   {} {}",
+            "↵".custom_color(CTP_BLUE).bold(),
+            "execute".custom_color(CTP_OVERLAY0),
+            "e".custom_color(CTP_BLUE).bold(),
+            "explain".custom_color(CTP_OVERLAY0),
+            "↑".custom_color(CTP_BLUE).bold(),
+            "edit".custom_color(CTP_OVERLAY0),
+            "n".custom_color(CTP_BLUE).bold(),
+            "cancel".custom_color(CTP_OVERLAY0),
         )
     } else {
         format!(
-            "[{}] to execute, [{}] to edit, [{}] to cancel",
-            "Y/Enter".custom_color(CTP_PRIMARY).bold(),
-            "Arrow Up".custom_color(CTP_PRIMARY).bold(),
-            "N".custom_color(CTP_PRIMARY).bold()
+            "{} {}   {} {}   {} {}",
+            "↵".custom_color(CTP_BLUE).bold(),
+            "execute".custom_color(CTP_OVERLAY0),
+            "↑".custom_color(CTP_BLUE).bold(),
+            "edit".custom_color(CTP_OVERLAY0),
+            "n".custom_color(CTP_BLUE).bold(),
+            "cancel".custom_color(CTP_OVERLAY0),
         )
     };
     visual += count_visual_lines(&hint, width);
-    eprint!("{}", hint.custom_color(CTP_BLUE));
+    eprint!("{hint}");
     visual
 }
 
@@ -737,9 +744,11 @@ fn edit_loop(current: &str, read_key: &mut dyn FnMut() -> KeyEvent) -> Option<St
     let mut pos = buf.len();
 
     let hint = format!(
-        "[{}] to confirm, [{}] to cancel",
-        "Enter".custom_color(CTP_PRIMARY).bold(),
-        "Ctrl+C".custom_color(CTP_PRIMARY).bold()
+        "{} {}   {} {}",
+        "↵".custom_color(CTP_BLUE).bold(),
+        "confirm".custom_color(CTP_OVERLAY0),
+        "⌃c".custom_color(CTP_BLUE).bold(),
+        "cancel".custom_color(CTP_OVERLAY0)
     );
 
     // Row offset (from the region's first row) where the edit cursor currently
@@ -766,10 +775,10 @@ fn edit_loop(current: &str, read_key: &mut dyn FnMut() -> KeyEvent) -> Option<St
         // below.
         eprint!(
             "{} {}{}\n{}",
-            "$".custom_color(CTP_PRIMARY),
+            "$".custom_color(CTP_BLUE),
             prefix.custom_color(CTP_TEXT).bold(),
             rest.custom_color(CTP_TEXT).bold(),
-            hint.custom_color(CTP_BLUE)
+            hint
         );
 
         // Return to the edit point with relative moves only. The cursor now sits
@@ -789,7 +798,7 @@ fn edit_loop(current: &str, read_key: &mut dyn FnMut() -> KeyEvent) -> Option<St
         eprint!("{back}");
         eprint!(
             "{} {}",
-            "$".custom_color(CTP_PRIMARY),
+            "$".custom_color(CTP_BLUE),
             prefix.custom_color(CTP_TEXT).bold()
         );
         flush_stderr();
