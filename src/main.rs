@@ -254,15 +254,16 @@ async fn run_piped(runtime: &mut Runtime) -> Result<(), LarpshellError> {
 
 async fn run_repl(runtime: &mut Runtime) -> Result<(), LarpshellError> {
     let mut prefill: Option<String> = None;
-    let mut sigint_exit = false;
 
     loop {
         let user_input = match read_next_input(prefill.take()) {
             Ok(Some(input)) => input,
             Ok(None) => continue,
+            // Ctrl-C cancels the current line, not the session: clear it and
+            // re-prompt. Ctrl-D/EOF (below) remains the only exit path.
             Err(ReplInputError::SigInt) => {
-                sigint_exit = true;
-                break;
+                clear_line();
+                continue;
             }
             Err(ReplInputError::Eof) => break,
             Err(ReplInputError::Io(error)) => return Err(LarpshellError::IoError(error)),
@@ -305,9 +306,6 @@ async fn run_repl(runtime: &mut Runtime) -> Result<(), LarpshellError> {
     }
 
     runtime.finish_update().await;
-    if sigint_exit {
-        std::process::exit(EXIT_SIGINT);
-    }
     Ok(())
 }
 
