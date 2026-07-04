@@ -21,6 +21,34 @@ mod explain;
 mod interactive;
 mod slash;
 
+static TARGET_DEBUG_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+// `CARGO_TARGET_DIR` or `build.target-dir` can relocate artifacts off
+// `CARGO_MANIFEST_DIR/target`, so resolve the real location via `cargo metadata`.
+fn target_debug_dir() -> PathBuf {
+    TARGET_DEBUG_DIR
+        .get_or_init(|| {
+            let output = Command::new("cargo")
+                .args(["metadata", "--format-version", "1", "--no-deps"])
+                .current_dir(env!("CARGO_MANIFEST_DIR"))
+                .output()
+                .expect("failed to run `cargo metadata`");
+            assert!(
+                output.status.success(),
+                "`cargo metadata` failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let meta: serde_json::Value =
+                serde_json::from_slice(&output.stdout).expect("failed to parse `cargo metadata`");
+            meta["target_directory"]
+                .as_str()
+                .map(PathBuf::from)
+                .expect("`cargo metadata` is missing `target_directory`")
+                .join("debug")
+        })
+        .clone()
+}
+
 fn binary() -> PathBuf {
     if let Some(path) = TEST_BINARY_OVERRIDE.lock().unwrap().clone() {
         return PathBuf::from(path);
@@ -30,7 +58,7 @@ fn binary() -> PathBuf {
         return PathBuf::from(path);
     }
 
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/debug/larpshell")
+    target_debug_dir().join("larpshell")
 }
 
 fn ensure_binary_built() {
