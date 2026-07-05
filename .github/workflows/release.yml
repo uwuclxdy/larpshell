@@ -55,13 +55,31 @@ jobs:
           tag_name: ${{ steps.version.outputs.tag }}
           generate_release_notes: false
 
-  # ── Job 2: compile binary, attach it to the release ───────────────────────
+  # ── Job 2: compile per-OS binaries natively, attach each to the release ───
+  # larpshell is unix-only (real shell integration + platform code) — linux + macos
+  # native runners, no windows row. The linux asset keeps the plain "larpshell"
+  # filename so aur/larpshell/PKGBUILD's release-asset URL
+  # (releases/download/v$pkgver/larpshell) keeps resolving; only the new macOS
+  # asset gets an OS/arch suffix since nothing downloads it by a fixed name yet.
   build-and-release:
-    name: Build and Release
+    name: Build ${{ matrix.asset_name }}
     needs: create-release
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     permissions:
       contents: write
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            asset_name: larpshell
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            asset_name: larpshell-macos-aarch64
 
     steps:
       - name: Checkout
@@ -71,6 +89,7 @@ jobs:
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9  # master
         with:
           toolchain: stable
+          targets: ${{ matrix.target }}
 
       - name: Cache cargo registry
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
@@ -79,22 +98,63 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-${{ matrix.target }}-cargo-
 
       - name: Build release binary
-        run: cargo build --release --locked
+        run: cargo build --release --locked --target ${{ matrix.target }}
         env:
           CARGO_TARGET_DIR: target
+
+      - name: Prepare asset
+        run: cp "target/${{ matrix.target }}/release/larpshell" "${{ matrix.asset_name }}"
 
       - name: Upload release binary
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2.6.2
         with:
           tag_name: ${{ needs.create-release.outputs.tag }}
-          files: target/release/larpshell
+          files: ${{ matrix.asset_name }}
           fail_on_unmatched_files: true
 
-  # ── Job 3: update AUR packages ────────────────────────────────────────────
+      - name: Upload artifact for checksum job
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: ${{ matrix.asset_name }}
+          path: ${{ matrix.asset_name }}
+          if-no-files-found: error
+
+  # ── Job 3: combined sha256sums.txt over every asset built above ───────────
+  checksums:
+    name: Checksums
+    needs: [create-release, build-and-release]
+    # Run even when one OS leg fails so the binaries that DID ship always have a
+    # matching sums file covering exactly what was published.
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Generate sha256sums.txt
+        # Glob whatever was actually built so a partial release still produces a
+        # sums file matching exactly what shipped.
+        run: |
+          cd artifacts
+          sha256sum larpshell* > ../sha256sums.txt
+
+      - name: Upload sha256sums.txt to release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2.6.2
+        with:
+          tag_name: ${{ needs.create-release.outputs.tag }}
+          files: sha256sums.txt
+
+  # ── Job 4: update AUR packages ─────────────────────────────────────────────
   aur-publish:
     name: Publish to AUR
     needs: [create-release, build-and-release]
