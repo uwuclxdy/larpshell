@@ -21,12 +21,12 @@ mod explain;
 mod interactive;
 mod slash;
 
-static TARGET_DEBUG_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+static TARGET_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
 
 // `CARGO_TARGET_DIR` or `build.target-dir` can relocate artifacts off
 // `CARGO_MANIFEST_DIR/target`, so resolve the real location via `cargo metadata`.
-fn target_debug_dir() -> PathBuf {
-    TARGET_DEBUG_DIR
+fn target_dir() -> PathBuf {
+    TARGET_DIR
         .get_or_init(|| {
             let output = Command::new("cargo")
                 .args(["metadata", "--format-version", "1", "--no-deps"])
@@ -35,7 +35,7 @@ fn target_debug_dir() -> PathBuf {
                 .expect("failed to run `cargo metadata`");
             assert!(output.status.success(), "`cargo metadata` failed: {}", String::from_utf8_lossy(&output.stderr));
             let meta: serde_json::Value = serde_json::from_slice(&output.stdout).expect("failed to parse `cargo metadata`");
-            meta["target_directory"].as_str().map(PathBuf::from).expect("`cargo metadata` is missing `target_directory`").join("debug")
+            meta["target_directory"].as_str().map(PathBuf::from).expect("`cargo metadata` is missing `target_directory`")
         })
         .clone()
 }
@@ -49,7 +49,8 @@ fn binary() -> PathBuf {
         return PathBuf::from(path);
     }
 
-    target_debug_dir().join("larpshell")
+    let profile = if cfg!(debug_assertions) { "debug" } else { "release" };
+    target_dir().join(profile).join("larpshell")
 }
 
 fn ensure_binary_built() {
@@ -58,11 +59,12 @@ fn ensure_binary_built() {
     }
 
     BUILD_ONCE.get_or_init(|| {
-        let status = Command::new("cargo")
-            .args(["build", "--bin", "larpshell"])
-            .current_dir(env!("CARGO_MANIFEST_DIR"))
-            .status()
-            .expect("failed to build larpshell test binary");
+        let mut cmd = Command::new("cargo");
+        cmd.args(["build", "--bin", "larpshell"]);
+        if !cfg!(debug_assertions) {
+            cmd.arg("--release");
+        }
+        let status = cmd.current_dir(env!("CARGO_MANIFEST_DIR")).status().expect("failed to build larpshell test binary");
         assert!(status.success(), "cargo build --bin larpshell failed");
     });
 }
