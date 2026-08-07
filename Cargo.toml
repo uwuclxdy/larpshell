@@ -10,6 +10,10 @@ repository = "https://github.com/uwuclxdy/larpshell"
 readme = "README.md"
 keywords = ["cli", "ai", "shell", "terminal", "larp"]
 categories = ["command-line-utilities"]
+# `tests/` holds unit bodies linked into the bin via `#[path]`, not standalone
+# integration crates: autodiscovery would build each as its own target and fail
+# on the `crate::` imports.
+autotests = false
 # Trees the published tarball has no use for; media/ alone is 2.5M of demo assets.
 # README image links are relative and crates.io resolves those against `repository`.
 exclude = ["media/", "aur/", ".github/"]

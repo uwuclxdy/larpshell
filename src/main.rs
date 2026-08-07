@@ -1,6 +1,7 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 #[cfg(test)]
+#[path = "../tests/mod.rs"]
 mod tests;
 
 mod agent;
