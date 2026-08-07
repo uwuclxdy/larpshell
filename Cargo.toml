@@ -10,27 +10,35 @@ repository = "https://github.com/uwuclxdy/larpshell"
 readme = "README.md"
 keywords = ["cli", "ai", "shell", "terminal", "larp"]
 categories = ["command-line-utilities"]
+# Trees the published tarball has no use for; media/ alone is 2.5M of demo assets.
+# README image links are relative and crates.io resolves those against `repository`.
+exclude = ["media/", "aur/", ".github/"]
 
 [dependencies]
-clap = { version = "4.6.1", features = ["derive"] }
-tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "signal", "sync", "io-util", "io-std"] }
-tokio-util = "0.7.18"
-reqwest = { version = "0.13.4", features = ["blocking", "json", "rustls"] }
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.150"
+clap = { version = "4.6.6", features = ["derive"] }
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "signal", "sync", "io-util", "io-std"] }
+tokio-util = "0.7.19"
+# `charset` (default) only powers `text_with_charset`; provider bodies are UTF-8
+# JSON, and `text()` has a non-charset path. `rustls` re-enables what `default-tls`
+# would have given us anyway.
+reqwest = { version = "0.13.4", default-features = false, features = ["blocking", "json", "rustls", "http2", "system-proxy"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
 semver = "1.0.28"
-toml = "1.1.2"
+toml = "1.1.4"
 dirs = "6.0.0"
 colored = "3.1.1"
-thiserror = "2.0.18"
-async-trait = "0.1.89"
+thiserror = "2.0.19"
+async-trait = "0.1.91"
 inquire = "0.9.4"
-rustyline = "18.0.0"
+# `with-dirs` only adds `~` expansion to `FilenameCompleter`, which this crate
+# never constructs, and it drags in `home` (MSRV 1.88).
+rustyline = { version = "18.0.1", default-features = false, features = ["custom-bindings", "with-file-history"] }
 unicode-width = "0.2.2"
 strip-ansi-escapes = "0.2.1"
 grep-regex = "0.1.14"
-grep-searcher = "0.1.16"
-ignore = "0.4.26"
+grep-searcher = "0.1.17"
+ignore = "0.4.30"
 terminal_size = "0.4.4"
 
 [target.'cfg(unix)'.dependencies]
