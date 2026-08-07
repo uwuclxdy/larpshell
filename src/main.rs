@@ -97,6 +97,9 @@ async fn main() -> ExitCode {
 }
 
 async fn run() -> Result<(), LarpshellError> {
+    if let Err(error) = config::migrate_macos_config_dir() {
+        print_warning(&format!("config directory migration failed: {error}"));
+    }
     setup_environment();
     do_nlsh_rs_migration();
 

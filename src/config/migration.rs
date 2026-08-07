@@ -9,7 +9,7 @@ use crate::prompt::DEFAULT_EXPLAIN_PROMPT;
 const OLD_EXPLAIN_PROMPT_V1: &str = include_str!("../prompts/old/explain_v1.md");
 const OLD_EXPLAIN_PROMPT_V2: &str = include_str!("../prompts/old/explain_v2.md");
 
-use super::{ActiveProvider, Config, MultiProviderConfig, atomic_write, explain_prompt_path};
+use super::{ActiveProvider, Config, MultiProviderConfig, atomic_write, config_base_dir, ensure_config_dir, explain_prompt_path};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct V1ProviderSection {
@@ -86,14 +86,17 @@ pub fn migrate_config(config_path: &Path) -> Result<bool, LarpshellError> {
 /// removes the old dir.  Returns `Ok(false)` immediately when there is nothing
 /// to do (no `~/.config/nlsh-rs/` present).
 pub fn migrate_from_nlsh_rs() -> Result<bool, LarpshellError> {
-    let config_base = dirs::config_dir().ok_or_else(|| LarpshellError::ConfigError("failed to get config directory".to_string()))?;
-    let old_dir = config_base.join("nlsh-rs");
+    // nlsh-rs used the platform's native config dir (Library/Application Support on macOS)
+    let old_base = dirs::config_dir().ok_or_else(|| LarpshellError::ConfigError("failed to get config directory".to_string()))?;
+    let old_dir = old_base.join("nlsh-rs");
 
     if !old_dir.exists() {
         return Ok(false);
     }
 
-    let new_dir = config_base.join("larpshell");
+    // larpshell now uses XDG config semantics on all unix
+    let new_dir =
+        config_base_dir().ok_or_else(|| LarpshellError::ConfigError("failed to get config directory".to_string()))?.join("larpshell");
     if !new_dir.join("config.toml").exists() {
         fs::create_dir_all(&new_dir)?;
         for entry in fs::read_dir(&old_dir)? {
@@ -108,10 +111,43 @@ pub fn migrate_from_nlsh_rs() -> Result<bool, LarpshellError> {
     Ok(true)
 }
 
+/// Copies all files from `old_dir` to `new_dir` when the new dir lacks a
+/// `config.toml`, then removes the old dir. When both dirs have `config.toml`,
+/// the new dir wins (no clobber). No-op when `old_dir` doesn't exist.
+fn relocate_config_dir(old_dir: &Path, new_dir: &Path) -> Result<bool, LarpshellError> {
+    if !old_dir.exists() {
+        return Ok(false);
+    }
+
+    if !new_dir.join("config.toml").exists() {
+        fs::create_dir_all(new_dir)?;
+        for entry in fs::read_dir(old_dir)? {
+            let entry = entry?;
+            if entry.file_type()?.is_file() {
+                fs::copy(entry.path(), new_dir.join(entry.file_name()))?;
+            }
+        }
+    }
+
+    let _ = fs::remove_dir_all(old_dir);
+    Ok(true)
+}
+
+/// Moves config from the macOS Application Support location
+/// (`~/Library/Application Support/larpshell`) to the XDG config directory.
+/// On Linux the old path never exists, so it is always a no-op.
+pub fn migrate_macos_config_dir() -> Result<bool, LarpshellError> {
+    let home = dirs::home_dir().ok_or_else(|| LarpshellError::ConfigError("failed to get home directory".to_string()))?;
+    let old_dir = home.join("Library/Application Support/larpshell");
+    let new_dir = ensure_config_dir()?;
+    relocate_config_dir(&old_dir, &new_dir)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
+    use std::path::PathBuf;
 
     #[test]
     fn v1_config_migrates_agent_to_off() {
@@ -134,5 +170,60 @@ model = "llama3"
         assert_eq!(config.agent, AgentMode::Off, "migrated config must not opt users into agent mode");
 
         let _ = fs::remove_file(&path);
+    }
+
+    fn migrate_tmp(test_name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("larpshell_migrate_{test_name}_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn relocate_config_dir_moves_files_when_new_is_empty() {
+        let tmp = migrate_tmp("empty");
+        let old_dir = tmp.join("old");
+        let new_dir = tmp.join("new");
+
+        fs::create_dir_all(&old_dir).unwrap();
+        fs::write(old_dir.join("config.toml"), "provider = \"ollama\"").unwrap();
+
+        let migrated = relocate_config_dir(&old_dir, &new_dir).unwrap();
+        assert!(migrated, "expected migration to run");
+        assert!(new_dir.join("config.toml").exists(), "config should be in new dir");
+        assert!(!old_dir.exists(), "old dir should be removed");
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn relocate_config_dir_preserves_new_when_both_exist() {
+        let tmp = migrate_tmp("clobber");
+        let old_dir = tmp.join("old");
+        let new_dir = tmp.join("new");
+
+        fs::create_dir_all(&old_dir).unwrap();
+        fs::write(old_dir.join("config.toml"), "old").unwrap();
+        fs::create_dir_all(&new_dir).unwrap();
+        fs::write(new_dir.join("config.toml"), "new").unwrap();
+
+        let migrated = relocate_config_dir(&old_dir, &new_dir).unwrap();
+        assert!(migrated, "old dir existed, migration ran");
+        assert_eq!(fs::read_to_string(new_dir.join("config.toml")).unwrap(), "new", "new dir must not be clobbered");
+        assert!(!old_dir.exists(), "old dir should still be cleaned up");
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn relocate_config_dir_noop_when_old_missing() {
+        let tmp = migrate_tmp("noop");
+        let old_dir = tmp.join("nonexistent");
+        let new_dir = tmp.join("new");
+
+        let migrated = relocate_config_dir(&old_dir, &new_dir).unwrap();
+        assert!(!migrated, "expected no migration");
+
+        let _ = fs::remove_dir_all(&tmp);
     }
 }

@@ -12,7 +12,7 @@ use crate::common::clear_n_lines;
 use crate::confirmation::style_message_markup;
 use crate::error::LarpshellError;
 mod migration;
-pub use migration::migrate_from_nlsh_rs;
+pub use migration::{migrate_from_nlsh_rs, migrate_macos_config_dir};
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -201,9 +201,26 @@ fn migrate_txt_prompt(md_path: &Path) {
     }
 }
 
+/// Resolves the config base directory with XDG semantics on all unix
+/// (`XDG_CONFIG_HOME` when absolute, else `~/.config`), matching `dirs::config_dir()`
+/// on Linux. On non-unix, delegates to `dirs::config_dir()` unchanged.
+fn config_base_dir() -> Option<PathBuf> {
+    #[cfg(unix)]
+    {
+        std::env::var_os("XDG_CONFIG_HOME")
+            .filter(|p| PathBuf::from(p).is_absolute())
+            .map(PathBuf::from)
+            .or_else(|| dirs::home_dir().map(|h| h.join(".config")))
+    }
+    #[cfg(not(unix))]
+    {
+        dirs::config_dir()
+    }
+}
+
 pub fn ensure_config_dir() -> Result<PathBuf, LarpshellError> {
     let config_dir =
-        dirs::config_dir().ok_or_else(|| LarpshellError::ConfigError("failed to get config directory".to_string()))?.join("larpshell");
+        config_base_dir().ok_or_else(|| LarpshellError::ConfigError("failed to get config directory".to_string()))?.join("larpshell");
     fs::create_dir_all(&config_dir).map_err(|e| LarpshellError::ConfigError(format!("failed to create config directory: {e}")))?;
     Ok(config_dir)
 }
