@@ -1,7 +1,6 @@
 use crate::confirmation::{
-    ConfirmPromptMode, ConfirmResult, KeyEvent, ResponseStyle, confirm_from_reader,
-    display_command, display_explanation, display_message, display_response, parse_key_from_reader,
-    style_html_tags_for_test, style_message_markup_for_test,
+    ConfirmPromptMode, ConfirmResult, KeyEvent, ResponseStyle, confirm_from_reader, display_command, display_explanation, display_message,
+    display_response, parse_key_from_reader, style_html_tags_for_test, style_message_markup_for_test,
 };
 
 #[test]
@@ -66,22 +65,13 @@ fn style_html_tags_strips_when_no_color() {
 
 #[test]
 fn style_message_markup_converts_supported_markdown() {
-    let result = style_message_markup_for_test(
-        "- **bold** `code` *italic* [label](https://example.com)",
-        true,
-    );
-    assert_eq!(
-        result,
-        "\x1b[1mbold\x1b[22m \x1b[7mcode\x1b[27m \x1b[3mitalic\x1b[23m label"
-    );
+    let result = style_message_markup_for_test("- **bold** `code` *italic* [label](https://example.com)", true);
+    assert_eq!(result, "\x1b[1mbold\x1b[22m \x1b[7mcode\x1b[27m \x1b[3mitalic\x1b[23m label");
 }
 
 #[test]
 fn style_message_markup_strips_unsupported_markdown_when_no_color() {
-    let result = style_message_markup_for_test(
-        "> ## heading\n1. [x] **bold** and ~~gone~~ with [label](https://example.com)",
-        false,
-    );
+    let result = style_message_markup_for_test("> ## heading\n1. [x] **bold** and ~~gone~~ with [label](https://example.com)", false);
     assert_eq!(result, "heading\nbold and gone with label");
 }
 
@@ -113,37 +103,25 @@ fn parse_key_from_reader_maps_carriage_return() {
 #[test]
 fn parse_key_from_reader_maps_char_y() {
     let mut input = std::io::Cursor::new(b"y");
-    assert!(matches!(
-        parse_key_from_reader(&mut input),
-        KeyEvent::Char('y')
-    ));
+    assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::Char('y')));
 }
 
 #[test]
 fn parse_key_from_reader_maps_char_uppercase_y() {
     let mut input = std::io::Cursor::new(b"Y");
-    assert!(matches!(
-        parse_key_from_reader(&mut input),
-        KeyEvent::Char('Y')
-    ));
+    assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::Char('Y')));
 }
 
 #[test]
 fn parse_key_from_reader_maps_char_e() {
     let mut input = std::io::Cursor::new(b"e");
-    assert!(matches!(
-        parse_key_from_reader(&mut input),
-        KeyEvent::Char('e')
-    ));
+    assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::Char('e')));
 }
 
 #[test]
 fn parse_key_from_reader_maps_char_n() {
     let mut input = std::io::Cursor::new(b"n");
-    assert!(matches!(
-        parse_key_from_reader(&mut input),
-        KeyEvent::Char('n')
-    ));
+    assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::Char('n')));
 }
 
 #[test]
@@ -155,19 +133,13 @@ fn parse_key_from_reader_maps_ctrl_c() {
 #[test]
 fn parse_key_from_reader_maps_backspace() {
     let mut input = std::io::Cursor::new(b"\x7f");
-    assert!(matches!(
-        parse_key_from_reader(&mut input),
-        KeyEvent::Backspace
-    ));
+    assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::Backspace));
 }
 
 #[test]
 fn parse_key_from_reader_maps_arrow_up_escape_sequence() {
     let mut input = std::io::Cursor::new(b"\x1b[A");
-    assert!(matches!(
-        parse_key_from_reader(&mut input),
-        KeyEvent::ArrowUp
-    ));
+    assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::ArrowUp));
 }
 
 #[test]
@@ -191,10 +163,7 @@ fn parse_key_from_reader_maps_arrow_left_escape_sequence() {
 #[test]
 fn parse_key_from_reader_maps_delete_key() {
     let mut input = std::io::Cursor::new(b"\x1b[3~");
-    assert!(matches!(
-        parse_key_from_reader(&mut input),
-        KeyEvent::Delete
-    ));
+    assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::Delete));
 }
 
 #[test]
@@ -237,38 +206,23 @@ fn parse_key_from_reader_ctrl_up_maps_to_arrow_up_and_consumes_sequence() {
     // ctrl+up = \x1b[1;5A → ArrowUp; the modifier params + final byte are fully
     // consumed, so the trailing sentinel parses cleanly next (no leak).
     let mut input = std::io::Cursor::new(b"\x1b[1;5Ax".to_vec());
-    assert!(matches!(
-        parse_key_from_reader(&mut input),
-        KeyEvent::ArrowUp
-    ));
-    assert!(matches!(
-        parse_key_from_reader(&mut input),
-        KeyEvent::Char('x')
-    ));
+    assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::ArrowUp));
+    assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::Char('x')));
 }
 
 #[test]
 fn parse_key_from_reader_ctrl_left_maps_to_left_and_consumes_sequence() {
     let mut input = std::io::Cursor::new(b"\x1b[1;5Dz".to_vec());
     assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::Left));
-    assert!(matches!(
-        parse_key_from_reader(&mut input),
-        KeyEvent::Char('z')
-    ));
+    assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::Char('z')));
 }
 
 #[test]
 fn parse_key_from_reader_ctrl_delete_maps_to_delete_and_consumes_tilde() {
     // ctrl+del = \x1b[3;5~ → Delete; the ~ terminator must not leak.
     let mut input = std::io::Cursor::new(b"\x1b[3;5~q".to_vec());
-    assert!(matches!(
-        parse_key_from_reader(&mut input),
-        KeyEvent::Delete
-    ));
-    assert!(matches!(
-        parse_key_from_reader(&mut input),
-        KeyEvent::Char('q')
-    ));
+    assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::Delete));
+    assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::Char('q')));
 }
 
 #[test]
@@ -276,10 +230,7 @@ fn parse_key_from_reader_pgup_is_other_and_consumes_tilde() {
     // PgUp = \x1b[5~ → unsupported (Other), but the ~ must be consumed whole.
     let mut input = std::io::Cursor::new(b"\x1b[5~w".to_vec());
     assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::Other));
-    assert!(matches!(
-        parse_key_from_reader(&mut input),
-        KeyEvent::Char('w')
-    ));
+    assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::Char('w')));
 }
 
 #[test]
@@ -287,10 +238,7 @@ fn parse_key_from_reader_insert_is_other_and_consumes_tilde() {
     // Insert = \x1b[2~ → unsupported (Other), ~ consumed.
     let mut input = std::io::Cursor::new(b"\x1b[2~w".to_vec());
     assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::Other));
-    assert!(matches!(
-        parse_key_from_reader(&mut input),
-        KeyEvent::Char('w')
-    ));
+    assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::Char('w')));
 }
 
 #[test]
@@ -305,69 +253,41 @@ fn parse_key_from_reader_tilde_home_and_end() {
 fn parse_key_from_reader_ss3_arrow_maps_to_arrow_up() {
     // SS3 (application-mode) up = \x1bOA → ArrowUp.
     let mut input = std::io::Cursor::new(b"\x1bOA".to_vec());
-    assert!(matches!(
-        parse_key_from_reader(&mut input),
-        KeyEvent::ArrowUp
-    ));
+    assert!(matches!(parse_key_from_reader(&mut input), KeyEvent::ArrowUp));
 }
 
 #[test]
 fn confirm_from_reader_with_explain_on_enter_returns_yes() {
     let mut keys = vec![KeyEvent::Enter].into_iter();
-    let result = confirm_from_reader(
-        || keys.next().unwrap(),
-        ConfirmPromptMode::WithExplain,
-        1,
-        0,
-    );
+    let result = confirm_from_reader(|| keys.next().unwrap(), ConfirmPromptMode::WithExplain, 1, 0);
     assert!(matches!(result, ConfirmResult::Yes));
 }
 
 #[test]
 fn confirm_from_reader_with_explain_on_y_returns_yes() {
     let mut keys = vec![KeyEvent::Char('y')].into_iter();
-    let result = confirm_from_reader(
-        || keys.next().unwrap(),
-        ConfirmPromptMode::WithExplain,
-        1,
-        0,
-    );
+    let result = confirm_from_reader(|| keys.next().unwrap(), ConfirmPromptMode::WithExplain, 1, 0);
     assert!(matches!(result, ConfirmResult::Yes));
 }
 
 #[test]
 fn confirm_from_reader_with_explain_on_e_returns_explain() {
     let mut keys = vec![KeyEvent::Char('e')].into_iter();
-    let result = confirm_from_reader(
-        || keys.next().unwrap(),
-        ConfirmPromptMode::WithExplain,
-        1,
-        0,
-    );
+    let result = confirm_from_reader(|| keys.next().unwrap(), ConfirmPromptMode::WithExplain, 1, 0);
     assert!(matches!(result, ConfirmResult::Explain));
 }
 
 #[test]
 fn confirm_from_reader_with_explain_on_n_returns_cancel() {
     let mut keys = vec![KeyEvent::Char('n')].into_iter();
-    let result = confirm_from_reader(
-        || keys.next().unwrap(),
-        ConfirmPromptMode::WithExplain,
-        1,
-        0,
-    );
+    let result = confirm_from_reader(|| keys.next().unwrap(), ConfirmPromptMode::WithExplain, 1, 0);
     assert!(matches!(result, ConfirmResult::Cancel));
 }
 
 #[test]
 fn confirm_from_reader_on_esc_returns_cancel() {
     let mut keys = vec![KeyEvent::Esc].into_iter();
-    let result = confirm_from_reader(
-        || keys.next().unwrap(),
-        ConfirmPromptMode::WithExplain,
-        1,
-        0,
-    );
+    let result = confirm_from_reader(|| keys.next().unwrap(), ConfirmPromptMode::WithExplain, 1, 0);
     assert!(matches!(result, ConfirmResult::Cancel));
 }
 

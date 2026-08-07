@@ -6,8 +6,8 @@ use crate::cli::is_interactive_terminal;
 #[cfg(unix)]
 use crate::common::RawModeGuard;
 use crate::common::{
-    CTP_BLUE, CTP_GREEN, CTP_OVERLAY0, CTP_RED, CTP_TEXT, CTP_YELLOW, clear_n_lines,
-    count_visual_lines, cursor_row_offset, flush_stderr, show_cursor, terminal_width,
+    CTP_BLUE, CTP_GREEN, CTP_OVERLAY0, CTP_RED, CTP_TEXT, CTP_YELLOW, clear_n_lines, count_visual_lines, cursor_row_offset, flush_stderr,
+    show_cursor, terminal_width,
 };
 
 pub enum ConfirmResult {
@@ -300,26 +300,14 @@ pub fn display_command(command: &str) -> usize {
     let width = terminal_width();
     if command.lines().count() == 1 {
         let visual = count_visual_lines(&format!("$ {command}"), width);
-        eprintln!(
-            "{} {}",
-            "$".custom_color(CTP_BLUE),
-            command.custom_color(CTP_TEXT).bold()
-        );
+        eprintln!("{} {}", "$".custom_color(CTP_BLUE), command.custom_color(CTP_TEXT).bold());
         visual
     } else {
         let mut visual = count_visual_lines("> multiline command:", width);
-        eprintln!(
-            "{} {}",
-            ">".custom_color(CTP_BLUE),
-            "multiline command:".custom_color(CTP_TEXT).bold()
-        );
+        eprintln!("{} {}", ">".custom_color(CTP_BLUE), "multiline command:".custom_color(CTP_TEXT).bold());
         for line in command.lines() {
             visual += count_visual_lines(&format!("$ {line}"), width);
-            eprintln!(
-                "{} {}",
-                "$".custom_color(CTP_BLUE),
-                line.custom_color(CTP_TEXT)
-            );
+            eprintln!("{} {}", "$".custom_color(CTP_BLUE), line.custom_color(CTP_TEXT));
         }
         visual
     }
@@ -336,11 +324,7 @@ fn display_bulleted(text: &str, prefix_color: colored::CustomColor) -> usize {
     for (index, line) in styled.lines().enumerate() {
         let prefix = if index == 0 { "● " } else { "" };
         visual += count_visual_lines(&format!("{prefix}{line}"), width);
-        eprintln!(
-            "{}{}",
-            prefix.custom_color(prefix_color),
-            line.custom_color(CTP_TEXT)
-        );
+        eprintln!("{}{}", prefix.custom_color(prefix_color), line.custom_color(CTP_TEXT));
     }
     visual
 }
@@ -402,12 +386,7 @@ fn style_html_tags_with_color(text: &str, use_color: bool) -> String {
             .replace("<u>", "\x1b[4m")
             .replace("</u>", "\x1b[24m")
     } else {
-        text.replace("<b>", "")
-            .replace("</b>", "")
-            .replace("<i>", "")
-            .replace("</i>", "")
-            .replace("<u>", "")
-            .replace("</u>", "")
+        text.replace("<b>", "").replace("</b>", "").replace("<i>", "").replace("</i>", "").replace("<u>", "").replace("</u>", "")
     }
 }
 
@@ -438,21 +417,13 @@ fn strip_markdown_prefixes(line: &str) -> &str {
         }
     }
 
-    if let Some(stripped) = rest
-        .strip_prefix("- ")
-        .or_else(|| rest.strip_prefix("* "))
-        .or_else(|| rest.strip_prefix("+ "))
-    {
+    if let Some(stripped) = rest.strip_prefix("- ").or_else(|| rest.strip_prefix("* ")).or_else(|| rest.strip_prefix("+ ")) {
         rest = stripped;
     }
 
     rest = strip_ordered_list_marker(rest);
 
-    if let Some(stripped) = rest
-        .strip_prefix("[ ] ")
-        .or_else(|| rest.strip_prefix("[x] "))
-        .or_else(|| rest.strip_prefix("[X] "))
-    {
+    if let Some(stripped) = rest.strip_prefix("[ ] ").or_else(|| rest.strip_prefix("[x] ")).or_else(|| rest.strip_prefix("[X] ")) {
         rest = stripped;
     }
 
@@ -460,10 +431,7 @@ fn strip_markdown_prefixes(line: &str) -> &str {
 }
 
 fn strip_ordered_list_marker(line: &str) -> &str {
-    let digit_count = line
-        .bytes()
-        .take_while(|byte| byte.is_ascii_digit())
-        .count();
+    let digit_count = line.bytes().take_while(|byte| byte.is_ascii_digit()).count();
 
     if digit_count == 0 || line.len() <= digit_count + 1 {
         return line;
@@ -472,11 +440,7 @@ fn strip_ordered_list_marker(line: &str) -> &str {
     let marker = line.as_bytes()[digit_count];
     let separator = line.as_bytes()[digit_count + 1];
 
-    if matches!(marker, b'.' | b')') && separator == b' ' {
-        &line[digit_count + 2..]
-    } else {
-        line
-    }
+    if matches!(marker, b'.' | b')') && separator == b' ' { &line[digit_count + 2..] } else { line }
 }
 
 fn strip_markdown_links(text: &str) -> String {
@@ -524,11 +488,7 @@ fn parse_markdown_link(text: &str, bracket_index: usize) -> Option<(&str, usize)
         return None;
     }
 
-    let paren_end = bytes[paren_start + 1..]
-        .iter()
-        .position(|&byte| byte == b')')?
-        + paren_start
-        + 1;
+    let paren_end = bytes[paren_start + 1..].iter().position(|&byte| byte == b')')? + paren_start + 1;
 
     Some((&text[label_start..label_end], paren_end + 1))
 }
@@ -549,10 +509,7 @@ fn apply_surrounded_style(text: &str, delimiter: &str, open: &str, close: &str) 
         };
 
         let (inner, after_end) = after_start.split_at(end);
-        if inner.is_empty()
-            || inner.starts_with(char::is_whitespace)
-            || inner.ends_with(char::is_whitespace)
-        {
+        if inner.is_empty() || inner.starts_with(char::is_whitespace) || inner.ends_with(char::is_whitespace) {
             styled.push_str(delimiter);
             styled.push_str(inner);
             styled.push_str(delimiter);
@@ -606,19 +563,12 @@ pub fn display_explanation(explanation: &str) -> usize {
     let styled = style_html_tags(explanation);
     let (first, tail) = styled.split_once('\n').unwrap_or((&styled, ""));
     let (level, rest) = parse_safety_level(first);
-    let body = if tail.is_empty() {
-        rest.to_string()
-    } else {
-        format!("{rest}\n{tail}")
-    };
+    let body = if tail.is_empty() { rest.to_string() } else { format!("{rest}\n{tail}") };
     display_bulleted(&body, safety_color(level))
 }
 
 pub fn confirm_from_reader(
-    mut read_key: impl FnMut() -> KeyEvent,
-    mode: ConfirmPromptMode,
-    cmd_line_count: usize,
-    expl_line_count: usize,
+    mut read_key: impl FnMut() -> KeyEvent, mode: ConfirmPromptMode, cmd_line_count: usize, expl_line_count: usize,
 ) -> ConfirmResult {
     let prompt_lines = confirmation_prompt(mode);
     let lines_to_clear = cmd_line_count + expl_line_count + prompt_lines;
@@ -628,11 +578,8 @@ pub fn confirm_from_reader(
             KeyEvent::Enter | KeyEvent::Char('y' | 'Y') => {
                 // WithExplain clears only prompt (keeps command + explanation).
                 // Simple clears explanation + prompt (keeps command).
-                let clear_count = if matches!(mode, ConfirmPromptMode::WithExplain) {
-                    prompt_lines
-                } else {
-                    expl_line_count + prompt_lines
-                };
+                let clear_count =
+                    if matches!(mode, ConfirmPromptMode::WithExplain) { prompt_lines } else { expl_line_count + prompt_lines };
                 clear_n_lines(clear_count);
                 return ConfirmResult::Yes;
             }
@@ -689,14 +636,7 @@ pub fn confirm_execution(cmd_line_count: usize, expl_line_count: usize) -> Confi
     flush_stderr();
     flush_stdin_input();
 
-    read_confirm(|read_key| {
-        confirm_from_reader(
-            read_key,
-            ConfirmPromptMode::Simple,
-            cmd_line_count,
-            expl_line_count,
-        )
-    })
+    read_confirm(|read_key| confirm_from_reader(read_key, ConfirmPromptMode::Simple, cmd_line_count, expl_line_count))
 }
 
 fn confirmation_prompt(mode: ConfirmPromptMode) -> usize {
@@ -773,13 +713,7 @@ fn edit_loop(current: &str, read_key: &mut dyn FnMut() -> KeyEvent) -> Option<St
 
         // Draw the whole region: the command line, then the hint on the line
         // below.
-        eprint!(
-            "{} {}{}\n{}",
-            "$".custom_color(CTP_BLUE),
-            prefix.custom_color(CTP_TEXT).bold(),
-            rest.custom_color(CTP_TEXT).bold(),
-            hint
-        );
+        eprint!("{} {}{}\n{}", "$".custom_color(CTP_BLUE), prefix.custom_color(CTP_TEXT).bold(), rest.custom_color(CTP_TEXT).bold(), hint);
 
         // Return to the edit point with relative moves only. The cursor now sits
         // on the hint's last row; walk up to the region top and reprint the
@@ -796,11 +730,7 @@ fn edit_loop(current: &str, read_key: &mut dyn FnMut() -> KeyEvent) -> Option<St
         }
         back.push('\r');
         eprint!("{back}");
-        eprint!(
-            "{} {}",
-            "$".custom_color(CTP_BLUE),
-            prefix.custom_color(CTP_TEXT).bold()
-        );
+        eprint!("{} {}", "$".custom_color(CTP_BLUE), prefix.custom_color(CTP_TEXT).bold());
         flush_stderr();
 
         *cursor_row = cursor_row_offset(&format!("$ {prefix}"), width);

@@ -99,41 +99,25 @@ struct GeminiErrorDetail {
 
 impl GeminiProvider {
     pub fn new(config: &GeminiConfig) -> Result<Self, LarpshellError> {
-        Ok(Self {
-            base: BaseProvider::new()?,
-            api_key: config.api_key.clone(),
-            model: config.model.clone(),
-        })
+        Ok(Self { base: BaseProvider::new()?, api_key: config.api_key.clone(), model: config.model.clone() })
     }
 
     fn generate_url(&self) -> String {
-        format!(
-            "{}/v1beta/models/{}:generateContent",
-            GEMINI_BASE_URL, self.model
-        )
+        format!("{}/v1beta/models/{}:generateContent", GEMINI_BASE_URL, self.model)
     }
 
     fn prompt_request(prompt: &str) -> GeminiRequest {
         GeminiRequest {
             contents: vec![Content {
                 role: None,
-                parts: vec![Part {
-                    text: Some(prompt.to_string()),
-                    function_call: None,
-                    function_response: None,
-                    thought_signature: None,
-                }],
+                parts: vec![Part { text: Some(prompt.to_string()), function_call: None, function_response: None, thought_signature: None }],
             }],
             system_instruction: None,
             tools: None,
         }
     }
 
-    fn parse_generate_error(
-        status: reqwest::StatusCode,
-        response_text: &str,
-        retry_after_header: Option<&str>,
-    ) -> LarpshellError {
+    fn parse_generate_error(status: reqwest::StatusCode, response_text: &str, retry_after_header: Option<&str>) -> LarpshellError {
         if let Ok(error_response) = serde_json::from_str::<GeminiErrorResponse>(response_text) {
             return LarpshellError::from_http_status_with_retry_header(
                 reqwest::StatusCode::from_u16(error_response.error.code).unwrap_or(status),
@@ -143,32 +127,20 @@ impl GeminiProvider {
             );
         }
 
-        LarpshellError::from_http_status_with_retry_header(
-            status,
-            "gemini",
-            response_text,
-            retry_after_header,
-        )
+        LarpshellError::from_http_status_with_retry_header(status, "gemini", response_text, retry_after_header)
     }
 
     fn parse_generate_response(response_text: &str) -> Result<GeminiResponse, LarpshellError> {
-        serde_json::from_str(response_text)
-            .map_err(|error| LarpshellError::InvalidResponse(error.to_string()))
+        serde_json::from_str(response_text).map_err(|error| LarpshellError::InvalidResponse(error.to_string()))
     }
 
     /// Returns the first candidate after rejecting blocked content, or an error
     /// if there are no candidates / the candidates list is empty / the content
     /// was blocked.
-    fn first_unblocked_candidate(
-        candidates: &Option<Vec<Candidate>>,
-    ) -> Result<&Candidate, LarpshellError> {
-        let candidates = candidates.as_ref().ok_or_else(|| {
-            LarpshellError::InvalidResponse("no candidates in response".to_string())
-        })?;
+    fn first_unblocked_candidate(candidates: &Option<Vec<Candidate>>) -> Result<&Candidate, LarpshellError> {
+        let candidates = candidates.as_ref().ok_or_else(|| LarpshellError::InvalidResponse("no candidates in response".to_string()))?;
 
-        let candidate = candidates
-            .first()
-            .ok_or_else(|| LarpshellError::InvalidResponse("empty candidates list".to_string()))?;
+        let candidate = candidates.first().ok_or_else(|| LarpshellError::InvalidResponse("empty candidates list".to_string()))?;
 
         if let Some(err) = Self::check_blocked(candidate) {
             return Err(err);
@@ -179,15 +151,9 @@ impl GeminiProvider {
 
     /// Joins the text across all parts, erroring if the result is empty.
     fn join_part_text(parts: &[Part]) -> Result<String, LarpshellError> {
-        let text: String = parts
-            .iter()
-            .filter_map(|part| part.text.as_deref())
-            .collect::<Vec<_>>()
-            .join("");
+        let text: String = parts.iter().filter_map(|part| part.text.as_deref()).collect::<Vec<_>>().join("");
         if text.is_empty() {
-            return Err(LarpshellError::InvalidResponse(
-                "no text in response".to_string(),
-            ));
+            return Err(LarpshellError::InvalidResponse("no text in response".to_string()));
         }
         Ok(text)
     }
@@ -195,23 +161,14 @@ impl GeminiProvider {
     fn extract_generate_text(gemini_response: GeminiResponse) -> Result<String, LarpshellError> {
         let candidate = Self::first_unblocked_candidate(&gemini_response.candidates)?;
 
-        let content = candidate
-            .content
-            .as_ref()
-            .ok_or_else(|| LarpshellError::InvalidResponse("no content in response".to_string()))?;
+        let content = candidate.content.as_ref().ok_or_else(|| LarpshellError::InvalidResponse("no content in response".to_string()))?;
 
-        let parts = content
-            .parts
-            .as_ref()
-            .ok_or_else(|| LarpshellError::InvalidResponse("no parts in content".to_string()))?;
+        let parts = content.parts.as_ref().ok_or_else(|| LarpshellError::InvalidResponse("no parts in content".to_string()))?;
 
         Self::join_part_text(parts)
     }
 
-    async fn request_generate(
-        &self,
-        request_body: &GeminiRequest,
-    ) -> Result<GeminiResponse, LarpshellError> {
+    async fn request_generate(&self, request_body: &GeminiRequest) -> Result<GeminiResponse, LarpshellError> {
         let response = self
             .base
             .client
@@ -223,22 +180,11 @@ impl GeminiProvider {
             .map_err(|e| LarpshellError::from_reqwest(&e, "gemini"))?;
 
         let status = response.status();
-        let retry_after = response
-            .headers()
-            .get(reqwest::header::RETRY_AFTER)
-            .and_then(|value| value.to_str().ok())
-            .map(str::to_owned);
-        let response_text = response
-            .text()
-            .await
-            .map_err(|e| LarpshellError::InvalidResponse(e.to_string()))?;
+        let retry_after = response.headers().get(reqwest::header::RETRY_AFTER).and_then(|value| value.to_str().ok()).map(str::to_owned);
+        let response_text = response.text().await.map_err(|e| LarpshellError::InvalidResponse(e.to_string()))?;
 
         if !status.is_success() {
-            return Err(Self::parse_generate_error(
-                status,
-                &response_text,
-                retry_after.as_deref(),
-            ));
+            return Err(Self::parse_generate_error(status, &response_text, retry_after.as_deref()));
         }
 
         Self::parse_generate_response(&response_text)
@@ -256,10 +202,7 @@ impl GeminiProvider {
                 .iter()
                 .map(|tool_call| Part {
                     text: None,
-                    function_call: Some(FunctionCall {
-                        name: tool_call.name.clone(),
-                        args: tool_call.arguments.clone(),
-                    }),
+                    function_call: Some(FunctionCall { name: tool_call.name.clone(), args: tool_call.arguments.clone() }),
                     function_response: None,
                     thought_signature: tool_call.thought_signature.clone(),
                 })
@@ -268,14 +211,9 @@ impl GeminiProvider {
             // Gemini matches a functionResponse to its functionCall by name, so
             // use the original function name; fall back to the id only if the
             // name is absent.
-            let name = message
-                .tool_call_name
-                .as_deref()
-                .or(message.tool_call_id.as_deref())
-                .ok_or_else(|| {
-                    LarpshellError::InvalidResponse(
-                        "tool message is missing tool_call_name and tool_call_id".to_string(),
-                    )
+            let name =
+                message.tool_call_name.as_deref().or(message.tool_call_id.as_deref()).ok_or_else(|| {
+                    LarpshellError::InvalidResponse("tool message is missing tool_call_name and tool_call_id".to_string())
                 })?;
             vec![Part {
                 text: None,
@@ -289,12 +227,7 @@ impl GeminiProvider {
                 thought_signature: None,
             }]
         } else {
-            vec![Part {
-                text: message.content.clone(),
-                function_call: None,
-                function_response: None,
-                thought_signature: None,
-            }]
+            vec![Part { text: message.content.clone(), function_call: None, function_response: None, thought_signature: None }]
         };
 
         Ok(Content { role, parts })
@@ -310,12 +243,7 @@ impl GeminiProvider {
 
         (!text.is_empty()).then(|| Content {
             role: None,
-            parts: vec![Part {
-                text: Some(text),
-                function_call: None,
-                function_response: None,
-                thought_signature: None,
-            }],
+            parts: vec![Part { text: Some(text), function_call: None, function_response: None, thought_signature: None }],
         })
     }
 
@@ -337,10 +265,7 @@ impl GeminiProvider {
     fn check_blocked(candidate: &Candidate) -> Option<LarpshellError> {
         let reason = candidate.finish_reason.as_deref()?;
         if matches!(reason, "SAFETY" | "RECITATION") {
-            Some(LarpshellError::InvalidResponse(format!(
-                "content blocked by gemini: {}",
-                reason.to_lowercase()
-            )))
+            Some(LarpshellError::InvalidResponse(format!("content blocked by gemini: {}", reason.to_lowercase())))
         } else {
             None
         }
@@ -357,11 +282,7 @@ impl GeminiProvider {
     fn extract_tool_calls(parts: &[Part]) -> Vec<ToolCall> {
         parts
             .iter()
-            .filter_map(|part| {
-                part.function_call
-                    .as_ref()
-                    .map(|call| (call, part.thought_signature.clone()))
-            })
+            .filter_map(|part| part.function_call.as_ref().map(|call| (call, part.thought_signature.clone())))
             .enumerate()
             .map(|(index, (function_call, thought_signature))| ToolCall {
                 id: format!("gemini_tc_{index}"),
@@ -372,9 +293,7 @@ impl GeminiProvider {
             .collect()
     }
 
-    fn extract_chat_response(
-        gemini_response: GeminiResponse,
-    ) -> Result<ChatResponse, LarpshellError> {
+    fn extract_chat_response(gemini_response: GeminiResponse) -> Result<ChatResponse, LarpshellError> {
         let candidate = Self::first_unblocked_candidate(&gemini_response.candidates)?;
 
         let parts = Self::extract_tool_parts(candidate)?;
@@ -396,11 +315,7 @@ impl AIProvider for GeminiProvider {
         Self::extract_generate_text(response)
     }
 
-    async fn generate_with_tools(
-        &self,
-        messages: &[ChatMessage],
-        tools: &[ToolDefinition],
-    ) -> Result<ChatResponse, LarpshellError> {
+    async fn generate_with_tools(&self, messages: &[ChatMessage], tools: &[ToolDefinition]) -> Result<ChatResponse, LarpshellError> {
         let request_body = GeminiRequest {
             contents: messages
                 .iter()
@@ -441,13 +356,7 @@ mod tests {
         }"#;
         let response: GeminiResponse = serde_json::from_str(json).unwrap();
         let candidates = response.candidates.unwrap();
-        let part = &candidates[0]
-            .content
-            .as_ref()
-            .unwrap()
-            .parts
-            .as_ref()
-            .unwrap()[0];
+        let part = &candidates[0].content.as_ref().unwrap().parts.as_ref().unwrap()[0];
         assert!(part.text.is_none());
         let function_call = part.function_call.as_ref().unwrap();
         assert_eq!(function_call.name, "read_file");
@@ -465,13 +374,7 @@ mod tests {
         }"#;
         let response: GeminiResponse = serde_json::from_str(json).unwrap();
         let candidates = response.candidates.unwrap();
-        let part = &candidates[0]
-            .content
-            .as_ref()
-            .unwrap()
-            .parts
-            .as_ref()
-            .unwrap()[0];
+        let part = &candidates[0].content.as_ref().unwrap().parts.as_ref().unwrap()[0];
         assert_eq!(part.text.as_deref(), Some("echo hello"));
         assert!(part.function_call.is_none());
     }
@@ -487,10 +390,7 @@ mod tests {
         let err = GeminiProvider::extract_chat_response(response).unwrap_err();
         match err {
             LarpshellError::InvalidResponse(msg) => {
-                assert!(
-                    msg.contains("content blocked by gemini") && msg.contains("safety"),
-                    "unexpected error message: {msg}"
-                );
+                assert!(msg.contains("content blocked by gemini") && msg.contains("safety"), "unexpected error message: {msg}");
             }
             other => panic!("expected InvalidResponse, got {other:?}"),
         }
@@ -498,10 +398,7 @@ mod tests {
 
     #[test]
     fn gemini_request_serializes_system_instruction() {
-        let messages = [
-            ChatMessage::system("Use tools before answering".to_string()),
-            ChatMessage::user("show disk usage".to_string()),
-        ];
+        let messages = [ChatMessage::system("Use tools before answering".to_string()), ChatMessage::user("show disk usage".to_string())];
         let request = GeminiRequest {
             contents: messages
                 .iter()
@@ -514,10 +411,7 @@ mod tests {
         };
 
         let json = serde_json::to_value(request).unwrap();
-        assert_eq!(
-            json["systemInstruction"]["parts"][0]["text"],
-            "Use tools before answering"
-        );
+        assert_eq!(json["systemInstruction"]["parts"][0]["text"], "Use tools before answering");
         assert_eq!(json["contents"].as_array().unwrap().len(), 1);
     }
 

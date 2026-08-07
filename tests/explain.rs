@@ -9,10 +9,7 @@ fn prompt_explain_show_prints_default() {
 
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        stdout.contains("{command}"),
-        "default explain prompt must contain {{command}}, got: {stdout}"
-    );
+    assert!(stdout.contains("{command}"), "default explain prompt must contain {{command}}, got: {stdout}");
 }
 
 // `larpshell prompt explain show` with a saved custom file → outputs the file contents.
@@ -38,14 +35,8 @@ fn prompt_system_show() {
 
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        stdout.contains("{request}"),
-        "system prompt must contain {{request}}, got: {stdout}"
-    );
-    assert!(
-        !stdout.contains("{command}"),
-        "system prompt must not contain {{command}}"
-    );
+    assert!(stdout.contains("{request}"), "system prompt must contain {{request}}, got: {stdout}");
+    assert!(!stdout.contains("{command}"), "system prompt must not contain {{command}}");
 }
 
 // `larpshell prompt` (no args, both defaults) is equivalent to `larpshell prompt system show`.
@@ -78,10 +69,7 @@ fn explain_subcommand_without_provider_exits_error() {
 
     assert!(!out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        stderr.contains("no API provider configured"),
-        "stderr: {stderr}"
-    );
+    assert!(stderr.contains("no API provider configured"), "stderr: {stderr}");
 }
 
 // `larpshell explain` with no arguments → exits non-zero (no provider → config error first).
@@ -106,10 +94,7 @@ fn explain_subcommand_with_mock_shows_explanation_in_stderr() {
 
     assert!(out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        stderr.contains("echoes hello to stdout"),
-        "explanation not found in stderr: {stderr}"
-    );
+    assert!(stderr.contains("echoes hello to stdout"), "explanation not found in stderr: {stderr}");
 }
 
 // ── main command flow ────────────────────────────────────────────────────────
@@ -123,15 +108,8 @@ fn single_run_with_mock_executes_command() {
 
     let out = tests::run(&home, &["list files in current directory"]);
 
-    assert!(
-        out.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    assert_eq!(
-        String::from_utf8_lossy(&out.stdout).trim(),
-        "echo from_mock"
-    );
+    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "echo from_mock");
 }
 
 // Interactive mode (piped stdin): mock returns a command → binary executes it,
@@ -144,14 +122,7 @@ fn interactive_mode_with_piped_input_executes_command() {
 
     let out = tests::run_with_stdin(&home, &[], b"list files\n");
 
-    assert!(
-        out.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
+    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        stdout.contains("interactive_ok"),
-        "executed command output not in stdout: {stdout}"
-    );
+    assert!(stdout.contains("interactive_ok"), "executed command output not in stdout: {stdout}");
 }

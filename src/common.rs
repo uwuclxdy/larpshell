@@ -13,41 +13,13 @@ pub const EXIT_SIGINT: i32 = 130;
 pub const DEFAULT_PROVIDER_TIMEOUT_SECS: u64 = 30;
 
 // Catppuccin Mocha palette — terminal truecolor tokens
-pub const CTP_PRIMARY: colored::CustomColor = colored::CustomColor {
-    r: 0xE0,
-    g: 0x7B,
-    b: 0x53,
-}; // Claude Orange
-pub const CTP_BLUE: colored::CustomColor = colored::CustomColor {
-    r: 0x89,
-    g: 0xb4,
-    b: 0xfa,
-};
-pub const CTP_GREEN: colored::CustomColor = colored::CustomColor {
-    r: 0xa6,
-    g: 0xe3,
-    b: 0xa1,
-};
-pub const CTP_RED: colored::CustomColor = colored::CustomColor {
-    r: 0xf3,
-    g: 0x8b,
-    b: 0xa8,
-};
-pub const CTP_YELLOW: colored::CustomColor = colored::CustomColor {
-    r: 0xf9,
-    g: 0xe2,
-    b: 0xaf,
-};
-pub const CTP_TEXT: colored::CustomColor = colored::CustomColor {
-    r: 0xcd,
-    g: 0xd6,
-    b: 0xf4,
-};
-pub const CTP_OVERLAY0: colored::CustomColor = colored::CustomColor {
-    r: 0x6c,
-    g: 0x70,
-    b: 0x86,
-};
+pub const CTP_PRIMARY: colored::CustomColor = colored::CustomColor { r: 0xE0, g: 0x7B, b: 0x53 }; // Claude Orange
+pub const CTP_BLUE: colored::CustomColor = colored::CustomColor { r: 0x89, g: 0xb4, b: 0xfa };
+pub const CTP_GREEN: colored::CustomColor = colored::CustomColor { r: 0xa6, g: 0xe3, b: 0xa1 };
+pub const CTP_RED: colored::CustomColor = colored::CustomColor { r: 0xf3, g: 0x8b, b: 0xa8 };
+pub const CTP_YELLOW: colored::CustomColor = colored::CustomColor { r: 0xf9, g: 0xe2, b: 0xaf };
+pub const CTP_TEXT: colored::CustomColor = colored::CustomColor { r: 0xcd, g: 0xd6, b: 0xf4 };
+pub const CTP_OVERLAY0: colored::CustomColor = colored::CustomColor { r: 0x6c, g: 0x70, b: 0x86 };
 
 pub const ANSI_SHOW_CURSOR: &str = "\x1b[?25h";
 pub const ANSI_HIDE_CURSOR: &str = "\x1b[?25l";
@@ -55,10 +27,7 @@ pub const ANSI_CLEAR_LINE: &str = "\r\x1b[K";
 pub const ANSI_CURSOR_UP_CLEAR: &str = "\x1b[1A\r\x1b[K";
 
 pub fn home_dir() -> PathBuf {
-    env::var("HOME")
-        .ok()
-        .or_else(|| env::var("USERPROFILE").ok())
-        .map_or_else(|| PathBuf::from("~"), PathBuf::from)
+    env::var("HOME").ok().or_else(|| env::var("USERPROFILE").ok()).map_or_else(|| PathBuf::from("~"), PathBuf::from)
 }
 
 pub fn current_directory() -> String {
@@ -80,18 +49,11 @@ static LINUX_INFO: LazyLock<String> = LazyLock::new(|| {
     format!("linux ({distro}; kernel: {kernel})")
 });
 
-static SHELL_NAME: LazyLock<String> = LazyLock::new(|| {
-    env::var("SHELL")
-        .ok()
-        .and_then(|s| s.split('/').next_back().map(str::to_string))
-        .unwrap_or_else(|| "sh".to_string())
-});
+static SHELL_NAME: LazyLock<String> =
+    LazyLock::new(|| env::var("SHELL").ok().and_then(|s| s.split('/').next_back().map(str::to_string)).unwrap_or_else(|| "sh".to_string()));
 
-static USERNAME: LazyLock<String> = LazyLock::new(|| {
-    env::var("USER")
-        .or_else(|_| env::var("USERNAME"))
-        .unwrap_or_else(|_| "user".to_string())
-});
+static USERNAME: LazyLock<String> =
+    LazyLock::new(|| env::var("USER").or_else(|_| env::var("USERNAME")).unwrap_or_else(|_| "user".to_string()));
 
 pub fn os_name() -> Cow<'static, str> {
     if cfg!(target_os = "linux") {
@@ -203,11 +165,7 @@ pub fn terminal_width() -> usize {
     {
         return cols as usize;
     }
-    env::var("COLUMNS")
-        .ok()
-        .and_then(|s| s.trim().parse::<usize>().ok())
-        .filter(|&cols| cols > 0)
-        .unwrap_or(80)
+    env::var("COLUMNS").ok().and_then(|s| s.trim().parse::<usize>().ok()).filter(|&cols| cols > 0).unwrap_or(80)
 }
 
 /// Counts the number of visual rows a string occupies when printed to a
@@ -292,9 +250,7 @@ pub fn restore_terminal_after_panic() {
         use nix::sys::termios::{LocalFlags, SetArg, tcgetattr, tcsetattr};
         let stdin = std::io::stdin();
         if let Ok(mut termios) = tcgetattr(&stdin) {
-            termios
-                .local_flags
-                .insert(LocalFlags::ECHO | LocalFlags::ECHOE);
+            termios.local_flags.insert(LocalFlags::ECHO | LocalFlags::ECHOE);
             let _ = tcsetattr(&stdin, SetArg::TCSANOW, &termios);
         }
     }
@@ -322,14 +278,8 @@ pub fn disable_terminal_echo() -> Option<nix::sys::termios::Termios> {
         return None;
     };
     let mut noecho = original.clone();
-    noecho
-        .local_flags
-        .remove(LocalFlags::ECHO | LocalFlags::ECHOE);
-    if tcsetattr(&stdin, SetArg::TCSANOW, &noecho).is_ok() {
-        Some(original)
-    } else {
-        None
-    }
+    noecho.local_flags.remove(LocalFlags::ECHO | LocalFlags::ECHOE);
+    if tcsetattr(&stdin, SetArg::TCSANOW, &noecho).is_ok() { Some(original) } else { None }
 }
 
 /// Restores terminal echo state saved by [`disable_terminal_echo`].
@@ -358,8 +308,7 @@ impl RawModeGuard {
         let stdin = std::io::stdin();
         let original = tcgetattr(&stdin).ok()?;
         let mut raw = original.clone();
-        raw.local_flags
-            .remove(LocalFlags::ICANON | LocalFlags::ECHO | LocalFlags::ISIG);
+        raw.local_flags.remove(LocalFlags::ICANON | LocalFlags::ECHO | LocalFlags::ISIG);
         tcsetattr(&stdin, SetArg::TCSANOW, &raw).ok()?;
         Some(Self { original })
     }

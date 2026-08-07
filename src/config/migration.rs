@@ -36,18 +36,11 @@ fn migrate_config_content(content: &str) -> Result<String, LarpshellError> {
         "ollama" => ActiveProvider::Ollama,
         "openai" => ActiveProvider::OpenAI,
         other => {
-            return Err(LarpshellError::ConfigError(format!(
-                "unknown provider type in config: {other}"
-            )));
+            return Err(LarpshellError::ConfigError(format!("unknown provider type in config: {other}")));
         }
     };
 
-    let new_config = Config {
-        active_provider,
-        providers: old_config.providers,
-        agent: AgentMode::Off,
-        verbose_tool_output: true,
-    };
+    let new_config = Config { active_provider, providers: old_config.providers, agent: AgentMode::Off, verbose_tool_output: true };
 
     Ok(toml::to_string_pretty(&new_config)?)
 }
@@ -93,8 +86,7 @@ pub fn migrate_config(config_path: &Path) -> Result<bool, LarpshellError> {
 /// removes the old dir.  Returns `Ok(false)` immediately when there is nothing
 /// to do (no `~/.config/nlsh-rs/` present).
 pub fn migrate_from_nlsh_rs() -> Result<bool, LarpshellError> {
-    let config_base = dirs::config_dir()
-        .ok_or_else(|| LarpshellError::ConfigError("failed to get config directory".to_string()))?;
+    let config_base = dirs::config_dir().ok_or_else(|| LarpshellError::ConfigError("failed to get config directory".to_string()))?;
     let old_dir = config_base.join("nlsh-rs");
 
     if !old_dir.exists() {
@@ -139,11 +131,7 @@ model = "llama3"
 
         let content = fs::read_to_string(&path).unwrap();
         let config: Config = toml::from_str(&content).unwrap();
-        assert_eq!(
-            config.agent,
-            AgentMode::Off,
-            "migrated config must not opt users into agent mode"
-        );
+        assert_eq!(config.agent, AgentMode::Off, "migrated config must not opt users into agent mode");
 
         let _ = fs::remove_file(&path);
     }

@@ -78,11 +78,7 @@ struct OllamaChatResponseMessage {
 
 impl OllamaProvider {
     pub fn new(config: &OllamaConfig) -> Result<Self, LarpshellError> {
-        Ok(Self {
-            base: BaseProvider::new()?,
-            base_url: config.base_url.trim_end_matches('/').to_string(),
-            model: config.model.clone(),
-        })
+        Ok(Self { base: BaseProvider::new()?, base_url: config.base_url.trim_end_matches('/').to_string(), model: config.model.clone() })
     }
 }
 
@@ -91,28 +87,19 @@ impl AIProvider for OllamaProvider {
     async fn generate(&self, prompt: &str) -> Result<String, LarpshellError> {
         let url = format!("{}/api/generate", self.base_url);
 
-        let request_body = OllamaRequest {
-            model: self.model.clone(),
-            prompt: prompt.to_string(),
-            stream: false,
-        };
+        let request_body = OllamaRequest { model: self.model.clone(), prompt: prompt.to_string(), stream: false };
 
         let request = self.base.client.post(&url).json(&request_body);
 
         let response = BaseProvider::send_json(request, "ollama").await?;
 
-        let ollama_response: OllamaResponse = response
-            .json()
-            .await
-            .map_err(|e| LarpshellError::InvalidResponse(e.to_string()))?;
+        let ollama_response: OllamaResponse = response.json().await.map_err(|e| LarpshellError::InvalidResponse(e.to_string()))?;
 
         Ok(ollama_response.response)
     }
 
     async fn generate_with_tools(
-        &self,
-        messages: &[crate::providers::ChatMessage],
-        tools: &[crate::providers::ToolDefinition],
+        &self, messages: &[crate::providers::ChatMessage], tools: &[crate::providers::ToolDefinition],
     ) -> Result<crate::providers::ChatResponse, LarpshellError> {
         use crate::providers::ChatResponse;
 
@@ -127,10 +114,7 @@ impl AIProvider for OllamaProvider {
                     tool_calls
                         .iter()
                         .map(|tool_call| OllamaToolCall {
-                            function: OllamaToolCallFunction {
-                                name: tool_call.name.clone(),
-                                arguments: tool_call.arguments.clone(),
-                            },
+                            function: OllamaToolCallFunction { name: tool_call.name.clone(), arguments: tool_call.arguments.clone() },
                         })
                         .collect()
                 }),
@@ -155,21 +139,13 @@ impl AIProvider for OllamaProvider {
             )
         };
 
-        let request_body = OllamaChatRequest {
-            model: self.model.clone(),
-            messages: ollama_messages,
-            stream: false,
-            tools: ollama_tools,
-        };
+        let request_body = OllamaChatRequest { model: self.model.clone(), messages: ollama_messages, stream: false, tools: ollama_tools };
 
         let request = self.base.client.post(&url).json(&request_body);
 
         let response = BaseProvider::send_json(request, "ollama").await?;
 
-        let chat_response: OllamaChatResponse = response
-            .json()
-            .await
-            .map_err(|e| LarpshellError::InvalidResponse(e.to_string()))?;
+        let chat_response: OllamaChatResponse = response.json().await.map_err(|e| LarpshellError::InvalidResponse(e.to_string()))?;
 
         if let Some(tool_calls) = &chat_response.message.tool_calls
             && !tool_calls.is_empty()
@@ -191,9 +167,7 @@ impl AIProvider for OllamaProvider {
             .message
             .content
             .filter(|s| !s.is_empty())
-            .ok_or_else(|| {
-                LarpshellError::InvalidResponse("no content in ollama response".to_string())
-            })?;
+            .ok_or_else(|| LarpshellError::InvalidResponse("no content in ollama response".to_string()))?;
 
         Ok(ChatResponse::Message(content))
     }
@@ -227,10 +201,7 @@ mod tests {
         let response: OllamaChatResponse = serde_json::from_str(json).unwrap();
         let tool_calls = response.message.tool_calls.unwrap();
         assert_eq!(tool_calls[0].function.name, "read_file");
-        assert_eq!(
-            tool_calls[0].function.arguments["file_path"],
-            "/tmp/test.txt"
-        );
+        assert_eq!(tool_calls[0].function.arguments["file_path"], "/tmp/test.txt");
     }
 
     #[test]
@@ -265,11 +236,8 @@ mod tests {
 
     #[test]
     fn new_normalizes_trailing_base_url_slash() {
-        let provider = OllamaProvider::new(&OllamaConfig {
-            base_url: "http://localhost:11434/".to_string(),
-            model: "llama3".to_string(),
-        })
-        .unwrap();
+        let provider =
+            OllamaProvider::new(&OllamaConfig { base_url: "http://localhost:11434/".to_string(), model: "llama3".to_string() }).unwrap();
 
         assert_eq!(provider.base_url, "http://localhost:11434");
     }

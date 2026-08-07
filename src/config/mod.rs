@@ -7,10 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::cli::{
-    map_inquire_cancel, print_error, print_ok, print_warning, prompt_input, prompt_select,
-    render_config,
-};
+use crate::cli::{map_inquire_cancel, print_error, print_ok, print_warning, prompt_input, prompt_select, render_config};
 use crate::common::clear_n_lines;
 use crate::confirmation::style_message_markup;
 use crate::error::LarpshellError;
@@ -80,43 +77,26 @@ impl Config {
     pub fn provider_config(&self) -> Result<ProviderConfig, LarpshellError> {
         macro_rules! require {
             ($opt:expr, $name:literal) => {
-                $opt.clone().ok_or_else(|| {
-                    LarpshellError::ConfigError(
-                        concat!($name, " config not found for active provider").to_string(),
-                    )
-                })?
+                $opt.clone()
+                    .ok_or_else(|| LarpshellError::ConfigError(concat!($name, " config not found for active provider").to_string()))?
             };
         }
         let (provider_type, config) = match self.active_provider {
-            ActiveProvider::Gemini => (
-                ActiveProvider::Gemini,
-                ProviderSpecificConfig::Gemini {
-                    gemini: require!(self.providers.gemini, "gemini"),
-                },
-            ),
-            ActiveProvider::Ollama => (
-                ActiveProvider::Ollama,
-                ProviderSpecificConfig::Ollama {
-                    ollama: require!(self.providers.ollama, "ollama"),
-                },
-            ),
+            ActiveProvider::Gemini => {
+                (ActiveProvider::Gemini, ProviderSpecificConfig::Gemini { gemini: require!(self.providers.gemini, "gemini") })
+            }
+            ActiveProvider::Ollama => {
+                (ActiveProvider::Ollama, ProviderSpecificConfig::Ollama { ollama: require!(self.providers.ollama, "ollama") })
+            }
             ActiveProvider::OpenRouter => (
                 ActiveProvider::OpenRouter,
-                ProviderSpecificConfig::OpenRouter {
-                    openrouter: require!(self.providers.openrouter, "openrouter"),
-                },
+                ProviderSpecificConfig::OpenRouter { openrouter: require!(self.providers.openrouter, "openrouter") },
             ),
-            ActiveProvider::OpenAI => (
-                ActiveProvider::OpenAI,
-                ProviderSpecificConfig::OpenAI {
-                    openai: require!(self.providers.openai, "openai"),
-                },
-            ),
+            ActiveProvider::OpenAI => {
+                (ActiveProvider::OpenAI, ProviderSpecificConfig::OpenAI { openai: require!(self.providers.openai, "openai") })
+            }
         };
-        Ok(ProviderConfig {
-            provider_type,
-            config,
-        })
+        Ok(ProviderConfig { provider_type, config })
     }
 }
 
@@ -217,20 +197,14 @@ fn migrate_txt_prompt(md_path: &Path) {
     };
 
     if remove_source && let Err(error) = fs::remove_file(&txt_path) {
-        print_warning(&format!(
-            "failed to remove migrated prompt {}: {error}",
-            txt_path.display()
-        ));
+        print_warning(&format!("failed to remove migrated prompt {}: {error}", txt_path.display()));
     }
 }
 
 pub fn ensure_config_dir() -> Result<PathBuf, LarpshellError> {
-    let config_dir = dirs::config_dir()
-        .ok_or_else(|| LarpshellError::ConfigError("failed to get config directory".to_string()))?
-        .join("larpshell");
-    fs::create_dir_all(&config_dir).map_err(|e| {
-        LarpshellError::ConfigError(format!("failed to create config directory: {e}"))
-    })?;
+    let config_dir =
+        dirs::config_dir().ok_or_else(|| LarpshellError::ConfigError("failed to get config directory".to_string()))?.join("larpshell");
+    fs::create_dir_all(&config_dir).map_err(|e| LarpshellError::ConfigError(format!("failed to create config directory: {e}")))?;
     Ok(config_dir)
 }
 
@@ -314,11 +288,9 @@ pub fn history_enabled() -> bool {
 pub fn set_history_enabled(enabled: bool) -> Result<(), LarpshellError> {
     let path = history_disabled_path()?;
     if !enabled {
-        fs::write(&path, "")
-            .map_err(|e| LarpshellError::ConfigError(format!("failed to disable history: {e}")))?;
+        fs::write(&path, "").map_err(|e| LarpshellError::ConfigError(format!("failed to disable history: {e}")))?;
     } else if path.exists() {
-        fs::remove_file(&path)
-            .map_err(|e| LarpshellError::ConfigError(format!("failed to enable history: {e}")))?;
+        fs::remove_file(&path).map_err(|e| LarpshellError::ConfigError(format!("failed to enable history: {e}")))?;
     }
     Ok(())
 }
@@ -339,9 +311,7 @@ fn default_config() -> Config {
 fn load_config_or_default() -> Result<Config, LarpshellError> {
     match load_config() {
         Ok(config) => Ok(config),
-        Err(LarpshellError::IoError(error)) if error.kind() == std::io::ErrorKind::NotFound => {
-            Ok(default_config())
-        }
+        Err(LarpshellError::IoError(error)) if error.kind() == std::io::ErrorKind::NotFound => Ok(default_config()),
         Err(error) => Err(error),
     }
 }
@@ -380,17 +350,9 @@ pub fn load_config() -> Result<Config, LarpshellError> {
 static ATOMIC_WRITE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 fn atomic_temp_path(path: &Path) -> PathBuf {
-    let mut name = path
-        .file_name()
-        .map_or_else(|| "config".into(), |name| name.to_os_string());
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| duration.as_nanos());
-    name.push(format!(
-        ".{}.{}.tmp",
-        std::process::id(),
-        now + u128::from(ATOMIC_WRITE_COUNTER.fetch_add(1, Ordering::Relaxed))
-    ));
+    let mut name = path.file_name().map_or_else(|| "config".into(), |name| name.to_os_string());
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |duration| duration.as_nanos());
+    name.push(format!(".{}.{}.tmp", std::process::id(), now + u128::from(ATOMIC_WRITE_COUNTER.fetch_add(1, Ordering::Relaxed))));
     path.with_file_name(name)
 }
 
@@ -402,21 +364,14 @@ pub(crate) fn atomic_write(path: &Path, contents: &str) -> Result<(), LarpshellE
         .create_new(true)
         .open(&tmp)
         .map_err(|e| LarpshellError::ConfigError(format!("failed to create temp config: {e}")))?;
-    if let Err(e) = file
-        .write_all(contents.as_bytes())
-        .and_then(|()| file.sync_all())
-    {
+    if let Err(e) = file.write_all(contents.as_bytes()).and_then(|()| file.sync_all()) {
         let _ = fs::remove_file(&tmp);
-        return Err(LarpshellError::ConfigError(format!(
-            "failed to write temp config: {e}"
-        )));
+        return Err(LarpshellError::ConfigError(format!("failed to write temp config: {e}")));
     }
     drop(file);
     if let Err(e) = fs::rename(&tmp, path) {
         let _ = fs::remove_file(&tmp);
-        return Err(LarpshellError::ConfigError(format!(
-            "failed to replace config atomically: {e}"
-        )));
+        return Err(LarpshellError::ConfigError(format!("failed to replace config atomically: {e}")));
     }
     Ok(())
 }
@@ -438,27 +393,13 @@ const PROVIDER_OPTIONS: &[(&str, ActiveProvider)] = &[
 pub fn interactive_setup() -> Result<(), LarpshellError> {
     let existing_config = load_config().ok();
     let current_provider = existing_config.as_ref().map(|c| c.active_provider);
-    let default_index = current_provider
-        .and_then(|cp| {
-            PROVIDER_OPTIONS
-                .iter()
-                .position(|(_, variant)| *variant == cp)
-        })
-        .unwrap_or(0);
-    let selection = prompt_select(
-        "Select API Provider",
-        &provider_options_with_marker(current_provider),
-        default_index,
-    )?;
+    let default_index = current_provider.and_then(|cp| PROVIDER_OPTIONS.iter().position(|(_, variant)| *variant == cp)).unwrap_or(0);
+    let selection = prompt_select("Select API Provider", &provider_options_with_marker(current_provider), default_index)?;
     let (provider_display_name, selected_variant) = PROVIDER_OPTIONS[selection];
 
-    let mut multi_providers = existing_config
-        .as_ref()
-        .map(|c| c.providers.clone())
-        .unwrap_or_default();
+    let mut multi_providers = existing_config.as_ref().map(|c| c.providers.clone()).unwrap_or_default();
 
-    let should_reuse_saved =
-        should_reuse_saved_credentials(&multi_providers, selected_variant, current_provider)?;
+    let should_reuse_saved = should_reuse_saved_credentials(&multi_providers, selected_variant, current_provider)?;
 
     let active_provider = if should_reuse_saved {
         selected_variant
@@ -472,9 +413,7 @@ pub fn interactive_setup() -> Result<(), LarpshellError> {
         active_provider,
         providers: multi_providers,
         agent: existing_config.as_ref().map_or(AgentMode::Off, |c| c.agent),
-        verbose_tool_output: existing_config
-            .as_ref()
-            .is_none_or(|c| c.verbose_tool_output),
+        verbose_tool_output: existing_config.as_ref().is_none_or(|c| c.verbose_tool_output),
     };
 
     save_config(&config)?;
@@ -489,40 +428,25 @@ pub fn interactive_setup() -> Result<(), LarpshellError> {
 fn provider_options_with_marker(current_provider: Option<ActiveProvider>) -> Vec<String> {
     PROVIDER_OPTIONS
         .iter()
-        .map(|(name, variant)| {
-            if Some(*variant) == current_provider {
-                format!("{name} (current)")
-            } else {
-                (*name).to_string()
-            }
-        })
+        .map(|(name, variant)| if Some(*variant) == current_provider { format!("{name} (current)") } else { (*name).to_string() })
         .collect()
 }
 
-fn provider_has_saved_credentials(
-    providers: &MultiProviderConfig,
-    selected_variant: ActiveProvider,
-) -> bool {
+fn provider_has_saved_credentials(providers: &MultiProviderConfig, selected_variant: ActiveProvider) -> bool {
     match selected_variant {
         ActiveProvider::Gemini => providers.gemini.is_some(),
         ActiveProvider::Ollama => providers.ollama.is_some(),
-        ActiveProvider::OpenRouter => providers
-            .openrouter
-            .as_ref()
-            .and_then(|config| config.api_key.as_deref())
-            .is_some_and(|api_key| !api_key.trim().is_empty()),
+        ActiveProvider::OpenRouter => {
+            providers.openrouter.as_ref().and_then(|config| config.api_key.as_deref()).is_some_and(|api_key| !api_key.trim().is_empty())
+        }
         ActiveProvider::OpenAI => providers.openai.is_some(),
     }
 }
 
 fn should_reuse_saved_credentials(
-    providers: &MultiProviderConfig,
-    selected_variant: ActiveProvider,
-    current_provider: Option<ActiveProvider>,
+    providers: &MultiProviderConfig, selected_variant: ActiveProvider, current_provider: Option<ActiveProvider>,
 ) -> Result<bool, LarpshellError> {
-    if !provider_has_saved_credentials(providers, selected_variant)
-        || Some(selected_variant) == current_provider
-    {
+    if !provider_has_saved_credentials(providers, selected_variant) || Some(selected_variant) == current_provider {
         return Ok(false);
     }
 
@@ -537,10 +461,7 @@ fn should_reuse_saved_credentials(
     Ok(result)
 }
 
-fn configure_provider(
-    selected_variant: ActiveProvider,
-    providers: &MultiProviderConfig,
-) -> Result<ProviderConfig, LarpshellError> {
+fn configure_provider(selected_variant: ActiveProvider, providers: &MultiProviderConfig) -> Result<ProviderConfig, LarpshellError> {
     match selected_variant {
         ActiveProvider::Gemini => configure_gemini(providers.gemini.as_ref()),
         ActiveProvider::Ollama => configure_ollama(providers.ollama.as_ref()),
@@ -569,17 +490,11 @@ fn apply_provider_config(providers: &mut MultiProviderConfig, config: &ProviderC
 fn display_config_summary(config: &Config, provider_name: &str) -> Result<(), LarpshellError> {
     print_ok("Configuration saved!");
     eprintln!();
-    eprintln!(
-        "{}",
-        style_message_markup(&format!("Provider: {provider_name}"))
-    );
+    eprintln!("{}", style_message_markup(&format!("Provider: {provider_name}")));
 
     let provider_config = config.provider_config()?;
     let specific = &provider_config.config;
-    eprintln!(
-        "{}",
-        style_message_markup(&format!("Model: {}", specific.model()))
-    );
+    eprintln!("{}", style_message_markup(&format!("Model: {}", specific.model())));
     if let Some(url) = specific.base_url() {
         eprintln!("{}", style_message_markup(&format!("Base URL: {url}")));
     }
@@ -589,15 +504,11 @@ fn display_config_summary(config: &Config, provider_name: &str) -> Result<(), La
 
 fn configure_gemini(existing: Option<&GeminiConfig>) -> Result<ProviderConfig, LarpshellError> {
     let api_key = prompt_api_key("Gemini API key", existing.map(|e| e.api_key.as_str()))?;
-    let model = prompt_model_name(Some(
-        existing.map_or("gemini-flash-latest", |e| e.model.as_str()),
-    ))?;
+    let model = prompt_model_name(Some(existing.map_or("gemini-flash-latest", |e| e.model.as_str())))?;
 
     Ok(ProviderConfig {
         provider_type: ActiveProvider::Gemini,
-        config: ProviderSpecificConfig::Gemini {
-            gemini: GeminiConfig { api_key, model },
-        },
+        config: ProviderSpecificConfig::Gemini { gemini: GeminiConfig { api_key, model } },
     })
 }
 
@@ -609,35 +520,22 @@ fn configure_ollama(existing: Option<&OllamaConfig>) -> Result<ProviderConfig, L
 
     Ok(ProviderConfig {
         provider_type: ActiveProvider::Ollama,
-        config: ProviderSpecificConfig::Ollama {
-            ollama: OllamaConfig { base_url, model },
-        },
+        config: ProviderSpecificConfig::Ollama { ollama: OllamaConfig { base_url, model } },
     })
 }
 
-fn configure_openrouter(
-    existing: Option<&OpenRouterConfig>,
-) -> Result<ProviderConfig, LarpshellError> {
+fn configure_openrouter(existing: Option<&OpenRouterConfig>) -> Result<ProviderConfig, LarpshellError> {
     let url_default = existing.map_or("https://openrouter.ai/api/v1", |e| e.base_url.as_str());
     let base_url = prompt_input("OpenRouter base URL", Some(url_default))?;
 
-    let api_key = Some(prompt_api_key(
-        "OpenRouter API key",
-        existing.and_then(|e| e.api_key.as_deref()),
-    )?);
+    let api_key = Some(prompt_api_key("OpenRouter API key", existing.and_then(|e| e.api_key.as_deref()))?);
 
     let model_default = existing.map_or("openrouter/auto", |e| e.model.as_str());
     let model = prompt_input("Model name", Some(model_default))?;
 
     Ok(ProviderConfig {
         provider_type: ActiveProvider::OpenRouter,
-        config: ProviderSpecificConfig::OpenRouter {
-            openrouter: OpenRouterConfig {
-                base_url,
-                api_key,
-                model,
-            },
-        },
+        config: ProviderSpecificConfig::OpenRouter { openrouter: OpenRouterConfig { base_url, api_key, model } },
     })
 }
 
@@ -655,13 +553,7 @@ fn configure_openai(existing: Option<&OpenAIConfig>) -> Result<ProviderConfig, L
 
     Ok(ProviderConfig {
         provider_type: ActiveProvider::OpenAI,
-        config: ProviderSpecificConfig::OpenAI {
-            openai: OpenAIConfig {
-                base_url,
-                api_key,
-                model,
-            },
-        },
+        config: ProviderSpecificConfig::OpenAI { openai: OpenAIConfig { base_url, api_key, model } },
     })
 }
 
@@ -669,10 +561,8 @@ fn configure_openai(existing: Option<&OpenAIConfig>) -> Result<ProviderConfig, L
 /// shared render config. Empty input is allowed so callers can implement the
 /// "leave blank to keep saved key" behavior.
 fn masked_password<'a>(label: &'a str, help: Option<&'a str>) -> Password<'a> {
-    let mut prompt = Password::new(label)
-        .with_display_mode(PasswordDisplayMode::Masked)
-        .without_confirmation()
-        .with_render_config(render_config());
+    let mut prompt =
+        Password::new(label).with_display_mode(PasswordDisplayMode::Masked).without_confirmation().with_render_config(render_config());
     if let Some(help) = help {
         prompt = prompt.with_help_message(help);
     }
@@ -690,9 +580,7 @@ fn reusable_saved_key(saved: Option<&str>) -> Option<&str> {
 /// be kept by submitting empty; otherwise a fresh, non-empty key is required.
 fn prompt_api_key(label: &str, saved: Option<&str>) -> Result<String, LarpshellError> {
     if let Some(existing) = reusable_saved_key(saved) {
-        let input = masked_password(label, Some("leave blank to keep saved key"))
-            .prompt()
-            .map_err(map_inquire_cancel)?;
+        let input = masked_password(label, Some("leave blank to keep saved key")).prompt().map_err(map_inquire_cancel)?;
         let trimmed = input.trim();
         if trimmed.is_empty() {
             return Ok(existing.to_owned());
@@ -700,9 +588,7 @@ fn prompt_api_key(label: &str, saved: Option<&str>) -> Result<String, LarpshellE
         Ok(trimmed.to_owned())
     } else {
         loop {
-            let input = masked_password(label, None)
-                .prompt()
-                .map_err(map_inquire_cancel)?;
+            let input = masked_password(label, None).prompt().map_err(map_inquire_cancel)?;
             let trimmed = input.trim();
             if !trimmed.is_empty() {
                 return Ok(trimmed.to_owned());
@@ -714,11 +600,7 @@ fn prompt_api_key(label: &str, saved: Option<&str>) -> Result<String, LarpshellE
 
 /// Prompts for an optional API key with masked input. When a saved key exists,
 /// an empty submit retains it; with no saved key an empty submit produces `None`.
-fn prompt_optional_api_key(
-    label: &str,
-    help: &str,
-    saved: Option<&str>,
-) -> Result<Option<String>, LarpshellError> {
+fn prompt_optional_api_key(label: &str, help: &str, saved: Option<&str>) -> Result<Option<String>, LarpshellError> {
     let help_msg;
     let help_text = if saved.is_some() {
         help_msg = format!("{help} — leave blank to keep saved key");
@@ -726,9 +608,7 @@ fn prompt_optional_api_key(
     } else {
         help
     };
-    let input = masked_password(label, Some(help_text))
-        .prompt_skippable()
-        .map_err(map_inquire_cancel)?;
+    let input = masked_password(label, Some(help_text)).prompt_skippable().map_err(map_inquire_cancel)?;
     match input {
         Some(s) if s.trim().is_empty() => Ok(saved.map(str::to_owned)),
         Some(s) => Ok(Some(s.trim().to_owned())),
@@ -753,37 +633,25 @@ mod tests {
 
     #[test]
     fn test_provider_default_index_gemini() {
-        let idx = PROVIDER_OPTIONS
-            .iter()
-            .position(|(_, v)| *v == ActiveProvider::Gemini)
-            .unwrap_or(0);
+        let idx = PROVIDER_OPTIONS.iter().position(|(_, v)| *v == ActiveProvider::Gemini).unwrap_or(0);
         assert_eq!(idx, 0);
     }
 
     #[test]
     fn test_provider_default_index_ollama() {
-        let idx = PROVIDER_OPTIONS
-            .iter()
-            .position(|(_, v)| *v == ActiveProvider::Ollama)
-            .unwrap_or(0);
+        let idx = PROVIDER_OPTIONS.iter().position(|(_, v)| *v == ActiveProvider::Ollama).unwrap_or(0);
         assert_eq!(idx, 1);
     }
 
     #[test]
     fn test_provider_default_index_openrouter() {
-        let idx = PROVIDER_OPTIONS
-            .iter()
-            .position(|(_, v)| *v == ActiveProvider::OpenRouter)
-            .unwrap_or(0);
+        let idx = PROVIDER_OPTIONS.iter().position(|(_, v)| *v == ActiveProvider::OpenRouter).unwrap_or(0);
         assert_eq!(idx, 2);
     }
 
     #[test]
     fn test_provider_default_index_openai() {
-        let idx = PROVIDER_OPTIONS
-            .iter()
-            .position(|(_, v)| *v == ActiveProvider::OpenAI)
-            .unwrap_or(0);
+        let idx = PROVIDER_OPTIONS.iter().position(|(_, v)| *v == ActiveProvider::OpenAI).unwrap_or(0);
         assert_eq!(idx, 3);
     }
 
@@ -798,10 +666,7 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(!provider_has_saved_credentials(
-            &providers,
-            ActiveProvider::OpenRouter
-        ));
+        assert!(!provider_has_saved_credentials(&providers, ActiveProvider::OpenRouter));
     }
 
     #[test]
@@ -815,10 +680,7 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(!provider_has_saved_credentials(
-            &providers,
-            ActiveProvider::OpenRouter
-        ));
+        assert!(!provider_has_saved_credentials(&providers, ActiveProvider::OpenRouter));
     }
 
     #[test]
@@ -832,26 +694,16 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(provider_has_saved_credentials(
-            &providers,
-            ActiveProvider::OpenRouter
-        ));
+        assert!(provider_has_saved_credentials(&providers, ActiveProvider::OpenRouter));
     }
 
     #[test]
     fn provider_options_mark_current_with_plain_text() {
         let opts = provider_options_with_marker(Some(ActiveProvider::Ollama));
-        assert!(
-            opts[1].contains("(current)"),
-            "active provider labelled: {:?}",
-            opts[1]
-        );
+        assert!(opts[1].contains("(current)"), "active provider labelled: {:?}", opts[1]);
         assert!(!opts[0].contains("(current)"));
         for opt in &opts {
-            assert!(
-                !opt.contains('\u{1b}'),
-                "labels must not bake in ANSI: {opt:?}"
-            );
+            assert!(!opt.contains('\u{1b}'), "labels must not bake in ANSI: {opt:?}");
         }
     }
 

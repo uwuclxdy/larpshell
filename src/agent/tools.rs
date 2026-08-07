@@ -8,10 +8,7 @@ type ToolExecutor = Box<dyn Fn(&serde_json::Value) -> Result<String, String> + S
 
 pub enum RegisteredTool {
     /// A builtin tool with an owned executor closure.
-    Builtin {
-        definition: ToolDefinition,
-        executor: ToolExecutor,
-    },
+    Builtin { definition: ToolDefinition, executor: ToolExecutor },
     /// An MCP-backed tool; execution is always routed through `mcp_clients`
     /// by name-prefix, so no executor is stored here.
     Mcp { definition: ToolDefinition },
@@ -19,10 +16,7 @@ pub enum RegisteredTool {
 
 impl RegisteredTool {
     pub fn new(definition: ToolDefinition, executor: ToolExecutor) -> Self {
-        Self::Builtin {
-            definition,
-            executor,
-        }
+        Self::Builtin { definition, executor }
     }
 
     pub fn definition(&self) -> &ToolDefinition {
@@ -34,10 +28,7 @@ impl RegisteredTool {
     pub fn execute(&self, args: &serde_json::Value) -> Result<String, String> {
         match self {
             Self::Builtin { executor, .. } => executor(args),
-            Self::Mcp { definition } => Err(format!(
-                "MCP tool '{}' must be dispatched via mcp_clients",
-                definition.name
-            )),
+            Self::Mcp { definition } => Err(format!("MCP tool '{}' must be dispatched via mcp_clients", definition.name)),
         }
     }
 }
@@ -65,10 +56,7 @@ pub struct ToolRegistry {
 
 impl ToolRegistry {
     pub const fn new() -> Self {
-        Self {
-            tools: Vec::new(),
-            mcp_clients: Vec::new(),
-        }
+        Self { tools: Vec::new(), mcp_clients: Vec::new() }
     }
 
     pub fn register(&mut self, tool: RegisteredTool) {
@@ -81,10 +69,7 @@ impl ToolRegistry {
         self.tools.push(RegisteredTool::Mcp { definition });
     }
 
-    pub fn add_mcp_client(
-        &mut self,
-        client: crate::agent::mcp::StdioMcpClient,
-    ) -> Result<(), String> {
+    pub fn add_mcp_client(&mut self, client: crate::agent::mcp::StdioMcpClient) -> Result<(), String> {
         let mut prefix = client.server_name().to_owned();
         prefix.push('_');
 
@@ -94,18 +79,12 @@ impl ToolRegistry {
             }
         }
 
-        self.mcp_clients.push(McpClientEntry {
-            prefix,
-            client: Mutex::new(client),
-        });
+        self.mcp_clients.push(McpClientEntry { prefix, client: Mutex::new(client) });
         Ok(())
     }
 
     pub fn definitions(&self) -> Vec<ToolDefinition> {
-        self.tools
-            .iter()
-            .map(|tool| tool.definition().clone())
-            .collect()
+        self.tools.iter().map(|tool| tool.definition().clone()).collect()
     }
 
     pub fn execute(&self, name: &str, args: &serde_json::Value) -> Result<String, String> {
@@ -116,17 +95,10 @@ impl ToolRegistry {
         self.execute_builtin_tool(name, args)
     }
 
-    fn try_execute_mcp_tool(
-        &self,
-        name: &str,
-        args: &serde_json::Value,
-    ) -> Option<Result<String, String>> {
+    fn try_execute_mcp_tool(&self, name: &str, args: &serde_json::Value) -> Option<Result<String, String>> {
         for entry in &self.mcp_clients {
             if name.starts_with(&entry.prefix) {
-                let mut client = entry
-                    .client
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                let mut client = entry.client.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                 return Some(client.call_tool(name, args));
             }
         }
@@ -155,9 +127,7 @@ mod tests {
     use std::fs;
 
     fn test_dir(name: &str) -> std::path::PathBuf {
-        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("target/tests")
-            .join(format!("agent_tools_{name}"));
+        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/tests").join(format!("agent_tools_{name}"));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
@@ -168,11 +138,7 @@ mod tests {
     }
 
     fn assert_has_tool_names(registry: &ToolRegistry, expected_names: &[&str]) {
-        let names: Vec<_> = registry
-            .definitions()
-            .iter()
-            .map(|definition| definition.name.clone())
-            .collect();
+        let names: Vec<_> = registry.definitions().iter().map(|definition| definition.name.clone()).collect();
 
         for name in expected_names {
             assert!(names.contains(&name.to_string()));
@@ -189,40 +155,16 @@ mod tests {
     #[test]
     fn tool_registry_with_builtins_registers_expected_builtin_names() {
         let registry = ToolRegistry::with_builtins(AgentMode::On);
-        let names = registry
-            .definitions()
-            .into_iter()
-            .map(|tool| tool.name)
-            .collect::<Vec<_>>();
+        let names = registry.definitions().into_iter().map(|tool| tool.name).collect::<Vec<_>>();
 
-        assert_eq!(
-            names,
-            vec![
-                "read_file",
-                "write_file",
-                "edit_file",
-                "list_files",
-                "search_files",
-                "fetch_url",
-                "run_command"
-            ]
-        );
+        assert_eq!(names, vec!["read_file", "write_file", "edit_file", "list_files", "search_files", "fetch_url", "run_command"]);
     }
 
     #[test]
     fn registry_with_builtins_has_five_safe_tools() {
         let registry = ToolRegistry::with_builtins(AgentMode::Safe);
         assert_eq!(registry.definitions().len(), 5);
-        assert_has_tool_names(
-            &registry,
-            &[
-                "read_file",
-                "list_files",
-                "search_files",
-                "fetch_url",
-                "run_command",
-            ],
-        );
+        assert_has_tool_names(&registry, &["read_file", "list_files", "search_files", "fetch_url", "run_command"]);
     }
 
     #[test]
@@ -231,15 +173,7 @@ mod tests {
         assert_eq!(registry.definitions().len(), 7);
         assert_has_tool_names(
             &registry,
-            &[
-                "read_file",
-                "write_file",
-                "edit_file",
-                "list_files",
-                "search_files",
-                "fetch_url",
-                "run_command",
-            ],
+            &["read_file", "write_file", "edit_file", "list_files", "search_files", "fetch_url", "run_command"],
         );
     }
 
@@ -249,12 +183,7 @@ mod tests {
         fs::write(dir.join("test.txt"), "hello").unwrap();
         let registry = ToolRegistry::with_builtins(AgentMode::Safe);
 
-        let result = registry
-            .execute(
-                "read_file",
-                &serde_json::json!({"file_path": dir.join("test.txt").to_str().unwrap()}),
-            )
-            .unwrap();
+        let result = registry.execute("read_file", &serde_json::json!({"file_path": dir.join("test.txt").to_str().unwrap()})).unwrap();
 
         assert_eq!(result, "hello");
     }
@@ -262,9 +191,6 @@ mod tests {
     #[test]
     fn registry_execute_unknown_tool_returns_error() {
         let registry = ToolRegistry::with_builtins(AgentMode::Safe);
-        assert_err_contains(
-            registry.execute("nonexistent", &serde_json::json!({})),
-            "unknown tool",
-        );
+        assert_err_contains(registry.execute("nonexistent", &serde_json::json!({})), "unknown tool");
     }
 }

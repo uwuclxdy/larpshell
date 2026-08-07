@@ -17,27 +17,15 @@ const SYMBOL_ERROR: &str = "error:";
 const SYMBOL_WARNING: &str = "warning:";
 
 pub fn print_ok(message: &str) {
-    eprintln!(
-        "{} {}",
-        SYMBOL_CHECK.custom_color(CTP_GREEN),
-        style_message_markup(message)
-    );
+    eprintln!("{} {}", SYMBOL_CHECK.custom_color(CTP_GREEN), style_message_markup(message));
 }
 
 pub fn print_error(message: &str) {
-    eprintln!(
-        "{} {}",
-        SYMBOL_ERROR.custom_color(CTP_RED).bold(),
-        style_message_markup(message)
-    );
+    eprintln!("{} {}", SYMBOL_ERROR.custom_color(CTP_RED).bold(), style_message_markup(message));
 }
 
 pub fn print_warning(message: &str) {
-    eprintln!(
-        "{} {}",
-        SYMBOL_WARNING.custom_color(CTP_YELLOW),
-        style_message_markup(message)
-    );
+    eprintln!("{} {}", SYMBOL_WARNING.custom_color(CTP_YELLOW), style_message_markup(message));
 }
 
 #[derive(Debug)]
@@ -50,22 +38,11 @@ pub struct CliArgs {
 pub enum Subcommands {
     Api,
     Uninstall,
-    History {
-        enable: Option<bool>,
-    },
-    Verbose {
-        enable: Option<bool>,
-    },
-    Prompt {
-        kind: PromptKind,
-        action: PromptAction,
-    },
-    Explain {
-        command: Vec<String>,
-    },
-    Agent {
-        mode: Option<AgentMode>,
-    },
+    History { enable: Option<bool> },
+    Verbose { enable: Option<bool> },
+    Prompt { kind: PromptKind, action: PromptAction },
+    Explain { command: Vec<String> },
+    Agent { mode: Option<AgentMode> },
 }
 
 #[derive(Debug, Clone)]
@@ -89,10 +66,7 @@ pub enum PromptAction {
 #[command(disable_help_subcommand = true)]
 #[command(override_usage = "larpshell [REQUEST]\n       larpshell <COMMAND>")]
 struct Cli {
-    #[arg(
-        value_name = "REQUEST",
-        help = "Natural language request to convert to a shell command"
-    )]
+    #[arg(value_name = "REQUEST", help = "Natural language request to convert to a shell command")]
     command: Vec<String>,
 
     #[command(subcommand)]
@@ -171,12 +145,12 @@ pub fn parse_cli_args() -> CliArgs {
     let subcommand = match cli.subcommand {
         Some(Commands::Api) => Some(Subcommands::Api),
         Some(Commands::Uninstall) => Some(Subcommands::Uninstall),
-        Some(Commands::History { toggle }) => Some(Subcommands::History {
-            enable: toggle.map(|toggle| matches!(toggle, ClapBoolToggle::On)),
-        }),
-        Some(Commands::Verbose { toggle }) => Some(Subcommands::Verbose {
-            enable: toggle.map(|toggle| matches!(toggle, ClapBoolToggle::On)),
-        }),
+        Some(Commands::History { toggle }) => {
+            Some(Subcommands::History { enable: toggle.map(|toggle| matches!(toggle, ClapBoolToggle::On)) })
+        }
+        Some(Commands::Verbose { toggle }) => {
+            Some(Subcommands::Verbose { enable: toggle.map(|toggle| matches!(toggle, ClapBoolToggle::On)) })
+        }
         Some(Commands::Prompt { kind, action }) => Some(Subcommands::Prompt {
             kind: match kind {
                 ClapPromptKind::System => PromptKind::System,
@@ -201,10 +175,7 @@ pub fn parse_cli_args() -> CliArgs {
         None => None,
     };
 
-    CliArgs {
-        command: cli.command,
-        subcommand,
-    }
+    CliArgs { command: cli.command, subcommand }
 }
 
 static CWD_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -226,33 +197,16 @@ pub fn execute_shell_command_unlocked(command: &str) -> Result<(), LarpshellErro
     // Mix in nanosecond timestamp for unpredictability — an attacker who
     // knows the PID cannot pre-create a symlink at the path because the
     // nanos component is not guessable without a timing oracle.
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.subsec_nanos())
-        .unwrap_or(0);
-    let cwd_file = env::temp_dir().join(format!(
-        ".larpshell_cwd_{}_{}_{:08x}",
-        std::process::id(),
-        seq,
-        nanos,
-    ));
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_nanos()).unwrap_or(0);
+    let cwd_file = env::temp_dir().join(format!(".larpshell_cwd_{}_{}_{:08x}", std::process::id(), seq, nanos,));
     // Create exclusively (O_EXCL) so a pre-planted symlink at this exact path
     // is never followed — the open fails rather than writing through it.
-    OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&cwd_file)?;
+    OpenOptions::new().write(true).create_new(true).open(&cwd_file)?;
     let script = format!(
         "__larpshell_cwd_file=$1\nreadonly __larpshell_cwd_file\n{trimmed}\n__larpshell_rc=$?\npwd > \"$__larpshell_cwd_file\"\nexit $__larpshell_rc"
     );
 
-    let status = Command::new("sh")
-        .arg("-c")
-        .arg(&script)
-        .arg("larpshell")
-        .arg(&cwd_file)
-        .current_dir(env::current_dir()?)
-        .status()?;
+    let status = Command::new("sh").arg("-c").arg(&script).arg("larpshell").arg(&cwd_file).current_dir(env::current_dir()?).status()?;
 
     // Sync the shell's final cwd back to the parent process.
     if let Ok(new_cwd) = std::fs::read_to_string(&cwd_file) {
@@ -263,19 +217,11 @@ pub fn execute_shell_command_unlocked(command: &str) -> Result<(), LarpshellErro
     }
     let _ = std::fs::remove_file(&cwd_file);
 
-    if status.success() {
-        Ok(())
-    } else {
-        Err(LarpshellError::IoError(std::io::Error::other(format!(
-            "sh exited with status {status}"
-        ))))
-    }
+    if status.success() { Ok(()) } else { Err(LarpshellError::IoError(std::io::Error::other(format!("sh exited with status {status}")))) }
 }
 
 pub fn execute_shell_command(command: &str) -> Result<(), LarpshellError> {
-    let _guard = CWD_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _guard = CWD_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     execute_shell_command_unlocked(command)
 }
 
@@ -310,18 +256,12 @@ pub fn render_config() -> inquire::ui::RenderConfig<'static> {
 /// conversion so genuine errors still surface.
 pub(crate) fn map_inquire_cancel(err: inquire::InquireError) -> LarpshellError {
     match err {
-        inquire::InquireError::OperationCanceled | inquire::InquireError::OperationInterrupted => {
-            LarpshellError::Cancelled
-        }
+        inquire::InquireError::OperationCanceled | inquire::InquireError::OperationInterrupted => LarpshellError::Cancelled,
         other => LarpshellError::from(other),
     }
 }
 
-pub fn prompt_select(
-    prompt: &str,
-    items: &[String],
-    default: usize,
-) -> Result<usize, LarpshellError> {
+pub fn prompt_select(prompt: &str, items: &[String], default: usize) -> Result<usize, LarpshellError> {
     let selected = Select::new(prompt, items.to_vec())
         .with_starting_cursor(default)
         .with_render_config(render_config())
@@ -349,15 +289,7 @@ mod tests {
 
     /// Value strings clap derives for a `ValueEnum`, in declaration order.
     fn enum_values<T: ValueEnum>() -> Vec<String> {
-        T::value_variants()
-            .iter()
-            .map(|v| {
-                v.to_possible_value()
-                    .expect("variant has no possible value")
-                    .get_name()
-                    .to_string()
-            })
-            .collect()
+        T::value_variants().iter().map(|v| v.to_possible_value().expect("variant has no possible value").get_name().to_string()).collect()
     }
 
     #[test]
@@ -382,22 +314,11 @@ mod tests {
 
     #[test]
     fn clap_subcommands_match_vocab() {
-        let names: Vec<String> = Cli::command()
-            .get_subcommands()
-            .map(|sub| sub.get_name().to_string())
-            .collect();
+        let names: Vec<String> = Cli::command().get_subcommands().map(|sub| sub.get_name().to_string()).collect();
         // Order differs from the bash first-word list, so compare as sets.
         for &want in vocab::SUBCOMMANDS {
-            assert!(
-                names.iter().any(|n| n == want),
-                "clap subcommand {want:?} missing from CLI"
-            );
+            assert!(names.iter().any(|n| n == want), "clap subcommand {want:?} missing from CLI");
         }
-        assert_eq!(
-            names.len(),
-            vocab::SUBCOMMANDS.len(),
-            "clap subcommand count {names:?} differs from vocab {:?}",
-            vocab::SUBCOMMANDS
-        );
+        assert_eq!(names.len(), vocab::SUBCOMMANDS.len(), "clap subcommand count {names:?} differs from vocab {:?}", vocab::SUBCOMMANDS);
     }
 }

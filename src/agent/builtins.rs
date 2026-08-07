@@ -18,22 +18,13 @@ const MAX_FILE_SIZE: usize = 100 * 1024;
 const MAX_FETCH_SIZE: usize = 100 * 1024;
 const MAX_SEARCH_MATCHES: usize = 50;
 const SAFE_COMMANDS: &[&str] = &[
-    "ls", "cat", "echo", "grep", "ps", "whoami", "uname", "date", "pwd", "env", "printenv",
-    "which", "whereis", "file", "stat", "id", "groups", "hostname", "uptime", "free", "df", "du",
-    "vmstat", "iostat", "mpstat", "sar", "netstat", "ss", "dig", "nslookup", "host", "git",
+    "ls", "cat", "echo", "grep", "ps", "whoami", "uname", "date", "pwd", "env", "printenv", "which", "whereis", "file", "stat", "id",
+    "groups", "hostname", "uptime", "free", "df", "du", "vmstat", "iostat", "mpstat", "sar", "netstat", "ss", "dig", "nslookup", "host",
+    "git",
 ];
 const DANGEROUS_FLAG_PREFIXES: &[&str] = &["--delete", "--remove", "--force"];
 const DANGEROUS_ARGUMENT_TOKENS: &[&str] = &["rm", "mv", "cp", "chmod", "chown"];
-const GIT_READ_ONLY_SUBCOMMANDS: &[&str] = &[
-    "status",
-    "log",
-    "diff",
-    "show",
-    "rev-parse",
-    "ls-files",
-    "describe",
-    "help",
-];
+const GIT_READ_ONLY_SUBCOMMANDS: &[&str] = &["status", "log", "diff", "show", "rev-parse", "ls-files", "describe", "help"];
 
 pub(crate) fn register_builtins(registry: &mut ToolRegistry, agent_mode: AgentMode) {
     registry.register(read_file_tool());
@@ -64,9 +55,7 @@ fn read_file_tool() -> RegisteredTool {
             }),
         },
         Box::new(|args| {
-            let file_path = args["file_path"]
-                .as_str()
-                .ok_or("file_path must be a string")?;
+            let file_path = args["file_path"].as_str().ok_or("file_path must be a string")?;
             execute_read_file(file_path)
         }),
     )
@@ -82,20 +71,13 @@ fn execute_read_file(file_path: &str) -> Result<String, String> {
     let metadata = fs::metadata(path).map_err(|error| format!("cannot read file: {error}"))?;
     if metadata.len() > MAX_FILE_SIZE as u64 {
         // Read only the first MAX_FILE_SIZE bytes to avoid allocating the full file.
-        let mut file =
-            fs::File::open(path).map_err(|error| format!("cannot read file: {error}"))?;
+        let mut file = fs::File::open(path).map_err(|error| format!("cannot read file: {error}"))?;
         use std::io::Read;
         let mut buf = Vec::with_capacity(MAX_FILE_SIZE);
-        file.by_ref()
-            .take(MAX_FILE_SIZE as u64)
-            .read_to_end(&mut buf)
-            .map_err(|error| format!("cannot read file: {error}"))?;
+        file.by_ref().take(MAX_FILE_SIZE as u64).read_to_end(&mut buf).map_err(|error| format!("cannot read file: {error}"))?;
         let n = buf.len();
         let partial = String::from_utf8_lossy(&buf);
-        return Ok(format!(
-            "{partial}\n\n[truncated — file is {} bytes, showing first {n}]",
-            metadata.len()
-        ));
+        return Ok(format!("{partial}\n\n[truncated — file is {} bytes, showing first {n}]", metadata.len()));
     }
 
     fs::read_to_string(path).map_err(|error| format!("cannot read file: {error}"))
@@ -105,8 +87,7 @@ fn write_file_tool() -> RegisteredTool {
     RegisteredTool::new(
         ToolDefinition {
             name: "write_file".to_string(),
-            description: "Write text content to a file, creating parent directories as needed."
-                .to_string(),
+            description: "Write text content to a file, creating parent directories as needed.".to_string(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -123,9 +104,7 @@ fn write_file_tool() -> RegisteredTool {
             }),
         },
         Box::new(|args| {
-            let file_path = args["file_path"]
-                .as_str()
-                .ok_or("file_path must be a string")?;
+            let file_path = args["file_path"].as_str().ok_or("file_path must be a string")?;
             let content = args["content"].as_str().ok_or("content must be a string")?;
             execute_write_file(file_path, content)
         }),
@@ -174,15 +153,9 @@ fn edit_file_tool() -> RegisteredTool {
             }),
         },
         Box::new(|args| {
-            let file_path = args["file_path"]
-                .as_str()
-                .ok_or("file_path must be a string")?;
-            let old_text = args["old_text"]
-                .as_str()
-                .ok_or("old_text must be a string")?;
-            let new_text = args["new_text"]
-                .as_str()
-                .ok_or("new_text must be a string")?;
+            let file_path = args["file_path"].as_str().ok_or("file_path must be a string")?;
+            let old_text = args["old_text"].as_str().ok_or("old_text must be a string")?;
+            let new_text = args["new_text"].as_str().ok_or("new_text must be a string")?;
             execute_edit_file(file_path, old_text, new_text)
         }),
     )
@@ -205,9 +178,7 @@ fn execute_edit_file(file_path: &str, old_text: &str, new_text: &str) -> Result<
         return Err("old_text not found".to_string());
     }
     if matches > 1 {
-        return Err(format!(
-            "old_text matched {matches} times; provide a unique string"
-        ));
+        return Err(format!("old_text matched {matches} times; provide a unique string"));
     }
 
     let updated = content.replacen(old_text, new_text, 1);
@@ -232,9 +203,7 @@ fn list_files_tool() -> RegisteredTool {
             }),
         },
         Box::new(|args| {
-            let directory_path = args["directory_path"]
-                .as_str()
-                .ok_or("directory_path must be a string")?;
+            let directory_path = args["directory_path"].as_str().ok_or("directory_path must be a string")?;
             execute_list_files(directory_path)
         }),
     )
@@ -258,15 +227,7 @@ fn execute_list_files(directory_path: &str) -> Result<String, String> {
 }
 
 fn entry_name(entry: &fs::DirEntry) -> Result<String, String> {
-    let suffix = if entry
-        .file_type()
-        .map_err(|error| format!("error reading entry: {error}"))?
-        .is_dir()
-    {
-        "/"
-    } else {
-        ""
-    };
+    let suffix = if entry.file_type().map_err(|error| format!("error reading entry: {error}"))?.is_dir() { "/" } else { "" };
 
     Ok(format!("{}{}", entry.file_name().to_string_lossy(), suffix))
 }
@@ -275,7 +236,8 @@ fn search_files_tool() -> RegisteredTool {
     RegisteredTool::new(
         ToolDefinition {
             name: "search_files".to_string(),
-            description: "Search for a text pattern across files in a directory. Returns matching lines with file paths and line numbers.".to_string(),
+            description: "Search for a text pattern across files in a directory. Returns matching lines with file paths and line numbers."
+                .to_string(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -293,10 +255,7 @@ fn search_files_tool() -> RegisteredTool {
         },
         Box::new(|args| {
             let pattern = args["pattern"].as_str().ok_or("pattern must be a string")?;
-            let directory_path = args
-                .get("directory_path")
-                .and_then(|value| value.as_str())
-                .unwrap_or(".");
+            let directory_path = args.get("directory_path").and_then(|value| value.as_str()).unwrap_or(".");
             execute_search_files(pattern, directory_path)
         }),
     )
@@ -309,15 +268,9 @@ fn execute_search_files(pattern: &str, directory_path: &str) -> Result<String, S
         return Err(format!("not a directory: {expanded}"));
     }
 
-    let matcher = RegexMatcherBuilder::new()
-        .fixed_strings(true)
-        .build(pattern)
-        .map_err(|error| format!("invalid pattern: {error}"))?;
+    let matcher = RegexMatcherBuilder::new().fixed_strings(true).build(pattern).map_err(|error| format!("invalid pattern: {error}"))?;
 
-    let walker = WalkBuilder::new(path)
-        .hidden(true)
-        .standard_filters(true)
-        .build();
+    let walker = WalkBuilder::new(path).hidden(true).standard_filters(true).build();
 
     let mut searcher = SearcherBuilder::new().line_number(true).build();
     let mut matches: Vec<String> = Vec::new();
@@ -331,18 +284,12 @@ fn execute_search_files(pattern: &str, directory_path: &str) -> Result<String, S
         }
 
         let entry_path = entry.path();
-        let is_file = entry
-            .file_type()
-            .is_some_and(|file_type| file_type.is_file());
+        let is_file = entry.file_type().is_some_and(|file_type| file_type.is_file());
         if !is_file {
             continue;
         }
 
-        let mut sink = MatchSink {
-            path: entry_path.to_path_buf(),
-            matches: &mut matches,
-            truncated: &mut truncated,
-        };
+        let mut sink = MatchSink { path: entry_path.to_path_buf(), matches: &mut matches, truncated: &mut truncated };
 
         searcher
             .search_path(&matcher, entry_path, &mut sink)
@@ -354,9 +301,7 @@ fn execute_search_files(pattern: &str, directory_path: &str) -> Result<String, S
     }
 
     if truncated {
-        matches.push(format!(
-            "\n[showing first {MAX_SEARCH_MATCHES} matches; refine your pattern to see more]"
-        ));
+        matches.push(format!("\n[showing first {MAX_SEARCH_MATCHES} matches; refine your pattern to see more]"));
     }
     Ok(matches.join("\n"))
 }
@@ -370,11 +315,7 @@ struct MatchSink<'a> {
 impl Sink for MatchSink<'_> {
     type Error = io::Error;
 
-    fn matched(
-        &mut self,
-        _searcher: &grep_searcher::Searcher,
-        mat: &SinkMatch<'_>,
-    ) -> Result<bool, io::Error> {
+    fn matched(&mut self, _searcher: &grep_searcher::Searcher, mat: &SinkMatch<'_>) -> Result<bool, io::Error> {
         if self.matches.len() >= MAX_SEARCH_MATCHES {
             *self.truncated = true;
             return Ok(false);
@@ -383,8 +324,7 @@ impl Sink for MatchSink<'_> {
         let line_number = mat.line_number().unwrap_or(0);
         let line = String::from_utf8_lossy(mat.bytes());
         let line = line.trim_end();
-        self.matches
-            .push(format!("{}:{line_number}:{line}", self.path.display()));
+        self.matches.push(format!("{}:{line_number}:{line}", self.path.display()));
         Ok(true)
     }
 }
@@ -425,33 +365,19 @@ fn execute_fetch_url(url: &str) -> Result<String, String> {
         return Err("url must start with http:// or https://".to_string());
     }
 
-    let response = FETCH_CLIENT
-        .as_ref()
-        .map_err(String::clone)?
-        .get(url)
-        .send()
-        .map_err(|error| format!("cannot fetch URL: {error}"))?;
+    let response = FETCH_CLIENT.as_ref().map_err(String::clone)?.get(url).send().map_err(|error| format!("cannot fetch URL: {error}"))?;
     let status = response.status();
     if !status.is_success() {
         return Err(format!("URL returned HTTP {status}"));
     }
 
-    let content = response
-        .text()
-        .map_err(|error| format!("cannot read response body: {error}"))?;
+    let content = response.text().map_err(|error| format!("cannot read response body: {error}"))?;
     if content.len() > MAX_FETCH_SIZE {
         // Floor to the nearest char boundary at or below MAX_FETCH_SIZE so we
         // always truncate an oversize body regardless of codepoint widths.
-        let cut = content
-            .char_indices()
-            .rev()
-            .find(|(i, _)| *i <= MAX_FETCH_SIZE)
-            .map_or(0, |(i, _)| i);
+        let cut = content.char_indices().rev().find(|(i, _)| *i <= MAX_FETCH_SIZE).map_or(0, |(i, _)| i);
         let truncated = &content[..cut];
-        Ok(format!(
-            "{truncated}\n\n[truncated — response is {} bytes, showing first {cut}]",
-            content.len()
-        ))
+        Ok(format!("{truncated}\n\n[truncated — response is {} bytes, showing first {cut}]", content.len()))
     } else {
         Ok(content)
     }
@@ -491,9 +417,7 @@ fn run_command_tool(agent_mode: AgentMode) -> RegisteredTool {
 const fn run_command_description(agent_mode: AgentMode) -> &'static str {
     match agent_mode {
         AgentMode::Safe => "Run a restricted read-only command to gather context.",
-        AgentMode::On => {
-            "Run a shell command to gather context or for multi-step requests such as installing or setting up programs."
-        }
+        AgentMode::On => "Run a shell command to gather context or for multi-step requests such as installing or setting up programs.",
         AgentMode::Off => "Run a command.",
     }
 }
@@ -504,15 +428,7 @@ fn command_args(args: &serde_json::Value) -> Result<Vec<String>, String> {
     };
 
     let values = value.as_array().ok_or("args must be an array")?;
-    values
-        .iter()
-        .map(|value| {
-            value
-                .as_str()
-                .map(ToString::to_string)
-                .ok_or_else(|| "args entries must be strings".to_string())
-        })
-        .collect()
+    values.iter().map(|value| value.as_str().map(ToString::to_string).ok_or_else(|| "args entries must be strings".to_string())).collect()
 }
 
 fn split_command(command: &str, args: &[String]) -> Result<(String, Vec<String>), String> {
@@ -524,18 +440,11 @@ fn split_command(command: &str, args: &[String]) -> Result<(String, Vec<String>)
 }
 
 fn has_shell_metacharacters(arg: &str) -> bool {
-    [">", "|", ";", "&", "`"]
-        .iter()
-        .any(|token| arg.contains(token))
+    [">", "|", ";", "&", "`"].iter().any(|token| arg.contains(token))
 }
 
 fn has_dangerous_flag(arg: &str) -> bool {
-    DANGEROUS_FLAG_PREFIXES.iter().any(|flag| {
-        arg == *flag
-            || arg
-                .strip_prefix(flag)
-                .is_some_and(|suffix| suffix.starts_with('='))
-    })
+    DANGEROUS_FLAG_PREFIXES.iter().any(|flag| arg == *flag || arg.strip_prefix(flag).is_some_and(|suffix| suffix.starts_with('=')))
 }
 
 fn is_dangerous_argument_token(arg: &str) -> bool {
@@ -552,13 +461,7 @@ fn git_config_key_is_exec_capable(key: &str) -> bool {
     // Reject by suffix/substring; case-insensitive to match git's behaviour.
     let key_lc = key.to_ascii_lowercase();
     // Exact dangerous keys.
-    const EXEC_KEYS: &[&str] = &[
-        "core.pager",
-        "core.sshcommand",
-        "core.fsmonitor",
-        "core.editor",
-        "core.askpass",
-    ];
+    const EXEC_KEYS: &[&str] = &["core.pager", "core.sshcommand", "core.fsmonitor", "core.editor", "core.askpass"];
     if EXEC_KEYS.contains(&key_lc.as_str()) {
         return true;
     }
@@ -618,11 +521,7 @@ fn validate_safe_run_command(command: &str, args: &[String]) -> Result<(), Strin
         return Err("command must not be empty".to_string());
     }
 
-    if Path::new(command)
-        .file_name()
-        .and_then(|segment| segment.to_str())
-        != Some(command)
-    {
+    if Path::new(command).file_name().and_then(|segment| segment.to_str()) != Some(command) {
         return Err(format!("path-qualified commands not allowed: {command}"));
     }
 
@@ -643,19 +542,13 @@ fn validate_safe_run_command(command: &str, args: &[String]) -> Result<(), Strin
     Ok(())
 }
 
-fn execute_run_command(
-    agent_mode: AgentMode,
-    command: &str,
-    args: &[String],
-) -> Result<String, String> {
+fn execute_run_command(agent_mode: AgentMode, command: &str, args: &[String]) -> Result<String, String> {
     let has_command_arguments = command.chars().any(char::is_whitespace);
     let should_use_shell = args.is_empty() && has_command_arguments && !agent_mode.is_safe();
 
     if agent_mode.is_safe() {
         if has_shell_metacharacters(command) {
-            return Err(format!(
-                "shell expressions not allowed in safe mode: {command}"
-            ));
+            return Err(format!("shell expressions not allowed in safe mode: {command}"));
         }
         if has_command_arguments {
             return Err("safe mode requires command arguments in args".to_string());
@@ -663,10 +556,7 @@ fn execute_run_command(
     }
 
     let (cmd, cmd_args) = if should_use_shell {
-        (
-            "sh".to_string(),
-            vec!["-c".to_string(), command.to_string()],
-        )
+        ("sh".to_string(), vec!["-c".to_string(), command.to_string()])
     } else {
         let (c, a) = split_command(command, args)?;
         if agent_mode.is_safe() {
@@ -675,10 +565,7 @@ fn execute_run_command(
         (c, a)
     };
 
-    let output = Command::new(&cmd)
-        .args(&cmd_args)
-        .output()
-        .map_err(|error| format!("failed to execute command: {error}"))?;
+    let output = Command::new(&cmd).args(&cmd_args).output().map_err(|error| format!("failed to execute command: {error}"))?;
 
     if !output.status.success() {
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -721,9 +608,7 @@ mod tests {
     use std::thread;
 
     fn test_dir(name: &str) -> std::path::PathBuf {
-        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("target/tests")
-            .join(format!("agent_builtins_{name}"));
+        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/tests").join(format!("agent_builtins_{name}"));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
@@ -750,10 +635,7 @@ mod tests {
     }
 
     fn http_response(status: &str, body: &str) -> String {
-        format!(
-            "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-            body.len()
-        )
+        format!("HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len())
     }
 
     #[test]
@@ -809,10 +691,7 @@ mod tests {
     fn write_file_rejects_directory_path() {
         let dir = test_dir("write_dir");
 
-        assert_err_contains(
-            execute_write_file(dir.to_str().unwrap(), "hello"),
-            "cannot write to directory",
-        );
+        assert_err_contains(execute_write_file(dir.to_str().unwrap(), "hello"), "cannot write to directory");
     }
 
     #[test]
@@ -833,10 +712,7 @@ mod tests {
         let file_path = dir.join("hello.txt");
         fs::write(&file_path, "hello world").unwrap();
 
-        assert_err_contains(
-            execute_edit_file(file_path.to_str().unwrap(), "nope", "there"),
-            "old_text not found",
-        );
+        assert_err_contains(execute_edit_file(file_path.to_str().unwrap(), "nope", "there"), "old_text not found");
     }
 
     #[test]
@@ -845,10 +721,7 @@ mod tests {
         let file_path = dir.join("hello.txt");
         fs::write(&file_path, "hello hello").unwrap();
 
-        assert_err_contains(
-            execute_edit_file(file_path.to_str().unwrap(), "hello", "hi"),
-            "old_text matched 2 times",
-        );
+        assert_err_contains(execute_edit_file(file_path.to_str().unwrap(), "hello", "hi"), "old_text matched 2 times");
     }
 
     #[test]
@@ -857,10 +730,7 @@ mod tests {
         let file_path = dir.join("hello.txt");
         fs::write(&file_path, "hello").unwrap();
 
-        assert_err_contains(
-            execute_edit_file(file_path.to_str().unwrap(), "", "hi"),
-            "old_text must not be empty",
-        );
+        assert_err_contains(execute_edit_file(file_path.to_str().unwrap(), "", "hi"), "old_text must not be empty");
     }
 
     #[test]
@@ -884,11 +754,7 @@ mod tests {
     #[test]
     fn search_files_finds_pattern() {
         let dir = test_dir("search");
-        fs::write(
-            dir.join("code.rs"),
-            "fn main() {\n    println!(\"hello\");\n}\n",
-        )
-        .unwrap();
+        fs::write(dir.join("code.rs"), "fn main() {\n    println!(\"hello\");\n}\n").unwrap();
         fs::write(dir.join("other.rs"), "fn other() {}\n").unwrap();
 
         let result = execute_search_files("println", dir.to_str().unwrap()).unwrap();
@@ -940,9 +806,7 @@ mod tests {
 
     #[test]
     fn fetch_url_returns_response_body() {
-        let url = test_http_server(Box::leak(
-            http_response("200 OK", "hello from server").into_boxed_str(),
-        ));
+        let url = test_http_server(Box::leak(http_response("200 OK", "hello from server").into_boxed_str()));
 
         let result = execute_fetch_url(&url).unwrap();
 
@@ -951,17 +815,12 @@ mod tests {
 
     #[test]
     fn fetch_url_rejects_non_http_urls() {
-        assert_err_contains(
-            execute_fetch_url("file:///etc/passwd"),
-            "url must start with http:// or https://",
-        );
+        assert_err_contains(execute_fetch_url("file:///etc/passwd"), "url must start with http:// or https://");
     }
 
     #[test]
     fn fetch_url_rejects_error_statuses() {
-        let url = test_http_server(Box::leak(
-            http_response("404 Not Found", "nope").into_boxed_str(),
-        ));
+        let url = test_http_server(Box::leak(http_response("404 Not Found", "nope").into_boxed_str()));
 
         assert_err_contains(execute_fetch_url(&url), "URL returned HTTP 404 Not Found");
     }
@@ -979,26 +838,17 @@ mod tests {
 
     #[test]
     fn run_command_executes_safe_commands() {
-        assert_ok_trimmed(
-            execute_run_command(AgentMode::Safe, "echo", &["hello world".to_string()]),
-            "hello world",
-        );
+        assert_ok_trimmed(execute_run_command(AgentMode::Safe, "echo", &["hello world".to_string()]), "hello world");
     }
 
     #[test]
     fn run_command_safe_rejects_combined_command_string() {
-        assert_err_contains(
-            execute_run_command(AgentMode::Safe, "echo hello world", &[]),
-            "safe mode requires command arguments in args",
-        );
+        assert_err_contains(execute_run_command(AgentMode::Safe, "echo hello world", &[]), "safe mode requires command arguments in args");
     }
 
     #[test]
     fn run_command_rejects_unsafe_commands() {
-        assert_err_contains(
-            execute_run_command(AgentMode::Safe, "rm", &["-rf".to_string(), "/".to_string()]),
-            "command not allowed",
-        );
+        assert_err_contains(execute_run_command(AgentMode::Safe, "rm", &["-rf".to_string(), "/".to_string()]), "command not allowed");
     }
 
     #[test]
@@ -1038,26 +888,17 @@ mod tests {
 
     #[test]
     fn run_command_rejects_dangerous_args() {
-        assert_err_contains(
-            execute_run_command(AgentMode::Safe, "ls", &["--force".to_string()]),
-            "dangerous argument",
-        );
+        assert_err_contains(execute_run_command(AgentMode::Safe, "ls", &["--force".to_string()]), "dangerous argument");
     }
 
     #[test]
     fn run_command_safe_allows_benign_args_with_blocked_substrings() {
-        assert_ok_trimmed(
-            execute_run_command(AgentMode::Safe, "echo", &["tcp".to_string()]),
-            "tcp",
-        );
+        assert_ok_trimmed(execute_run_command(AgentMode::Safe, "echo", &["tcp".to_string()]), "tcp");
     }
 
     #[test]
     fn run_command_safe_rejects_mutating_git_subcommands() {
-        assert_err_contains(
-            execute_run_command(AgentMode::Safe, "git", &["init".to_string()]),
-            "dangerous git subcommand",
-        );
+        assert_err_contains(execute_run_command(AgentMode::Safe, "git", &["init".to_string()]), "dangerous git subcommand");
     }
 
     #[test]
@@ -1069,57 +910,35 @@ mod tests {
 
     #[test]
     fn run_command_safe_allows_git_global_option_before_read_only_subcommand() {
-        let result = execute_run_command(
-            AgentMode::Safe,
-            "git",
-            &[
-                "-c".to_string(),
-                "color.ui=always".to_string(),
-                "--version".to_string(),
-            ],
-        );
+        let result =
+            execute_run_command(AgentMode::Safe, "git", &["-c".to_string(), "color.ui=always".to_string(), "--version".to_string()]);
         assert!(result.is_ok());
         assert!(result.unwrap().contains("git version"));
     }
 
     #[test]
     fn run_command_safe_allows_literal_dollar_argument() {
-        assert_ok_trimmed(
-            execute_run_command(AgentMode::Safe, "echo", &["$HOME".to_string()]),
-            "$HOME",
-        );
+        assert_ok_trimmed(execute_run_command(AgentMode::Safe, "echo", &["$HOME".to_string()]), "$HOME");
     }
 
     #[test]
     fn run_command_on_allows_arbitrary_commands() {
-        assert_ok_trimmed(
-            execute_run_command(AgentMode::On, "echo", &["hello world".to_string()]),
-            "hello world",
-        );
+        assert_ok_trimmed(execute_run_command(AgentMode::On, "echo", &["hello world".to_string()]), "hello world");
     }
 
     #[test]
     fn run_command_on_accepts_combined_command_string() {
-        assert_ok_trimmed(
-            execute_run_command(AgentMode::On, "echo hello world", &[]),
-            "hello world",
-        );
+        assert_ok_trimmed(execute_run_command(AgentMode::On, "echo hello world", &[]), "hello world");
     }
 
     #[test]
     fn run_command_on_preserves_quoted_combined_command_string() {
-        assert_ok_trimmed(
-            execute_run_command(AgentMode::On, r#"printf '%s' "two words""#, &[]),
-            "two words",
-        );
+        assert_ok_trimmed(execute_run_command(AgentMode::On, r#"printf '%s' "two words""#, &[]), "two words");
     }
 
     #[test]
     fn run_command_on_allows_previously_blocked_args() {
-        assert_ok_trimmed(
-            execute_run_command(AgentMode::On, "echo", &["--force".to_string()]),
-            "--force",
-        );
+        assert_ok_trimmed(execute_run_command(AgentMode::On, "echo", &["--force".to_string()]), "--force");
     }
 
     #[test]
@@ -1133,14 +952,7 @@ bar",
 
     #[test]
     fn run_command_failure_includes_status_stdout_and_stderr() {
-        let result = execute_run_command(
-            AgentMode::On,
-            "sh",
-            &[
-                "-c".to_string(),
-                "echo out; echo err >&2; exit 7".to_string(),
-            ],
-        );
+        let result = execute_run_command(AgentMode::On, "sh", &["-c".to_string(), "echo out; echo err >&2; exit 7".to_string()]);
 
         let error = result.unwrap_err();
         assert!(error.contains("status exit status: 7"));
@@ -1160,61 +972,31 @@ bar",
 
     #[test]
     fn run_command_safe_rejects_find_delete() {
-        assert_err_contains(
-            execute_run_command(
-                AgentMode::Safe,
-                "find",
-                &[".".to_string(), "-delete".to_string()],
-            ),
-            "command not allowed",
-        );
+        assert_err_contains(execute_run_command(AgentMode::Safe, "find", &[".".to_string(), "-delete".to_string()]), "command not allowed");
     }
 
     #[test]
     fn run_command_safe_rejects_ip_link_set() {
         assert_err_contains(
-            execute_run_command(
-                AgentMode::Safe,
-                "ip",
-                &[
-                    "link".to_string(),
-                    "set".to_string(),
-                    "lo".to_string(),
-                    "down".to_string(),
-                ],
-            ),
+            execute_run_command(AgentMode::Safe, "ip", &["link".to_string(), "set".to_string(), "lo".to_string(), "down".to_string()]),
             "command not allowed",
         );
     }
 
     #[test]
     fn run_command_safe_rejects_svn_commit() {
-        assert_err_contains(
-            execute_run_command(AgentMode::Safe, "svn", &["commit".to_string()]),
-            "command not allowed",
-        );
+        assert_err_contains(execute_run_command(AgentMode::Safe, "svn", &["commit".to_string()]), "command not allowed");
     }
 
     #[test]
     fn run_command_safe_rejects_hg_commit() {
-        assert_err_contains(
-            execute_run_command(AgentMode::Safe, "hg", &["commit".to_string()]),
-            "command not allowed",
-        );
+        assert_err_contains(execute_run_command(AgentMode::Safe, "hg", &["commit".to_string()]), "command not allowed");
     }
 
     #[test]
     fn run_command_safe_rejects_curl() {
         assert_err_contains(
-            execute_run_command(
-                AgentMode::Safe,
-                "curl",
-                &[
-                    "-o".to_string(),
-                    "/tmp/x".to_string(),
-                    "http://example.com".to_string(),
-                ],
-            ),
+            execute_run_command(AgentMode::Safe, "curl", &["-o".to_string(), "/tmp/x".to_string(), "http://example.com".to_string()]),
             "command not allowed",
         );
     }
@@ -1222,45 +1004,27 @@ bar",
     #[test]
     fn run_command_safe_rejects_wget() {
         assert_err_contains(
-            execute_run_command(
-                AgentMode::Safe,
-                "wget",
-                &[
-                    "-O".to_string(),
-                    "/tmp/x".to_string(),
-                    "http://example.com".to_string(),
-                ],
-            ),
+            execute_run_command(AgentMode::Safe, "wget", &["-O".to_string(), "/tmp/x".to_string(), "http://example.com".to_string()]),
             "command not allowed",
         );
     }
 
     #[test]
     fn run_command_safe_rejects_docker() {
-        assert_err_contains(
-            execute_run_command(AgentMode::Safe, "docker", &["ps".to_string()]),
-            "command not allowed",
-        );
+        assert_err_contains(execute_run_command(AgentMode::Safe, "docker", &["ps".to_string()]), "command not allowed");
     }
 
     #[test]
     fn run_command_safe_rejects_kubectl() {
         assert_err_contains(
-            execute_run_command(
-                AgentMode::Safe,
-                "kubectl",
-                &["get".to_string(), "pods".to_string()],
-            ),
+            execute_run_command(AgentMode::Safe, "kubectl", &["get".to_string(), "pods".to_string()]),
             "command not allowed",
         );
     }
 
     #[test]
     fn run_command_safe_rejects_terraform() {
-        assert_err_contains(
-            execute_run_command(AgentMode::Safe, "terraform", &["plan".to_string()]),
-            "command not allowed",
-        );
+        assert_err_contains(execute_run_command(AgentMode::Safe, "terraform", &["plan".to_string()]), "command not allowed");
     }
 
     // ── regression: bug fixes ────────────────────────────────────────────────
@@ -1276,43 +1040,26 @@ bar",
         // Repeat enough times that the total byte length is slightly above MAX_FETCH_SIZE.
         let count = MAX_FETCH_SIZE / unit_bytes + 1;
         let body: String = std::iter::repeat_n(unit, count).collect();
-        assert!(
-            body.len() > MAX_FETCH_SIZE,
-            "body must exceed cap for test to be meaningful"
-        );
+        assert!(body.len() > MAX_FETCH_SIZE, "body must exceed cap for test to be meaningful");
 
         let response = http_response("200 OK", &body);
         let url = test_http_server(Box::leak(response.into_boxed_str()));
 
         let result = execute_fetch_url(&url).unwrap();
         // The truncation notice must be present — the body was over the limit.
-        assert!(
-            result.contains("[truncated"),
-            "expected truncation notice in: {result}"
-        );
+        assert!(result.contains("[truncated"), "expected truncation notice in: {result}");
         // The prefix before the notice must be valid UTF-8 (no mid-codepoint cut).
         let prefix = result.split("\n\n[truncated").next().unwrap_or("");
         assert!(std::str::from_utf8(prefix.as_bytes()).is_ok());
         // The prefix must be strictly shorter than the full body.
-        assert!(
-            prefix.len() < body.len(),
-            "prefix should be shorter than the full body"
-        );
+        assert!(prefix.len() < body.len(), "prefix should be shorter than the full body");
     }
 
     #[test]
     fn git_safe_mode_rejects_exec_capable_config_key() {
         // `core.pager` can execute arbitrary commands; must be rejected in safe mode.
         assert_err_contains(
-            execute_run_command(
-                AgentMode::Safe,
-                "git",
-                &[
-                    "-c".to_string(),
-                    "core.pager=evil-cmd".to_string(),
-                    "log".to_string(),
-                ],
-            ),
+            execute_run_command(AgentMode::Safe, "git", &["-c".to_string(), "core.pager=evil-cmd".to_string(), "log".to_string()]),
             "dangerous git subcommand",
         );
     }
@@ -1320,15 +1067,7 @@ bar",
     #[test]
     fn git_safe_mode_rejects_alias_config_key() {
         assert_err_contains(
-            execute_run_command(
-                AgentMode::Safe,
-                "git",
-                &[
-                    "-c".to_string(),
-                    "alias.x=!evil".to_string(),
-                    "status".to_string(),
-                ],
-            ),
+            execute_run_command(AgentMode::Safe, "git", &["-c".to_string(), "alias.x=!evil".to_string(), "status".to_string()]),
             "dangerous git subcommand",
         );
     }
@@ -1339,21 +1078,12 @@ bar",
         let result = execute_run_command(
             AgentMode::Safe,
             "git",
-            &[
-                "-c".to_string(),
-                "color.ui=never".to_string(),
-                "log".to_string(),
-                "--oneline".to_string(),
-                "-1".to_string(),
-            ],
+            &["-c".to_string(), "color.ui=never".to_string(), "log".to_string(), "--oneline".to_string(), "-1".to_string()],
         );
         // We may not be in a git repo in CI, but the rejection must NOT happen.
         // Accept both success and a git error; reject only a "dangerous" error.
         if let Err(e) = result {
-            assert!(
-                !e.contains("dangerous"),
-                "benign -c key should not be rejected; got: {e}"
-            );
+            assert!(!e.contains("dangerous"), "benign -c key should not be rejected; got: {e}");
         }
     }
 
@@ -1379,14 +1109,8 @@ bar",
             .and_then(|s| s.trim().parse().ok())
             .expect("could not parse byte count from truncation notice");
         // Must be ≤ MAX_FILE_SIZE (not the hardcoded constant stated regardless of actual read).
-        assert!(
-            showing_count <= MAX_FILE_SIZE,
-            "showing count {showing_count} exceeds MAX_FILE_SIZE {MAX_FILE_SIZE}"
-        );
+        assert!(showing_count <= MAX_FILE_SIZE, "showing count {showing_count} exceeds MAX_FILE_SIZE {MAX_FILE_SIZE}");
         // For an all-ASCII file, the actual read should equal the cap exactly.
-        assert_eq!(
-            showing_count, MAX_FILE_SIZE,
-            "ASCII file should fill the buffer completely"
-        );
+        assert_eq!(showing_count, MAX_FILE_SIZE, "ASCII file should fill the buffer completely");
     }
 }

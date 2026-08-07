@@ -291,14 +291,7 @@ fn interactive_mode_edit_then_execute() {
     // then "\x1b[A after\ny" → arrow up + type " after" + Enter + Y.
     let out = tests::run_with_stdin_interactive(&home, &[], b"show files\n\x1b[A after\ny");
 
-    assert!(
-        out.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
+    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
     let output = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        output.contains("before after"),
-        "expected executed output to contain 'before after', got: {output}"
-    );
+    assert!(output.contains("before after"), "expected executed output to contain 'before after', got: {output}");
 }

@@ -32,11 +32,7 @@ fn detect_install_method() -> InstallMethod {
         InstallMethod::Cargo
     } else if path.starts_with("/usr") {
         let is_arch = std::path::Path::new("/etc/arch-release").exists();
-        if is_arch {
-            InstallMethod::Aur
-        } else {
-            InstallMethod::Unknown
-        }
+        if is_arch { InstallMethod::Aur } else { InstallMethod::Unknown }
     } else {
         InstallMethod::Unknown
     }
@@ -58,11 +54,7 @@ pub async fn is_update_available() -> bool {
     else {
         return false;
     };
-    let Ok(response) = client
-        .get("https://crates.io/api/v1/crates/larpshell")
-        .send()
-        .await
-    else {
+    let Ok(response) = client.get("https://crates.io/api/v1/crates/larpshell").send().await else {
         return false;
     };
     let Ok(info) = response.json::<CrateInfo>().await else {
@@ -72,10 +64,7 @@ pub async fn is_update_available() -> bool {
 }
 
 fn remote_version_is_newer(remote: &str, current: &str) -> bool {
-    let (Ok(remote), Ok(current)) = (
-        semver::Version::parse(remote),
-        semver::Version::parse(current),
-    ) else {
+    let (Ok(remote), Ok(current)) = (semver::Version::parse(remote), semver::Version::parse(current)) else {
         return false;
     };
     remote.cmp_precedence(&current).is_gt()
@@ -84,10 +73,7 @@ fn remote_version_is_newer(remote: &str, current: &str) -> bool {
 fn print_notice() {
     let mut msg = "update available".to_string();
     msg.push_str(update_instruction());
-    eprintln!(
-        "{}",
-        style_message_markup(&msg).custom_color(CTP_PRIMARY).bold()
-    );
+    eprintln!("{}", style_message_markup(&msg).custom_color(CTP_PRIMARY).bold());
 }
 
 pub async fn print_if_available(task: JoinHandle<bool>) {

@@ -1,9 +1,7 @@
 use super::*;
 
 fn clean_home(suffix: &str) -> std::path::PathBuf {
-    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("target/tests")
-        .join(format!("larpshell_test_clean_{suffix}"));
+    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/tests").join(format!("larpshell_test_clean_{suffix}"));
     if dir.exists() {
         fs::remove_dir_all(&dir).unwrap();
     }
@@ -37,34 +35,21 @@ fn stdout_text(out: &std::process::Output) -> String {
 
 fn assert_no_shell_bootstrap(out: &std::process::Output) {
     let stderr = stderr_text(out);
-    assert!(
-        !stderr.contains("restart shell or run 'source ~/.bashrc'"),
-        "subcommand should not trigger shell bootstrap; stderr: {stderr}"
-    );
+    assert!(!stderr.contains("restart shell or run 'source ~/.bashrc'"), "subcommand should not trigger shell bootstrap; stderr: {stderr}");
 }
 
 fn assert_agent_mode_written(home: &std::path::Path, expected: &str) {
     let contents = fs::read_to_string(clean_home_config_path(home)).unwrap();
-    assert!(
-        contents.contains(expected),
-        "config contents were: {contents}"
-    );
+    assert!(contents.contains(expected), "config contents were: {contents}");
 }
 
 fn assert_success(out: &std::process::Output) {
-    assert!(
-        out.status.success(),
-        "expected success, stderr: {}",
-        stderr_text(out)
-    );
+    assert!(out.status.success(), "expected success, stderr: {}", stderr_text(out));
 }
 
 fn assert_file_contains(path: &std::path::Path, expected: &str) {
     let contents = fs::read_to_string(path).unwrap();
-    assert!(
-        contents.contains(expected),
-        "file contents were: {contents}"
-    );
+    assert!(contents.contains(expected), "file contents were: {contents}");
 }
 
 fn assert_clean_home_agent_bootstrap(suffix: &str, args: &[&str], expected: &str) {
@@ -81,11 +66,7 @@ fn assert_prompt_show_uses_default(suffix: &str, args: &[&str], placeholder: &st
     assert!(stdout_text(&out).contains(placeholder));
 }
 
-fn run_clean_home_with_editor(
-    home: &std::path::Path,
-    args: &[&str],
-    editor: &std::path::Path,
-) -> std::process::Output {
+fn run_clean_home_with_editor(home: &std::path::Path, args: &[&str], editor: &std::path::Path) -> std::process::Output {
     ensure_binary_built();
     let config_dir = home.join(".config");
     std::process::Command::new(binary())
@@ -99,9 +80,7 @@ fn run_clean_home_with_editor(
 }
 
 fn agent_safe_prompt_path(home: &std::path::Path) -> std::path::PathBuf {
-    home.join(".config")
-        .join("larpshell")
-        .join("agent-safe-prompt.md")
+    home.join(".config").join("larpshell").join("agent-safe-prompt.md")
 }
 
 fn make_noop_editor(home: &std::path::Path) -> std::path::PathBuf {
@@ -154,11 +133,7 @@ fn agent_safe_subcommand_bootstraps_missing_config() {
 
 #[test]
 fn agent_safe_subcommand_bootstraps_missing_config_on_clean_home() {
-    assert_clean_home_agent_bootstrap(
-        "agent_safe_clean_home",
-        &["agent", "safe"],
-        SAFE_BOOTSTRAPPED,
-    );
+    assert_clean_home_agent_bootstrap("agent_safe_clean_home", &["agent", "safe"], SAFE_BOOTSTRAPPED);
 }
 
 #[test]
@@ -205,29 +180,17 @@ fn agent_off_subcommand_bootstraps_missing_config_on_clean_home() {
 
 #[test]
 fn prompt_agent_show_uses_default_on_clean_home() {
-    assert_prompt_show_uses_default(
-        "prompt_agent_clean_home",
-        &["prompt", "agent", "show"],
-        "interacting with the user's machine",
-    );
+    assert_prompt_show_uses_default("prompt_agent_clean_home", &["prompt", "agent", "show"], "interacting with the user's machine");
 }
 
 #[test]
 fn prompt_system_show_uses_default_on_clean_home() {
-    assert_prompt_show_uses_default(
-        "prompt_system_clean_home",
-        &["prompt", "system", "show"],
-        "{request}",
-    );
+    assert_prompt_show_uses_default("prompt_system_clean_home", &["prompt", "system", "show"], "{request}");
 }
 
 #[test]
 fn prompt_explain_show_uses_default_on_clean_home() {
-    assert_prompt_show_uses_default(
-        "prompt_explain_clean_home",
-        &["prompt", "explain", "show"],
-        "{command}",
-    );
+    assert_prompt_show_uses_default("prompt_explain_clean_home", &["prompt", "explain", "show"], "{command}");
 }
 
 #[test]
@@ -267,24 +230,11 @@ fn verbose_slash_command_takes_effect_immediately() {
     ]);
     write_ollama_config(&home, port);
 
-    let out = run_with_stdin_interactive(
-        &home,
-        &[],
-        b"/agent safe\n/verbose off\nfind Cargo\n/quit\n",
-    );
+    let out = run_with_stdin_interactive(&home, &[], b"/agent safe\n/verbose off\nfind Cargo\n/quit\n");
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        stderr.contains("verbose tool output: off"),
-        "expected verbose off message; stderr: {stderr}"
-    );
-    assert!(
-        stderr.contains("result ("),
-        "expected tool summary; stderr: {stderr}"
-    );
-    assert!(
-        !stderr.contains("Cargo.toml"),
-        "verbose output should not show result lines after /verbose off; stderr: {stderr}"
-    );
+    assert!(stderr.contains("verbose tool output: off"), "expected verbose off message; stderr: {stderr}");
+    assert!(stderr.contains("result ("), "expected tool summary; stderr: {stderr}");
+    assert!(!stderr.contains("Cargo.toml"), "verbose output should not show result lines after /verbose off; stderr: {stderr}");
 
     let config_path = home.join("config").join("larpshell").join("config.toml");
     assert_file_contains(&config_path, "verbose_tool_output = false");
@@ -298,10 +248,7 @@ fn agent_slash_command_parsed_in_interactive() {
 
     let out = run_with_stdin(&home, &[], b"/agent safe\n/quit\n");
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        stderr.contains("agent mode: safe"),
-        "expected agent safe message; stderr: {stderr}"
-    );
+    assert!(stderr.contains("agent mode: safe"), "expected agent safe message; stderr: {stderr}");
 
     let config_path = home.join("config").join("larpshell").join("config.toml");
     assert_file_contains(&config_path, "agent = \"safe\"");
@@ -326,14 +273,8 @@ COMMAND: echo done"]);
     let out = run_with_stdin(&home, &[], b"install package\n");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(out.status.success(), "stderr: {stderr}");
-    assert!(
-        stderr.contains("● package needed by:\nlarpshell"),
-        "expected multiline message without indent; stderr: {stderr}"
-    );
-    assert!(
-        !stderr.contains("● package needed by:\n  larpshell"),
-        "message continuation line should not be indented; stderr: {stderr}"
-    );
+    assert!(stderr.contains("● package needed by:\nlarpshell"), "expected multiline message without indent; stderr: {stderr}");
+    assert!(!stderr.contains("● package needed by:\n  larpshell"), "message continuation line should not be indented; stderr: {stderr}");
 }
 
 #[test]
@@ -344,8 +285,5 @@ fn agent_off_by_default_in_config() {
 
     let config_path = home.join("config").join("larpshell").join("config.toml");
     let contents = fs::read_to_string(&config_path).unwrap();
-    assert!(
-        !contents.contains("agent = \"on\"") && !contents.contains("agent = \"safe\""),
-        "fresh config should not have agent enabled"
-    );
+    assert!(!contents.contains("agent = \"on\"") && !contents.contains("agent = \"safe\""), "fresh config should not have agent enabled");
 }

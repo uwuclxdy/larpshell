@@ -7,17 +7,13 @@ use colored::Colorize;
 use crate::cli::print_warning;
 #[cfg(unix)]
 use crate::common::RawModeGuard;
-use crate::common::{
-    CTP_BLUE, CTP_GREEN, CTP_OVERLAY0, CTP_PRIMARY, CTP_RED, CTP_YELLOW, clear_line,
-};
-use crate::config::{
-    AgentMode, Config, load_agent_prompt, load_agent_safe_prompt, load_sys_prompt,
-};
+use crate::common::{CTP_BLUE, CTP_GREEN, CTP_OVERLAY0, CTP_PRIMARY, CTP_RED, CTP_YELLOW, clear_line};
+use crate::config::{AgentMode, Config, load_agent_prompt, load_agent_safe_prompt, load_sys_prompt};
 use crate::confirmation::style_message_markup;
 use crate::error::LarpshellError;
 use crate::prompt::{
-    DEFAULT_AGENT_PROMPT, DEFAULT_AGENT_SAFE_PROMPT, DEFAULT_PROMPT_TEMPLATE, create_system_prompt,
-    parse_labeled_response, validate_sys_prompt,
+    DEFAULT_AGENT_PROMPT, DEFAULT_AGENT_SAFE_PROMPT, DEFAULT_PROMPT_TEMPLATE, create_system_prompt, parse_labeled_response,
+    validate_sys_prompt,
 };
 use crate::providers::{AIProvider, ChatMessage, ChatResponse, ToolCall};
 use crate::status::StatusLine;
@@ -40,11 +36,7 @@ pub struct FinalResponse {
     pub command: Option<String>,
 }
 
-fn compose_agent_system_prompt(
-    agent_prompt: &str,
-    user_request: &str,
-    system_template: &str,
-) -> String {
+fn compose_agent_system_prompt(agent_prompt: &str, user_request: &str, system_template: &str) -> String {
     let system_prompt = create_system_prompt(user_request, Some(system_template));
     format!("{agent_prompt}\n\n{system_prompt}")
 }
@@ -52,13 +44,10 @@ fn compose_agent_system_prompt(
 fn build_agent_system_prompt(agent_mode: AgentMode, user_request: &str) -> String {
     let agent_prompt = match agent_mode {
         AgentMode::On => load_agent_prompt().unwrap_or_else(|| DEFAULT_AGENT_PROMPT.to_string()),
-        AgentMode::Safe | AgentMode::Off => {
-            load_agent_safe_prompt().unwrap_or_else(|| DEFAULT_AGENT_SAFE_PROMPT.to_string())
-        }
+        AgentMode::Safe | AgentMode::Off => load_agent_safe_prompt().unwrap_or_else(|| DEFAULT_AGENT_SAFE_PROMPT.to_string()),
     };
-    let system_template = load_sys_prompt()
-        .filter(|template| validate_sys_prompt(template))
-        .unwrap_or_else(|| DEFAULT_PROMPT_TEMPLATE.to_string());
+    let system_template =
+        load_sys_prompt().filter(|template| validate_sys_prompt(template)).unwrap_or_else(|| DEFAULT_PROMPT_TEMPLATE.to_string());
 
     compose_agent_system_prompt(&agent_prompt, user_request, &system_template)
 }
@@ -77,15 +66,8 @@ enum Key {
     Eof,
 }
 
-fn string_argument<'a>(
-    arguments: &'a serde_json::Map<String, serde_json::Value>,
-    key: &str,
-    default: &'a str,
-) -> &'a str {
-    arguments
-        .get(key)
-        .and_then(|value| value.as_str())
-        .unwrap_or(default)
+fn string_argument<'a>(arguments: &'a serde_json::Map<String, serde_json::Value>, key: &str, default: &'a str) -> &'a str {
+    arguments.get(key).and_then(|value| value.as_str()).unwrap_or(default)
 }
 
 fn run_command_preview(arguments: &serde_json::Map<String, serde_json::Value>) -> String {
@@ -98,18 +80,11 @@ fn run_command_preview(arguments: &serde_json::Map<String, serde_json::Value>) -
         .filter_map(|value| value.as_str())
         .collect::<Vec<_>>()
         .join(" ");
-    let full_command = if args.is_empty() {
-        command.to_string()
-    } else {
-        format!("{command} {args}")
-    };
+    let full_command = if args.is_empty() { command.to_string() } else { format!("{command} {args}") };
     format!("{} {}", "run".custom_color(CTP_BLUE), full_command.italic())
 }
 
-fn generic_tool_preview(
-    tool_name: &str,
-    arguments: &serde_json::Map<String, serde_json::Value>,
-) -> String {
+fn generic_tool_preview(tool_name: &str, arguments: &serde_json::Map<String, serde_json::Value>) -> String {
     let parts = arguments
         .iter()
         .map(|(key, value)| {
@@ -121,59 +96,28 @@ fn generic_tool_preview(
         })
         .collect::<Vec<_>>();
 
-    if parts.is_empty() {
-        format!("{}", tool_name.bold())
-    } else {
-        format!("{} with {}", tool_name.bold(), parts.join(", "))
-    }
+    if parts.is_empty() { format!("{}", tool_name.bold()) } else { format!("{} with {}", tool_name.bold(), parts.join(", ")) }
 }
 
-fn format_tool_preview(
-    tool_name: &str,
-    arguments: &serde_json::Map<String, serde_json::Value>,
-) -> String {
+fn format_tool_preview(tool_name: &str, arguments: &serde_json::Map<String, serde_json::Value>) -> String {
     match tool_name {
         "run_command" => run_command_preview(arguments),
-        "read_file" => format!(
-            "{} {}",
-            "read".custom_color(CTP_BLUE),
-            string_argument(arguments, "file_path", "").italic()
-        ),
-        "write_file" => format!(
-            "{} {}",
-            "write".custom_color(CTP_BLUE),
-            string_argument(arguments, "file_path", "").italic()
-        ),
-        "edit_file" => format!(
-            "{} {}",
-            "edit".custom_color(CTP_BLUE),
-            string_argument(arguments, "file_path", "").italic()
-        ),
-        "list_files" => format!(
-            "{} in {}",
-            "list files".custom_color(CTP_BLUE),
-            string_argument(arguments, "directory_path", "").italic()
-        ),
+        "read_file" => format!("{} {}", "read".custom_color(CTP_BLUE), string_argument(arguments, "file_path", "").italic()),
+        "write_file" => format!("{} {}", "write".custom_color(CTP_BLUE), string_argument(arguments, "file_path", "").italic()),
+        "edit_file" => format!("{} {}", "edit".custom_color(CTP_BLUE), string_argument(arguments, "file_path", "").italic()),
+        "list_files" => format!("{} in {}", "list files".custom_color(CTP_BLUE), string_argument(arguments, "directory_path", "").italic()),
         "search_files" => format!(
             "{} for {} in {}",
             "search".custom_color(CTP_BLUE),
             string_argument(arguments, "pattern", "").italic(),
             string_argument(arguments, "directory_path", ".").italic()
         ),
-        "fetch_url" => format!(
-            "{} {}",
-            "fetch".custom_color(CTP_BLUE),
-            string_argument(arguments, "url", "").italic()
-        ),
+        "fetch_url" => format!("{} {}", "fetch".custom_color(CTP_BLUE), string_argument(arguments, "url", "").italic()),
         _ => generic_tool_preview(tool_name, arguments),
     }
 }
 
-fn execute_tool_call(
-    tool_registry: &ToolRegistry,
-    tool_call: &ToolCall,
-    verbose_tool_output: bool,
-) -> String {
+fn execute_tool_call(tool_registry: &ToolRegistry, tool_call: &ToolCall, verbose_tool_output: bool) -> String {
     match tool_registry.execute(&tool_call.name, &tool_call.arguments) {
         Ok(output) => {
             render_success_inline(&output, verbose_tool_output);
@@ -192,29 +136,17 @@ const fn denied_tool_result() -> &'static str {
 
 fn initial_agent_messages(user_input: &str, config: &Config) -> Vec<ChatMessage> {
     let system_prompt = build_agent_system_prompt(config.agent, user_input);
-    vec![
-        ChatMessage::system(system_prompt),
-        ChatMessage::user(user_input),
-    ]
+    vec![ChatMessage::system(system_prompt), ChatMessage::user(user_input)]
 }
 
 fn agent_context(
-    user_input: &str,
-    config: &Config,
-    tool_registry: &ToolRegistry,
+    user_input: &str, config: &Config, tool_registry: &ToolRegistry,
 ) -> (Vec<ChatMessage>, Vec<crate::providers::ToolDefinition>) {
-    (
-        initial_agent_messages(user_input, config),
-        tool_registry.definitions(),
-    )
+    (initial_agent_messages(user_input, config), tool_registry.definitions())
 }
 
 fn handle_tool_calls<F>(
-    tool_calls: &[ToolCall],
-    tool_registry: &ToolRegistry,
-    messages: &mut Vec<ChatMessage>,
-    verbose_tool_output: bool,
-    confirm_tool: &mut F,
+    tool_calls: &[ToolCall], tool_registry: &ToolRegistry, messages: &mut Vec<ChatMessage>, verbose_tool_output: bool, confirm_tool: &mut F,
 ) -> Result<(), LarpshellError>
 where
     F: FnMut(&ToolCall) -> ToolConfirmResult,
@@ -230,19 +162,11 @@ where
         match confirm_tool(tool_call) {
             ToolConfirmResult::Allow => {
                 let result_text = execute_tool_call(tool_registry, tool_call, verbose_tool_output);
-                pending_messages.push(ChatMessage::tool_result(
-                    &tool_call.id,
-                    &tool_call.name,
-                    result_text,
-                ));
+                pending_messages.push(ChatMessage::tool_result(&tool_call.id, &tool_call.name, result_text));
             }
             ToolConfirmResult::Deny => {
                 render_denied_inline();
-                pending_messages.push(ChatMessage::tool_result(
-                    &tool_call.id,
-                    &tool_call.name,
-                    denied_tool_result(),
-                ));
+                pending_messages.push(ChatMessage::tool_result(&tool_call.id, &tool_call.name, denied_tool_result()));
             }
             ToolConfirmResult::Cancel => return Err(LarpshellError::Cancelled),
         }
@@ -268,30 +192,16 @@ fn parse_final_response(text: &str) -> FinalResponse {
         }
 
         if let Some(message) = parsed.message {
-            return FinalResponse {
-                kind: FinalResponseKind::Message,
-                content: message.clone(),
-                message: Some(message),
-                command: None,
-            };
+            return FinalResponse { kind: FinalResponseKind::Message, content: message.clone(), message: Some(message), command: None };
         }
     }
 
     let content = crate::prompt::normalize_model_output(trimmed);
-    FinalResponse {
-        kind: FinalResponseKind::Message,
-        message: Some(content.clone()),
-        content,
-        command: None,
-    }
+    FinalResponse { kind: FinalResponseKind::Message, message: Some(content.clone()), content, command: None }
 }
 
 fn handle_agent_response<F>(
-    response: ChatResponse,
-    tool_registry: &ToolRegistry,
-    messages: &mut Vec<ChatMessage>,
-    verbose_tool_output: bool,
-    confirm_tool: &mut F,
+    response: ChatResponse, tool_registry: &ToolRegistry, messages: &mut Vec<ChatMessage>, verbose_tool_output: bool, confirm_tool: &mut F,
 ) -> Result<Option<FinalResponse>, LarpshellError>
 where
     F: FnMut(&ToolCall) -> ToolConfirmResult,
@@ -299,13 +209,7 @@ where
     match response {
         ChatResponse::Message(text) => Ok(Some(parse_final_response(&text))),
         ChatResponse::ToolCalls(tool_calls) => {
-            handle_tool_calls(
-                &tool_calls,
-                tool_registry,
-                messages,
-                verbose_tool_output,
-                confirm_tool,
-            )?;
+            handle_tool_calls(&tool_calls, tool_registry, messages, verbose_tool_output, confirm_tool)?;
             Ok(None)
         }
     }
@@ -316,22 +220,14 @@ fn tool_line_string(tool_call: &ToolCall) -> String {
         let preview = format_tool_preview(&tool_call.name, arguments);
         format!("  {} {}", "tool".custom_color(CTP_OVERLAY0), preview)
     } else {
-        format!(
-            "  {}  {}",
-            "tool".custom_color(CTP_OVERLAY0),
-            tool_call.name.custom_color(CTP_BLUE).bold()
-        )
+        format!("  {}  {}", "tool".custom_color(CTP_OVERLAY0), tool_call.name.custom_color(CTP_BLUE).bold())
     }
 }
 
 fn success_summary_string(output: &str) -> String {
     let line_count = output.lines().count();
     let line_word = if line_count == 1 { "line" } else { "lines" };
-    format!(
-        "  {} {}",
-        "result".custom_color(CTP_OVERLAY0),
-        format!("({line_count} {line_word})").custom_color(CTP_GREEN),
-    )
+    format!("  {} {}", "result".custom_color(CTP_OVERLAY0), format!("({line_count} {line_word})").custom_color(CTP_GREEN),)
 }
 
 fn expanded_output_line_string(line: &str, is_first: bool) -> String {
@@ -340,39 +236,20 @@ fn expanded_output_line_string(line: &str, is_first: bool) -> String {
     // (so it can't override the dim styling) and print it verbatim — running it
     // through the markdown styler mangled underscores in paths, `*` globs, etc.
     let clean = String::from_utf8_lossy(&strip_ansi_escapes::strip(line.as_bytes())).into_owned();
-    format!(
-        "{}{}",
-        prefix.custom_color(CTP_OVERLAY0),
-        clean.custom_color(CTP_OVERLAY0)
-    )
+    format!("{}{}", prefix.custom_color(CTP_OVERLAY0), clean.custom_color(CTP_OVERLAY0))
 }
 
 fn error_line_string(msg: &str) -> String {
-    format!(
-        "  {} {}",
-        "error".custom_color(CTP_OVERLAY0),
-        style_message_markup(msg).custom_color(CTP_RED)
-    )
+    format!("  {} {}", "error".custom_color(CTP_OVERLAY0), style_message_markup(msg).custom_color(CTP_RED))
 }
 
 fn tip_line_string(msg: &str) -> Option<String> {
-    command_not_allowed_tip(msg).map(|tip| {
-        format!(
-            "  {} {}",
-            "tip:".custom_color(CTP_OVERLAY0).italic(),
-            style_message_markup(&tip)
-        )
-    })
+    command_not_allowed_tip(msg).map(|tip| format!("  {} {}", "tip:".custom_color(CTP_OVERLAY0).italic(), style_message_markup(&tip)))
 }
 
 fn more_lines_indicator(hidden: usize) -> String {
     let word = if hidden == 1 { "line" } else { "lines" };
-    format!(
-        "    {}",
-        format!("... {hidden} more {word}")
-            .custom_color(CTP_OVERLAY0)
-            .italic()
-    )
+    format!("    {}", format!("... {hidden} more {word}").custom_color(CTP_OVERLAY0).italic())
 }
 
 fn render_success_inline(output: &str, verbose_tool_output: bool) {
@@ -475,17 +352,11 @@ fn read_byte(reader: &mut impl std::io::Read) -> Key {
 }
 
 fn command_not_allowed_tip(error: &str) -> Option<String> {
-    error
-        .starts_with("command not allowed:")
-        .then(|| "run **/agent on** to enable all commands".to_string())
+    error.starts_with("command not allowed:").then(|| "run **/agent on** to enable all commands".to_string())
 }
 
 async fn run_agent_loop_with_confirm<F>(
-    user_input: &str,
-    provider: &dyn AIProvider,
-    config: &Config,
-    tool_registry: &ToolRegistry,
-    mut confirm_tool: F,
+    user_input: &str, provider: &dyn AIProvider, config: &Config, tool_registry: &ToolRegistry, mut confirm_tool: F,
 ) -> Result<FinalResponse, LarpshellError>
 where
     F: FnMut(&ToolCall) -> ToolConfirmResult,
@@ -494,27 +365,15 @@ where
     let (mut messages, tool_definitions) = agent_context(user_input, config, tool_registry);
 
     for iteration in 0..MAX_AGENT_ITERATIONS {
-        let label = if iteration == 0 {
-            format!("agent · {model}")
-        } else {
-            "thinking".to_string()
-        };
+        let label = if iteration == 0 { format!("agent · {model}") } else { "thinking".to_string() };
         let status = StatusLine::start(&label);
 
-        let response = provider
-            .generate_with_tools(&messages, &tool_definitions)
-            .await;
+        let response = provider.generate_with_tools(&messages, &tool_definitions).await;
         status.finish();
 
         let response = response?;
 
-        if let Some(text) = handle_agent_response(
-            response,
-            tool_registry,
-            &mut messages,
-            config.verbose_tool_output,
-            &mut confirm_tool,
-        )? {
+        if let Some(text) = handle_agent_response(response, tool_registry, &mut messages, config.verbose_tool_output, &mut confirm_tool)? {
             return Ok(text);
         }
     }
@@ -523,23 +382,15 @@ where
 }
 
 pub async fn run_agent_loop(
-    user_input: &str,
-    provider: &dyn AIProvider,
-    config: &Config,
-    tool_registry: &ToolRegistry,
+    user_input: &str, provider: &dyn AIProvider, config: &Config, tool_registry: &ToolRegistry,
 ) -> Result<FinalResponse, LarpshellError> {
-    run_agent_loop_with_confirm(user_input, provider, config, tool_registry, |_| {
-        confirm_tool_call()
-    })
-    .await
+    run_agent_loop_with_confirm(user_input, provider, config, tool_registry, |_| confirm_tool_call()).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{
-        ActiveProvider, Config, MultiProviderConfig, OllamaConfig, ProviderSpecificConfig,
-    };
+    use crate::config::{ActiveProvider, Config, MultiProviderConfig, OllamaConfig, ProviderSpecificConfig};
     use crate::providers::{ChatResponse, Role, ToolDefinition};
     use async_trait::async_trait;
     use std::collections::VecDeque;
@@ -553,10 +404,7 @@ mod tests {
 
     impl MockProvider {
         fn new(responses: Vec<ChatResponse>) -> Self {
-            Self {
-                responses: Mutex::new(responses.into()),
-                captured_messages: Mutex::new(Vec::new()),
-            }
+            Self { responses: Mutex::new(responses.into()), captured_messages: Mutex::new(Vec::new()) }
         }
     }
 
@@ -566,20 +414,9 @@ mod tests {
             unreachable!("generate should not be called")
         }
 
-        async fn generate_with_tools(
-            &self,
-            messages: &[ChatMessage],
-            _tools: &[ToolDefinition],
-        ) -> Result<ChatResponse, LarpshellError> {
-            self.captured_messages
-                .lock()
-                .unwrap()
-                .push(messages.to_vec());
-            self.responses
-                .lock()
-                .unwrap()
-                .pop_front()
-                .ok_or_else(|| LarpshellError::InvalidResponse("missing mock response".to_string()))
+        async fn generate_with_tools(&self, messages: &[ChatMessage], _tools: &[ToolDefinition]) -> Result<ChatResponse, LarpshellError> {
+            self.captured_messages.lock().unwrap().push(messages.to_vec());
+            self.responses.lock().unwrap().pop_front().ok_or_else(|| LarpshellError::InvalidResponse("missing mock response".to_string()))
         }
 
         fn name(&self) -> String {
@@ -591,10 +428,7 @@ mod tests {
         Config {
             active_provider: ActiveProvider::Ollama,
             providers: MultiProviderConfig {
-                ollama: Some(OllamaConfig {
-                    base_url: "http://localhost:11434".to_string(),
-                    model: "llama3".to_string(),
-                }),
+                ollama: Some(OllamaConfig { base_url: "http://localhost:11434".to_string(), model: "llama3".to_string() }),
                 ..Default::default()
             },
             agent: AgentMode::Safe,
@@ -605,10 +439,8 @@ mod tests {
     fn make_test_directory(name: &str) -> std::path::PathBuf {
         static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-        let path = std::env::temp_dir().join(format!(
-            "larpshell_agent_{name}_{}",
-            NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-        ));
+        let path =
+            std::env::temp_dir().join(format!("larpshell_agent_{name}_{}", NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
         let _ = fs::remove_dir_all(&path);
         fs::create_dir_all(&path).unwrap();
         path
@@ -616,32 +448,20 @@ mod tests {
 
     #[test]
     fn build_agent_system_prompt_prepends_agent_prompt_to_system_prompt() {
-        let prompt = compose_agent_system_prompt(
-            DEFAULT_AGENT_SAFE_PROMPT,
-            "list the rust files",
-            DEFAULT_PROMPT_TEMPLATE,
-        );
-        let expected_system_prompt =
-            create_system_prompt("list the rust files", Some(DEFAULT_PROMPT_TEMPLATE));
+        let prompt = compose_agent_system_prompt(DEFAULT_AGENT_SAFE_PROMPT, "list the rust files", DEFAULT_PROMPT_TEMPLATE);
+        let expected_system_prompt = create_system_prompt("list the rust files", Some(DEFAULT_PROMPT_TEMPLATE));
 
         assert!(prompt.contains("User request: list the rust files"));
         assert!(prompt.contains("Current dir:"));
         assert!(prompt.contains("Shell:"));
         assert!(prompt.contains("safe, read-only tools"));
         assert!(prompt.contains("You are a shell command translator."));
-        assert_eq!(
-            prompt,
-            format!("{DEFAULT_AGENT_SAFE_PROMPT}\n\n{expected_system_prompt}")
-        );
+        assert_eq!(prompt, format!("{DEFAULT_AGENT_SAFE_PROMPT}\n\n{expected_system_prompt}"));
     }
 
     #[test]
     fn build_agent_system_prompt_for_on_mentions_iterative_probing() {
-        let prompt = compose_agent_system_prompt(
-            DEFAULT_AGENT_PROMPT,
-            "inspect the environment",
-            DEFAULT_PROMPT_TEMPLATE,
-        );
+        let prompt = compose_agent_system_prompt(DEFAULT_AGENT_PROMPT, "inspect the environment", DEFAULT_PROMPT_TEMPLATE);
 
         assert!(prompt.contains("interacting with the user's machine"));
         assert!(prompt.contains("Multi-step probing"));
@@ -650,11 +470,7 @@ mod tests {
 
     #[test]
     fn build_agent_system_prompt_for_safe_is_conservative() {
-        let prompt = compose_agent_system_prompt(
-            DEFAULT_AGENT_SAFE_PROMPT,
-            "inspect the environment",
-            DEFAULT_PROMPT_TEMPLATE,
-        );
+        let prompt = compose_agent_system_prompt(DEFAULT_AGENT_SAFE_PROMPT, "inspect the environment", DEFAULT_PROMPT_TEMPLATE);
 
         assert!(prompt.contains("safe, read-only tools"));
         assert!(!prompt.contains("use the run_command tool"));
@@ -662,19 +478,12 @@ mod tests {
 
     #[tokio::test]
     async fn run_agent_loop_returns_command_without_tool_calls() {
-        let provider =
-            MockProvider::new(vec![ChatResponse::Message("COMMAND: ls -la".to_string())]);
+        let provider = MockProvider::new(vec![ChatResponse::Message("COMMAND: ls -la".to_string())]);
         let tool_registry = ToolRegistry::with_builtins(AgentMode::Safe);
 
-        let response = run_agent_loop_with_confirm(
-            "list files",
-            &provider,
-            &test_config(),
-            &tool_registry,
-            |_| ToolConfirmResult::Allow,
-        )
-        .await
-        .unwrap();
+        let response = run_agent_loop_with_confirm("list files", &provider, &test_config(), &tool_registry, |_| ToolConfirmResult::Allow)
+            .await
+            .unwrap();
 
         assert_eq!(
             response,
@@ -689,20 +498,11 @@ mod tests {
 
     #[tokio::test]
     async fn run_agent_loop_returns_message_without_tool_calls() {
-        let provider = MockProvider::new(vec![ChatResponse::Message(
-            "MESSAGE: no command needed".to_string(),
-        )]);
+        let provider = MockProvider::new(vec![ChatResponse::Message("MESSAGE: no command needed".to_string())]);
         let tool_registry = ToolRegistry::with_builtins(AgentMode::Safe);
 
-        let response = run_agent_loop_with_confirm(
-            "say hi",
-            &provider,
-            &test_config(),
-            &tool_registry,
-            |_| ToolConfirmResult::Allow,
-        )
-        .await
-        .unwrap();
+        let response =
+            run_agent_loop_with_confirm("say hi", &provider, &test_config(), &tool_registry, |_| ToolConfirmResult::Allow).await.unwrap();
 
         assert_eq!(
             response,
@@ -718,20 +518,14 @@ mod tests {
     #[tokio::test]
     async fn run_agent_loop_returns_message_and_command_from_single_response() {
         let provider = MockProvider::new(vec![ChatResponse::Message(
-            "MESSAGE: package needed by:\nlarpshell\nCOMMAND: sudo pacman -S webkit2gtk-4.1"
-                .to_string(),
+            "MESSAGE: package needed by:\nlarpshell\nCOMMAND: sudo pacman -S webkit2gtk-4.1".to_string(),
         )]);
         let tool_registry = ToolRegistry::with_builtins(AgentMode::Safe);
 
-        let response = run_agent_loop_with_confirm(
-            "install package",
-            &provider,
-            &test_config(),
-            &tool_registry,
-            |_| ToolConfirmResult::Allow,
-        )
-        .await
-        .unwrap();
+        let response =
+            run_agent_loop_with_confirm("install package", &provider, &test_config(), &tool_registry, |_| ToolConfirmResult::Allow)
+                .await
+                .unwrap();
 
         assert_eq!(
             response,
@@ -746,20 +540,12 @@ mod tests {
 
     #[tokio::test]
     async fn run_agent_loop_preserves_multiline_command_payload() {
-        let provider = MockProvider::new(vec![ChatResponse::Message(
-            "COMMAND: echo one\necho two".to_string(),
-        )]);
+        let provider = MockProvider::new(vec![ChatResponse::Message("COMMAND: echo one\necho two".to_string())]);
         let tool_registry = ToolRegistry::with_builtins(AgentMode::Safe);
 
-        let response = run_agent_loop_with_confirm(
-            "echo twice",
-            &provider,
-            &test_config(),
-            &tool_registry,
-            |_| ToolConfirmResult::Allow,
-        )
-        .await
-        .unwrap();
+        let response = run_agent_loop_with_confirm("echo twice", &provider, &test_config(), &tool_registry, |_| ToolConfirmResult::Allow)
+            .await
+            .unwrap();
 
         assert_eq!(
             response,
@@ -774,20 +560,13 @@ mod tests {
 
     #[tokio::test]
     async fn run_agent_loop_preserves_multiline_message_payload() {
-        let provider = MockProvider::new(vec![ChatResponse::Message(
-            "MESSAGE: first line\nsecond line".to_string(),
-        )]);
+        let provider = MockProvider::new(vec![ChatResponse::Message("MESSAGE: first line\nsecond line".to_string())]);
         let tool_registry = ToolRegistry::with_builtins(AgentMode::Safe);
 
-        let response = run_agent_loop_with_confirm(
-            "describe thing",
-            &provider,
-            &test_config(),
-            &tool_registry,
-            |_| ToolConfirmResult::Allow,
-        )
-        .await
-        .unwrap();
+        let response =
+            run_agent_loop_with_confirm("describe thing", &provider, &test_config(), &tool_registry, |_| ToolConfirmResult::Allow)
+                .await
+                .unwrap();
 
         assert_eq!(
             response,
@@ -818,15 +597,10 @@ mod tests {
         ]);
         let tool_registry = ToolRegistry::with_builtins(AgentMode::Safe);
 
-        let response = run_agent_loop_with_confirm(
-            "show me the file",
-            &provider,
-            &test_config(),
-            &tool_registry,
-            |_| ToolConfirmResult::Allow,
-        )
-        .await
-        .unwrap();
+        let response =
+            run_agent_loop_with_confirm("show me the file", &provider, &test_config(), &tool_registry, |_| ToolConfirmResult::Allow)
+                .await
+                .unwrap();
 
         assert_eq!(
             response,
@@ -840,16 +614,8 @@ mod tests {
 
         let captured_messages = provider.captured_messages.lock().unwrap();
         assert_eq!(captured_messages.len(), 2);
-        assert!(
-            captured_messages[1]
-                .iter()
-                .any(|message| message.role == Role::Assistant && message.tool_calls.is_some())
-        );
-        assert!(
-            captured_messages[1]
-                .iter()
-                .any(|message| message.role == Role::Tool && message.content.is_some())
-        );
+        assert!(captured_messages[1].iter().any(|message| message.role == Role::Assistant && message.tool_calls.is_some()));
+        assert!(captured_messages[1].iter().any(|message| message.role == Role::Tool && message.content.is_some()));
     }
 
     #[tokio::test]
@@ -860,37 +626,21 @@ mod tests {
             arguments: serde_json::json!({ "pattern": "main" }),
             thought_signature: None,
         };
-        let responses = std::iter::repeat_n(
-            ChatResponse::ToolCalls(vec![tool_call]),
-            MAX_AGENT_ITERATIONS,
-        )
-        .collect();
+        let responses = std::iter::repeat_n(ChatResponse::ToolCalls(vec![tool_call]), MAX_AGENT_ITERATIONS).collect();
         let provider = MockProvider::new(responses);
         let tool_registry = ToolRegistry::with_builtins(AgentMode::Safe);
 
-        let error = run_agent_loop_with_confirm(
-            "find main",
-            &provider,
-            &test_config(),
-            &tool_registry,
-            |_| ToolConfirmResult::Deny,
-        )
-        .await
-        .unwrap_err();
+        let error = run_agent_loop_with_confirm("find main", &provider, &test_config(), &tool_registry, |_| ToolConfirmResult::Deny)
+            .await
+            .unwrap_err();
 
-        assert!(matches!(
-            error,
-            LarpshellError::AgentMaxIterations(MAX_AGENT_ITERATIONS)
-        ));
+        assert!(matches!(error, LarpshellError::AgentMaxIterations(MAX_AGENT_ITERATIONS)));
     }
 
     #[test]
     fn test_config_uses_ollama_provider() {
         let provider_config = test_config().provider_config().unwrap();
-        assert!(matches!(
-            provider_config.config,
-            ProviderSpecificConfig::Ollama { .. }
-        ));
+        assert!(matches!(provider_config.config, ProviderSpecificConfig::Ollama { .. }));
     }
 
     #[test]
@@ -1038,17 +788,10 @@ mod tests {
         ];
         let tool_registry = ToolRegistry::with_builtins(AgentMode::Safe);
         let mut messages = vec![ChatMessage::user("show me files")];
-        let mut confirmations =
-            vec![ToolConfirmResult::Allow, ToolConfirmResult::Cancel].into_iter();
+        let mut confirmations = vec![ToolConfirmResult::Allow, ToolConfirmResult::Cancel].into_iter();
 
-        let error = handle_tool_calls(
-            &tool_calls,
-            &tool_registry,
-            &mut messages,
-            true,
-            &mut |_| confirmations.next().unwrap(),
-        )
-        .unwrap_err();
+        let error =
+            handle_tool_calls(&tool_calls, &tool_registry, &mut messages, true, &mut |_| confirmations.next().unwrap()).unwrap_err();
 
         assert!(matches!(error, LarpshellError::Cancelled));
         assert_eq!(messages, vec![ChatMessage::user("show me files")]);

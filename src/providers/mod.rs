@@ -47,30 +47,14 @@ pub struct ChatMessage {
 
 impl ChatMessage {
     pub fn user(content: impl Into<String>) -> Self {
-        Self {
-            role: Role::User,
-            content: Some(content.into()),
-            tool_calls: None,
-            tool_call_id: None,
-            tool_call_name: None,
-        }
+        Self { role: Role::User, content: Some(content.into()), tool_calls: None, tool_call_id: None, tool_call_name: None }
     }
 
     pub fn system(content: impl Into<String>) -> Self {
-        Self {
-            role: Role::System,
-            content: Some(content.into()),
-            tool_calls: None,
-            tool_call_id: None,
-            tool_call_name: None,
-        }
+        Self { role: Role::System, content: Some(content.into()), tool_calls: None, tool_call_id: None, tool_call_name: None }
     }
 
-    pub fn tool_result(
-        tool_call_id: impl Into<String>,
-        tool_call_name: impl Into<String>,
-        content: impl Into<String>,
-    ) -> Self {
+    pub fn tool_result(tool_call_id: impl Into<String>, tool_call_name: impl Into<String>, content: impl Into<String>) -> Self {
         Self {
             role: Role::Tool,
             content: Some(content.into()),
@@ -81,13 +65,7 @@ impl ChatMessage {
     }
 
     pub fn assistant_tool_calls(tool_calls: Vec<ToolCall>) -> Self {
-        Self {
-            role: Role::Assistant,
-            content: None,
-            tool_calls: Some(tool_calls),
-            tool_call_id: None,
-            tool_call_name: None,
-        }
+        Self { role: Role::Assistant, content: None, tool_calls: Some(tool_calls), tool_call_id: None, tool_call_name: None }
     }
 }
 
@@ -130,11 +108,7 @@ pub trait AIProvider: Send + Sync {
     ///
     /// Providers that support multi-turn tool use should override this method to preserve
     /// conversation state and pass tools to their LLM API.
-    async fn generate_with_tools(
-        &self,
-        messages: &[ChatMessage],
-        _tools: &[ToolDefinition],
-    ) -> Result<ChatResponse, LarpshellError> {
+    async fn generate_with_tools(&self, messages: &[ChatMessage], _tools: &[ToolDefinition]) -> Result<ChatResponse, LarpshellError> {
         let prompt = messages
             .iter()
             .filter(|message| message.role == Role::User || message.role == Role::System)
@@ -149,18 +123,10 @@ pub trait AIProvider: Send + Sync {
 pub fn create_provider(config: &Config) -> Result<Box<dyn AIProvider>, LarpshellError> {
     let provider = config.provider_config()?;
     match &provider.config {
-        ProviderSpecificConfig::Gemini { gemini } => {
-            Ok(Box::new(gemini::GeminiProvider::new(gemini)?))
-        }
-        ProviderSpecificConfig::Ollama { ollama } => {
-            Ok(Box::new(ollama::OllamaProvider::new(ollama)?))
-        }
-        ProviderSpecificConfig::OpenRouter { openrouter } => Ok(Box::new(
-            openai::OpenAICompatibleProvider::openrouter(openrouter)?,
-        )),
-        ProviderSpecificConfig::OpenAI { openai } => {
-            Ok(Box::new(openai::OpenAICompatibleProvider::openai(openai)?))
-        }
+        ProviderSpecificConfig::Gemini { gemini } => Ok(Box::new(gemini::GeminiProvider::new(gemini)?)),
+        ProviderSpecificConfig::Ollama { ollama } => Ok(Box::new(ollama::OllamaProvider::new(ollama)?)),
+        ProviderSpecificConfig::OpenRouter { openrouter } => Ok(Box::new(openai::OpenAICompatibleProvider::openrouter(openrouter)?)),
+        ProviderSpecificConfig::OpenAI { openai } => Ok(Box::new(openai::OpenAICompatibleProvider::openai(openai)?)),
     }
 }
 
@@ -305,12 +271,8 @@ mod tests {
 
     #[test]
     fn chat_response_tool_calls_variant_contains_calls() {
-        let tool_calls = vec![ToolCall {
-            id: String::from("call-1"),
-            name: String::from("search"),
-            arguments: json!({}),
-            thought_signature: None,
-        }];
+        let tool_calls =
+            vec![ToolCall { id: String::from("call-1"), name: String::from("search"), arguments: json!({}), thought_signature: None }];
         let response = ChatResponse::ToolCalls(tool_calls.clone());
 
         assert_eq!(response, ChatResponse::ToolCalls(tool_calls));

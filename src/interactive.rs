@@ -13,16 +13,13 @@ use rustyline::hint::Hinter;
 use rustyline::history::DefaultHistory;
 use rustyline::validate::Validator;
 use rustyline::{
-    Cmd, CompletionType, ConditionalEventHandler, Config, Editor, Event, EventContext,
-    EventHandler, Helper, KeyCode, KeyEvent, Modifiers, RepeatCount,
+    Cmd, CompletionType, ConditionalEventHandler, Config, Editor, Event, EventContext, EventHandler, Helper, KeyCode, KeyEvent, Modifiers,
+    RepeatCount,
 };
 
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use crate::common::{
-    CTP_BLUE, CTP_OVERLAY0, CTP_PRIMARY, CTP_TEXT, current_directory_display, show_cursor,
-    terminal_width,
-};
+use crate::common::{CTP_BLUE, CTP_OVERLAY0, CTP_PRIMARY, CTP_TEXT, current_directory_display, show_cursor, terminal_width};
 use crate::config;
 use crate::slash_commands;
 
@@ -33,13 +30,7 @@ static SHELL_MODE: AtomicBool = AtomicBool::new(false);
 // "uninstall" = 9 chars. Column = 2 (indent) + 1 (/) + 9 (name) + 4 (gap) = 16
 const PREVIEW_DESC_COL: usize = 16;
 
-pub fn format_preview_row(
-    cmd_name: &str,
-    typed_len: usize,
-    description: &str,
-    max_width: usize,
-    selected: bool,
-) -> String {
+pub fn format_preview_row(cmd_name: &str, typed_len: usize, description: &str, max_width: usize, selected: bool) -> String {
     // Indent is always 2 display columns, whether or not a row is selected.
     const INDENT_COLS: usize = 2;
     let split = typed_len.min(cmd_name.len());
@@ -166,12 +157,7 @@ pub(crate) fn preview_items(source: &str) -> Vec<PreviewItem> {
         .iter()
         .map(|cmd| {
             let name = format!("/{}", cmd.name);
-            PreviewItem {
-                description: cmd.description,
-                typed_len: source.len(),
-                replacement: name.clone(),
-                name,
-            }
+            PreviewItem { description: cmd.description, typed_len: source.len(), replacement: name.clone(), name }
         })
         .collect()
 }
@@ -179,23 +165,12 @@ pub(crate) fn preview_items(source: &str) -> Vec<PreviewItem> {
 /// Builds the escape sequence for a from-scratch preview redraw: `max_lines`
 /// rows are each erased (returning to column 0 first, for the same reason as
 /// `clear_preview_sequence`) and, for rows with an item, redrawn.
-pub(crate) fn render_preview_sequence(
-    items: &[PreviewItem],
-    selected: Option<usize>,
-    max_lines: usize,
-    width: usize,
-) -> String {
+pub(crate) fn render_preview_sequence(items: &[PreviewItem], selected: Option<usize>, max_lines: usize, width: usize) -> String {
     let mut seq = String::new();
     for i in 0..max_lines {
         seq.push_str("\n\r\x1b[K");
         if let Some(item) = items.get(i) {
-            seq.push_str(&format_preview_row(
-                &item.name,
-                item.typed_len,
-                item.description,
-                width,
-                selected == Some(i),
-            ));
+            seq.push_str(&format_preview_row(&item.name, item.typed_len, item.description, width, selected == Some(i)));
         }
     }
     // Return cursor to the prompt line.
@@ -247,9 +222,7 @@ struct CycleState {
 static CYCLE: Mutex<Option<CycleState>> = Mutex::new(None);
 
 fn cycle_lock() -> std::sync::MutexGuard<'static, Option<CycleState>> {
-    CYCLE
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+    CYCLE.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 fn reset_cycle() {
@@ -288,10 +261,7 @@ pub(crate) fn cycle_slash_preview(line: &str, forward: bool) -> Option<Cmd> {
         return None;
     }
     let index = next_cycle_index(guard.as_ref().map(|c| c.index), items.len(), forward);
-    *guard = Some(CycleState {
-        base: line.to_string(),
-        index,
-    });
+    *guard = Some(CycleState { base: line.to_string(), index });
     Some(Cmd::Repaint)
 }
 
@@ -299,10 +269,7 @@ pub(crate) fn cycle_slash_preview(line: &str, forward: bool) -> Option<Cmd> {
 fn selected_replacement() -> Option<String> {
     let guard = cycle_lock();
     let c = guard.as_ref()?;
-    preview_items(&c.base)
-        .into_iter()
-        .nth(c.index)
-        .map(|i| i.replacement)
+    preview_items(&c.base).into_iter().nth(c.index).map(|i| i.replacement)
 }
 
 /// Ghost suffix to show after the cursor: the selected completion with the
@@ -321,24 +288,14 @@ impl Helper for NlshHelper {}
 impl Completer for NlshHelper {
     type Candidate = Pair;
 
-    fn complete(
-        &self,
-        line: &str,
-        _pos: usize,
-        _ctx: &rustyline::Context<'_>,
-    ) -> rustyline::Result<(usize, Vec<Pair>)> {
+    fn complete(&self, line: &str, _pos: usize, _ctx: &rustyline::Context<'_>) -> rustyline::Result<(usize, Vec<Pair>)> {
         if !line.starts_with('/') {
             return Ok((0, vec![]));
         }
         if line.contains(' ') {
             if let Some((start, choices)) = slash_commands::arg_completions(line) {
-                let candidates = choices
-                    .iter()
-                    .map(|c| Pair {
-                        display: c.value.to_string(),
-                        replacement: format!("{} ", c.value),
-                    })
-                    .collect();
+                let candidates =
+                    choices.iter().map(|c| Pair { display: c.value.to_string(), replacement: format!("{} ", c.value) }).collect();
                 return Ok((start, candidates));
             }
             return Ok((0, vec![]));
@@ -348,10 +305,7 @@ impl Completer for NlshHelper {
             .iter()
             .map(|cmd| {
                 let name = format!("/{}", cmd.name);
-                Pair {
-                    display: name.clone(),
-                    replacement: format!("{name} "),
-                }
+                Pair { display: name.clone(), replacement: format!("{name} ") }
             })
             .collect();
         Ok((0, candidates))
@@ -375,11 +329,7 @@ impl Hinter for NlshHelper {
 impl Validator for NlshHelper {}
 
 impl Highlighter for NlshHelper {
-    fn highlight_prompt<'b, 's: 'b, 'p: 'b>(
-        &'s self,
-        prompt: &'p str,
-        _default: bool,
-    ) -> Cow<'b, str> {
+    fn highlight_prompt<'b, 's: 'b, 'p: 'b>(&'s self, prompt: &'p str, _default: bool) -> Cow<'b, str> {
         if !SHELL_MODE.load(Ordering::Relaxed) {
             return Cow::Borrowed(prompt);
         }
@@ -429,13 +379,7 @@ impl Highlighter for NlshHelper {
 struct SlashPreviewHandler;
 
 impl ConditionalEventHandler for SlashPreviewHandler {
-    fn handle(
-        &self,
-        evt: &Event,
-        _n: RepeatCount,
-        _positive: bool,
-        ctx: &EventContext<'_>,
-    ) -> Option<Cmd> {
+    fn handle(&self, evt: &Event, _n: RepeatCount, _positive: bool, ctx: &EventContext<'_>) -> Option<Cmd> {
         let line = ctx.line();
         let pos = ctx.pos();
 
@@ -465,8 +409,7 @@ impl ConditionalEventHandler for SlashPreviewHandler {
                         return Some(cmd);
                     }
                 }
-                Some(KeyEvent(KeyCode::Up, Modifiers::NONE))
-                | Some(KeyEvent(KeyCode::BackTab, _)) => {
+                Some(KeyEvent(KeyCode::Up, Modifiers::NONE)) | Some(KeyEvent(KeyCode::BackTab, _)) => {
                     if let Some(cmd) = cycle_slash_preview(line, false) {
                         return Some(cmd);
                     }
@@ -519,21 +462,13 @@ where
 {
     SHELL_MODE.store(false, Ordering::Relaxed);
     reset_cycle();
-    let mut editor_lock = EDITOR
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut editor_lock = EDITOR.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     if editor_lock.is_none() {
-        let mut editor = Editor::<NlshHelper, DefaultHistory>::with_config(
-            Config::builder()
-                .completion_type(CompletionType::Circular)
-                .build(),
-        )
-        .map_err(io::Error::other)?;
+        let mut editor =
+            Editor::<NlshHelper, DefaultHistory>::with_config(Config::builder().completion_type(CompletionType::Circular).build())
+                .map_err(io::Error::other)?;
         editor.set_helper(Some(NlshHelper));
-        editor.bind_sequence(
-            Event::Any,
-            EventHandler::Conditional(Box::new(SlashPreviewHandler)),
-        );
+        editor.bind_sequence(Event::Any, EventHandler::Conditional(Box::new(SlashPreviewHandler)));
         // Load unconditionally: a session that starts with history-saving
         // disabled must still see prior entries, otherwise flipping it on
         // mid-session (`/history on`) and saving would overwrite the file
@@ -548,12 +483,7 @@ where
         return Err(io::Error::other("failed to initialize rustyline editor"));
     };
     let cwd = current_directory_display();
-    let prompt = format!(
-        "{}:{}{} ",
-        "larpshell".custom_color(CTP_PRIMARY),
-        cwd.custom_color(CTP_OVERLAY0),
-        "❯".custom_color(CTP_BLUE)
-    );
+    let prompt = format!("{}:{}{} ", "larpshell".custom_color(CTP_PRIMARY), cwd.custom_color(CTP_OVERLAY0), "❯".custom_color(CTP_BLUE));
     match readline_fn(editor, &prompt) {
         Ok(line) => {
             clear_slash_preview();

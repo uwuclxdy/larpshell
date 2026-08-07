@@ -1,7 +1,7 @@
 use crate::common::{current_directory, home_dir, os_name, shell_name, username};
 use crate::config::{
-    agent_prompt_path, agent_safe_prompt_path, explain_prompt_path, save_agent_prompt,
-    save_agent_safe_prompt, save_explain_prompt, save_sys_prompt, sys_prompt_path,
+    agent_prompt_path, agent_safe_prompt_path, explain_prompt_path, save_agent_prompt, save_agent_safe_prompt, save_explain_prompt,
+    save_sys_prompt, sys_prompt_path,
 };
 use crate::error::LarpshellError;
 
@@ -67,12 +67,7 @@ pub struct ParsedLabeledResponse {
     pub has_labels: bool,
 }
 
-fn flush_current(
-    label: Option<&str>,
-    lines: &mut Vec<&str>,
-    message_parts: &mut Vec<String>,
-    command_parts: &mut Vec<String>,
-) {
+fn flush_current(label: Option<&str>, lines: &mut Vec<&str>, message_parts: &mut Vec<String>, command_parts: &mut Vec<String>) {
     if let Some(label) = label {
         let block = lines.join("\n").trim().to_string();
         if !block.is_empty() {
@@ -99,19 +94,12 @@ pub fn parse_labeled_response(text: &str) -> ParsedLabeledResponse {
         let next_label = if let Some(rest) = trimmed.strip_prefix("MESSAGE:") {
             Some(("MESSAGE:", rest.trim()))
         } else {
-            trimmed
-                .strip_prefix("COMMAND:")
-                .map(|rest| ("COMMAND:", rest.trim()))
+            trimmed.strip_prefix("COMMAND:").map(|rest| ("COMMAND:", rest.trim()))
         };
 
         if let Some((label, first_line)) = next_label {
             has_labels = true;
-            flush_current(
-                current_label,
-                &mut current_lines,
-                &mut message_parts,
-                &mut command_parts,
-            );
+            flush_current(current_label, &mut current_lines, &mut message_parts, &mut command_parts);
             current_label = Some(label);
             current_lines.push(first_line);
             continue;
@@ -122,21 +110,12 @@ pub fn parse_labeled_response(text: &str) -> ParsedLabeledResponse {
         }
     }
 
-    flush_current(
-        current_label,
-        &mut current_lines,
-        &mut message_parts,
-        &mut command_parts,
-    );
+    flush_current(current_label, &mut current_lines, &mut message_parts, &mut command_parts);
 
     let message = (!message_parts.is_empty()).then(|| message_parts.join("\n"));
     let command = (!command_parts.is_empty()).then(|| command_parts.join("\n"));
 
-    ParsedLabeledResponse {
-        message,
-        command,
-        has_labels,
-    }
+    ParsedLabeledResponse { message, command, has_labels }
 }
 
 pub fn normalize_model_output(text: &str) -> String {
@@ -167,9 +146,7 @@ pub fn clean_explanation(response: &str, command: &str) -> String {
 }
 
 fn init_prompt_file(
-    path_result: Result<std::path::PathBuf, LarpshellError>,
-    default: &str,
-    save: fn(&str) -> Result<(), LarpshellError>,
+    path_result: Result<std::path::PathBuf, LarpshellError>, default: &str, save: fn(&str) -> Result<(), LarpshellError>,
 ) -> Result<(), LarpshellError> {
     let path = path_result?;
     if !path.exists() {
@@ -180,26 +157,10 @@ fn init_prompt_file(
 
 pub fn create_prompts() -> Result<(), LarpshellError> {
     let prompts = [
-        (
-            sys_prompt_path(),
-            DEFAULT_PROMPT_TEMPLATE,
-            save_sys_prompt as fn(&str) -> Result<(), LarpshellError>,
-        ),
-        (
-            explain_prompt_path(),
-            DEFAULT_EXPLAIN_PROMPT,
-            save_explain_prompt as fn(&str) -> Result<(), LarpshellError>,
-        ),
-        (
-            agent_prompt_path(),
-            DEFAULT_AGENT_PROMPT,
-            save_agent_prompt as fn(&str) -> Result<(), LarpshellError>,
-        ),
-        (
-            agent_safe_prompt_path(),
-            DEFAULT_AGENT_SAFE_PROMPT,
-            save_agent_safe_prompt as fn(&str) -> Result<(), LarpshellError>,
-        ),
+        (sys_prompt_path(), DEFAULT_PROMPT_TEMPLATE, save_sys_prompt as fn(&str) -> Result<(), LarpshellError>),
+        (explain_prompt_path(), DEFAULT_EXPLAIN_PROMPT, save_explain_prompt as fn(&str) -> Result<(), LarpshellError>),
+        (agent_prompt_path(), DEFAULT_AGENT_PROMPT, save_agent_prompt as fn(&str) -> Result<(), LarpshellError>),
+        (agent_safe_prompt_path(), DEFAULT_AGENT_SAFE_PROMPT, save_agent_safe_prompt as fn(&str) -> Result<(), LarpshellError>),
     ];
 
     for (path, default, save) in prompts {
@@ -308,19 +269,13 @@ mod tests {
         let parsed = parse_labeled_response("MESSAGE: first line\nsecond line\nthird line");
         assert_eq!(
             parsed,
-            ParsedLabeledResponse {
-                message: Some("first line\nsecond line\nthird line".to_string()),
-                command: None,
-                has_labels: true,
-            }
+            ParsedLabeledResponse { message: Some("first line\nsecond line\nthird line".to_string()), command: None, has_labels: true }
         );
     }
 
     #[test]
     fn parse_labeled_response_extracts_message_and_command_blocks() {
-        let parsed = parse_labeled_response(
-            "MESSAGE: package needed by:\nfoo\nbar\nCOMMAND: sudo pacman -S webkit2gtk-4.1\necho done",
-        );
+        let parsed = parse_labeled_response("MESSAGE: package needed by:\nfoo\nbar\nCOMMAND: sudo pacman -S webkit2gtk-4.1\necho done");
         assert_eq!(
             parsed,
             ParsedLabeledResponse {
@@ -336,25 +291,14 @@ mod tests {
         let parsed = parse_labeled_response("COMMAND: echo hello\n  echo world\n  pwd");
         assert_eq!(
             parsed,
-            ParsedLabeledResponse {
-                message: None,
-                command: Some("echo hello\necho world\npwd".to_string()),
-                has_labels: true,
-            }
+            ParsedLabeledResponse { message: None, command: Some("echo hello\necho world\npwd".to_string()), has_labels: true }
         );
     }
 
     #[test]
     fn parse_labeled_response_appends_repeated_message_blocks() {
         let parsed = parse_labeled_response("MESSAGE: first\nMESSAGE: second");
-        assert_eq!(
-            parsed,
-            ParsedLabeledResponse {
-                message: Some("first\nsecond".to_string()),
-                command: None,
-                has_labels: true,
-            }
-        );
+        assert_eq!(parsed, ParsedLabeledResponse { message: Some("first\nsecond".to_string()), command: None, has_labels: true });
     }
 
     #[test]

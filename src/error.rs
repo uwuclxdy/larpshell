@@ -101,17 +101,11 @@ impl LarpshellError {
     }
 
     pub fn connection_failed(provider: impl Into<String>, message: impl Into<String>) -> Self {
-        Self::ConnectionFailed {
-            provider: provider.into(),
-            message: message.into(),
-        }
+        Self::ConnectionFailed { provider: provider.into(), message: message.into() }
     }
 
     pub fn server_error(provider: impl Into<String>, message: impl Into<String>) -> Self {
-        Self::ServerError {
-            provider: provider.into(),
-            message: message.into(),
-        }
+        Self::ServerError { provider: provider.into(), message: message.into() }
     }
 
     pub const fn timeout(seconds: u64) -> Self {
@@ -119,9 +113,7 @@ impl LarpshellError {
     }
 
     pub fn auth_failed(message: impl Into<String>) -> Self {
-        Self::AuthenticationFailed {
-            message: message.into(),
-        }
+        Self::AuthenticationFailed { message: message.into() }
     }
 
     pub fn from_http_status(status: reqwest::StatusCode, provider: &str, body: &str) -> Self {
@@ -129,10 +121,7 @@ impl LarpshellError {
     }
 
     pub fn from_http_status_with_retry_header(
-        status: reqwest::StatusCode,
-        provider: &str,
-        body: &str,
-        retry_after_header: Option<&str>,
+        status: reqwest::StatusCode, provider: &str, body: &str, retry_after_header: Option<&str>,
     ) -> Self {
         match status.as_u16() {
             401 | 403 => {
@@ -168,10 +157,7 @@ impl LarpshellError {
         if error.is_timeout() {
             Self::timeout(crate::common::DEFAULT_PROVIDER_TIMEOUT_SECS)
         } else if error.is_connect() {
-            Self::connection_failed(
-                provider,
-                "check if the service is running and the URL is correct",
-            )
+            Self::connection_failed(provider, "check if the service is running and the URL is correct")
         } else if error.is_request() {
             Self::NetworkError("invalid request".to_string())
         } else if let Some(status) = error.status() {
@@ -194,41 +180,25 @@ mod tests {
 
     #[test]
     fn test_api_key_detection_401_with_api_key_phrase() {
-        let err = LarpshellError::from_http_status(
-            reqwest::StatusCode::UNAUTHORIZED,
-            "openai",
-            "invalid api key",
-        );
+        let err = LarpshellError::from_http_status(reqwest::StatusCode::UNAUTHORIZED, "openai", "invalid api key");
         assert!(matches!(err, LarpshellError::InvalidApiKey));
     }
 
     #[test]
     fn test_api_key_detection_403_with_api_key_phrase() {
-        let err = LarpshellError::from_http_status(
-            reqwest::StatusCode::FORBIDDEN,
-            "gemini",
-            "API_KEY authentication failed",
-        );
+        let err = LarpshellError::from_http_status(reqwest::StatusCode::FORBIDDEN, "gemini", "API_KEY authentication failed");
         assert!(matches!(err, LarpshellError::InvalidApiKey));
     }
 
     #[test]
     fn test_api_key_detection_403_with_apikey_phrase() {
-        let err = LarpshellError::from_http_status(
-            reqwest::StatusCode::FORBIDDEN,
-            "ollama",
-            "invalid apikey provided",
-        );
+        let err = LarpshellError::from_http_status(reqwest::StatusCode::FORBIDDEN, "ollama", "invalid apikey provided");
         assert!(matches!(err, LarpshellError::InvalidApiKey));
     }
 
     #[test]
     fn test_api_key_detection_case_insensitive() {
-        let err = LarpshellError::from_http_status(
-            reqwest::StatusCode::UNAUTHORIZED,
-            "provider",
-            "API KEY required",
-        );
+        let err = LarpshellError::from_http_status(reqwest::StatusCode::UNAUTHORIZED, "provider", "API KEY required");
         assert!(matches!(err, LarpshellError::InvalidApiKey));
     }
 
@@ -245,22 +215,14 @@ mod tests {
 
     #[test]
     fn test_capacity_not_misclassified_as_invalid_key() {
-        let err = LarpshellError::from_http_status(
-            reqwest::StatusCode::FORBIDDEN,
-            "gemini",
-            "capacity not available in your region",
-        );
+        let err = LarpshellError::from_http_status(reqwest::StatusCode::FORBIDDEN, "gemini", "capacity not available in your region");
         assert!(!matches!(err, LarpshellError::InvalidApiKey));
         assert!(matches!(err, LarpshellError::AuthenticationFailed { .. }));
     }
 
     #[test]
     fn test_openapi_not_misclassified_as_invalid_key() {
-        let err = LarpshellError::from_http_status(
-            reqwest::StatusCode::FORBIDDEN,
-            "provider",
-            "openapi schema validation failed",
-        );
+        let err = LarpshellError::from_http_status(reqwest::StatusCode::FORBIDDEN, "provider", "openapi schema validation failed");
         assert!(!matches!(err, LarpshellError::InvalidApiKey));
         assert!(matches!(err, LarpshellError::AuthenticationFailed { .. }));
     }
@@ -273,42 +235,19 @@ mod tests {
             "rate limited",
             Some("120"),
         );
-        assert!(matches!(
-            err,
-            LarpshellError::RateLimitExceeded {
-                retry_after: Some(120)
-            }
-        ));
+        assert!(matches!(err, LarpshellError::RateLimitExceeded { retry_after: Some(120) }));
     }
 
     #[test]
     fn test_retry_after_from_body_gemini_format() {
-        let err = LarpshellError::from_http_status(
-            reqwest::StatusCode::TOO_MANY_REQUESTS,
-            "gemini",
-            "please retry in 30s",
-        );
-        assert!(matches!(
-            err,
-            LarpshellError::RateLimitExceeded {
-                retry_after: Some(30)
-            }
-        ));
+        let err = LarpshellError::from_http_status(reqwest::StatusCode::TOO_MANY_REQUESTS, "gemini", "please retry in 30s");
+        assert!(matches!(err, LarpshellError::RateLimitExceeded { retry_after: Some(30) }));
     }
 
     #[test]
     fn test_retry_after_from_body_gemini_format_float() {
-        let err = LarpshellError::from_http_status(
-            reqwest::StatusCode::TOO_MANY_REQUESTS,
-            "gemini",
-            "please retry in 45.5s",
-        );
-        assert!(matches!(
-            err,
-            LarpshellError::RateLimitExceeded {
-                retry_after: Some(46)
-            }
-        ));
+        let err = LarpshellError::from_http_status(reqwest::StatusCode::TOO_MANY_REQUESTS, "gemini", "please retry in 45.5s");
+        assert!(matches!(err, LarpshellError::RateLimitExceeded { retry_after: Some(46) }));
     }
 
     #[test]
@@ -319,24 +258,12 @@ mod tests {
             "please retry in 10s",
             Some("60"),
         );
-        assert!(matches!(
-            err,
-            LarpshellError::RateLimitExceeded {
-                retry_after: Some(60)
-            }
-        ));
+        assert!(matches!(err, LarpshellError::RateLimitExceeded { retry_after: Some(60) }));
     }
 
     #[test]
     fn test_retry_after_none_when_not_available() {
-        let err = LarpshellError::from_http_status(
-            reqwest::StatusCode::TOO_MANY_REQUESTS,
-            "provider",
-            "rate limited",
-        );
-        assert!(matches!(
-            err,
-            LarpshellError::RateLimitExceeded { retry_after: None }
-        ));
+        let err = LarpshellError::from_http_status(reqwest::StatusCode::TOO_MANY_REQUESTS, "provider", "rate limited");
+        assert!(matches!(err, LarpshellError::RateLimitExceeded { retry_after: None }));
     }
 }

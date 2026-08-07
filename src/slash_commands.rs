@@ -16,113 +16,44 @@ pub struct ArgChoice {
 // from the CLI and the generated shell completions; only the descriptions live
 // here. Each array's ordering matches its source slice in `vocab`.
 static PROMPT_KINDS: &[ArgChoice] = &[
-    ArgChoice {
-        value: vocab::PROMPT_KINDS[0],
-        description: "system prompt",
-    },
-    ArgChoice {
-        value: vocab::PROMPT_KINDS[1],
-        description: "explain prompt",
-    },
-    ArgChoice {
-        value: vocab::PROMPT_KINDS[2],
-        description: "agent (unrestricted) prompt",
-    },
-    ArgChoice {
-        value: vocab::PROMPT_KINDS[3],
-        description: "agent (safe/restricted) prompt",
-    },
+    ArgChoice { value: vocab::PROMPT_KINDS[0], description: "system prompt" },
+    ArgChoice { value: vocab::PROMPT_KINDS[1], description: "explain prompt" },
+    ArgChoice { value: vocab::PROMPT_KINDS[2], description: "agent (unrestricted) prompt" },
+    ArgChoice { value: vocab::PROMPT_KINDS[3], description: "agent (safe/restricted) prompt" },
 ];
 
 static PROMPT_ACTIONS: &[ArgChoice] = &[
-    ArgChoice {
-        value: vocab::PROMPT_ACTIONS[0],
-        description: "print current value",
-    },
-    ArgChoice {
-        value: vocab::PROMPT_ACTIONS[1],
-        description: "open in editor",
-    },
-    ArgChoice {
-        value: vocab::PROMPT_ACTIONS[2],
-        description: "restore default and back up current",
-    },
+    ArgChoice { value: vocab::PROMPT_ACTIONS[0], description: "print current value" },
+    ArgChoice { value: vocab::PROMPT_ACTIONS[1], description: "open in editor" },
+    ArgChoice { value: vocab::PROMPT_ACTIONS[2], description: "restore default and back up current" },
 ];
 
 static HISTORY_TOGGLES: &[ArgChoice] = &[
-    ArgChoice {
-        value: vocab::BOOL_TOGGLES[0],
-        description: "save prompts across sessions",
-    },
-    ArgChoice {
-        value: vocab::BOOL_TOGGLES[1],
-        description: "stop saving history",
-    },
+    ArgChoice { value: vocab::BOOL_TOGGLES[0], description: "save prompts across sessions" },
+    ArgChoice { value: vocab::BOOL_TOGGLES[1], description: "stop saving history" },
 ];
 
 static TOOL_OUTPUT_TOGGLES: &[ArgChoice] = &[
-    ArgChoice {
-        value: vocab::BOOL_TOGGLES[0],
-        description: "show expanded agent tool output",
-    },
-    ArgChoice {
-        value: vocab::BOOL_TOGGLES[1],
-        description: "show tool output summaries only",
-    },
+    ArgChoice { value: vocab::BOOL_TOGGLES[0], description: "show expanded agent tool output" },
+    ArgChoice { value: vocab::BOOL_TOGGLES[1], description: "show tool output summaries only" },
 ];
 
 static AGENT_TOGGLES: &[ArgChoice] = &[
-    ArgChoice {
-        value: vocab::AGENT_TOGGLES[0],
-        description: "disable agent mode",
-    },
-    ArgChoice {
-        value: vocab::AGENT_TOGGLES[1],
-        description: "enable restricted agent tool mode",
-    },
-    ArgChoice {
-        value: vocab::AGENT_TOGGLES[2],
-        description: "enable unrestricted agent tool mode",
-    },
+    ArgChoice { value: vocab::AGENT_TOGGLES[0], description: "disable agent mode" },
+    ArgChoice { value: vocab::AGENT_TOGGLES[1], description: "enable restricted agent tool mode" },
+    ArgChoice { value: vocab::AGENT_TOGGLES[2], description: "enable unrestricted agent tool mode" },
 ];
 
 pub const COMMANDS: &[SlashCommand] = &[
-    SlashCommand {
-        name: "api",
-        description: "configure API provider",
-    },
-    SlashCommand {
-        name: "agent",
-        description: "enable or disable agent mode",
-    },
-    SlashCommand {
-        name: "explain",
-        description: "explain a shell command",
-    },
-    SlashCommand {
-        name: "history",
-        description: "enable or disable prompt history",
-    },
-    SlashCommand {
-        name: "verbose",
-        description: "enable or disable verbose agent tool output",
-    },
-    SlashCommand {
-        name: "prompt",
-        description: "manage system, explain, or agent prompts",
-    },
-    SlashCommand {
-        name: "help",
-        description: "list available slash commands",
-    },
-    SlashCommand {
-        name: "quit",
-        description: "exit interactive mode",
-    },
-    SlashCommand {
-        name: "uninstall",
-        description: "uninstall larpshell",
-    },
+    SlashCommand { name: "api", description: "configure API provider" },
+    SlashCommand { name: "agent", description: "enable or disable agent mode" },
+    SlashCommand { name: "explain", description: "explain a shell command" },
+    SlashCommand { name: "history", description: "enable or disable prompt history" },
+    SlashCommand { name: "verbose", description: "enable or disable verbose agent tool output" },
+    SlashCommand { name: "prompt", description: "manage system, explain, or agent prompts" },
+    SlashCommand { name: "help", description: "list available slash commands" },
+    SlashCommand { name: "quit", description: "exit interactive mode" },
+    SlashCommand { name: "uninstall", description: "uninstall larpshell" },
 ];
 
 /// Returns `(replacement_start, candidates)` for argument completion at the
@@ -169,10 +100,7 @@ pub fn arg_completions(line: &str) -> Option<(usize, Vec<&'static ArgChoice>)> {
         _ => return None,
     };
 
-    let candidates: Vec<&'static ArgChoice> = pool
-        .iter()
-        .filter(|c| c.value.starts_with(partial))
-        .collect();
+    let candidates: Vec<&'static ArgChoice> = pool.iter().filter(|c| c.value.starts_with(partial)).collect();
 
     if candidates.is_empty() {
         return None;
@@ -187,10 +115,7 @@ pub fn arg_completions(line: &str) -> Option<(usize, Vec<&'static ArgChoice>)> {
     let start = if partial.is_empty() {
         line.len()
     } else {
-        line.char_indices()
-            .rev()
-            .find(|&(_, ch)| ch.is_whitespace())
-            .map_or(space_pos + 1, |(i, ch)| i + ch.len_utf8())
+        line.char_indices().rev().find(|&(_, ch)| ch.is_whitespace()).map_or(space_pos + 1, |(i, ch)| i + ch.len_utf8())
     };
 
     Some((start, candidates))
@@ -204,44 +129,25 @@ pub fn filter(typed: &str) -> Vec<&'static SlashCommand> {
     }
     // Extract just the command part (first word, strip leading '/')
     let typed_cmd = typed[1..].split_whitespace().next().unwrap_or("");
-    COMMANDS
-        .iter()
-        .filter(|cmd| cmd.name.starts_with(typed_cmd))
-        .collect()
+    COMMANDS.iter().filter(|cmd| cmd.name.starts_with(typed_cmd)).collect()
 }
 
 #[derive(Debug)]
 pub enum SlashCmd {
-    Agent {
-        mode: Option<AgentMode>,
-    },
+    Agent { mode: Option<AgentMode> },
     Api,
     Uninstall,
-    History {
-        enable: Option<bool>,
-    },
-    Verbose {
-        enable: Option<bool>,
-    },
-    Prompt {
-        kind: PromptKind,
-        action: PromptAction,
-    },
-    Explain {
-        args: Vec<String>,
-    },
+    History { enable: Option<bool> },
+    Verbose { enable: Option<bool> },
+    Prompt { kind: PromptKind, action: PromptAction },
+    Explain { args: Vec<String> },
     Help,
     Quit,
     Unknown(String),
-    InvalidArgs {
-        command: &'static str,
-        expected: &'static str,
-    },
+    InvalidArgs { command: &'static str, expected: &'static str },
 }
 
-fn parse_agent_mode_strict(
-    arg: Option<&str>,
-) -> Result<Option<AgentMode>, (&'static str, &'static str)> {
+fn parse_agent_mode_strict(arg: Option<&str>) -> Result<Option<AgentMode>, (&'static str, &'static str)> {
     match arg {
         None => Ok(None),
         Some("off") => Ok(Some(AgentMode::Off)),
@@ -251,10 +157,7 @@ fn parse_agent_mode_strict(
     }
 }
 
-fn parse_bool_toggle_strict(
-    command: &'static str,
-    arg: Option<&str>,
-) -> Result<Option<bool>, (&'static str, &'static str)> {
+fn parse_bool_toggle_strict(command: &'static str, arg: Option<&str>) -> Result<Option<bool>, (&'static str, &'static str)> {
     match arg {
         None => Ok(None),
         Some("on") => Ok(Some(true)),
@@ -287,10 +190,7 @@ pub fn parse(input: &str) -> SlashCmd {
     match parts.next() {
         Some("/agent") => match parse_agent_mode_strict(parts.next()) {
             Ok(mode) => SlashCmd::Agent { mode },
-            Err((cmd, expected)) => SlashCmd::InvalidArgs {
-                command: cmd,
-                expected,
-            },
+            Err((cmd, expected)) => SlashCmd::InvalidArgs { command: cmd, expected },
         },
         Some("/api") => SlashCmd::Api,
         Some("/uninstall") => SlashCmd::Uninstall,
@@ -298,30 +198,19 @@ pub fn parse(input: &str) -> SlashCmd {
         Some("/quit") => SlashCmd::Quit,
         Some("/history") => match parse_bool_toggle_strict("history", parts.next()) {
             Ok(enable) => SlashCmd::History { enable },
-            Err((cmd, expected)) => SlashCmd::InvalidArgs {
-                command: cmd,
-                expected,
-            },
+            Err((cmd, expected)) => SlashCmd::InvalidArgs { command: cmd, expected },
         },
         Some("/verbose") => match parse_bool_toggle_strict("verbose", parts.next()) {
             Ok(enable) => SlashCmd::Verbose { enable },
-            Err((cmd, expected)) => SlashCmd::InvalidArgs {
-                command: cmd,
-                expected,
-            },
+            Err((cmd, expected)) => SlashCmd::InvalidArgs { command: cmd, expected },
         },
-        Some("/explain") => SlashCmd::Explain {
-            args: parts.map(std::string::ToString::to_string).collect(),
-        },
+        Some("/explain") => SlashCmd::Explain { args: parts.map(std::string::ToString::to_string).collect() },
         Some("/prompt") => {
             let kind_arg = parts.next();
             let action_arg = parts.next();
             match (parse_prompt_kind(kind_arg), parse_prompt_action(action_arg)) {
                 (Ok(kind), Ok(action)) => SlashCmd::Prompt { kind, action },
-                (Err((cmd, expected)), _) | (_, Err((cmd, expected))) => SlashCmd::InvalidArgs {
-                    command: cmd,
-                    expected,
-                },
+                (Err((cmd, expected)), _) | (_, Err((cmd, expected))) => SlashCmd::InvalidArgs { command: cmd, expected },
             }
         }
         _ => SlashCmd::Unknown(input.to_string()),
@@ -394,24 +283,12 @@ mod tests {
 
     #[test]
     fn parse_prompt_bad_kind_returns_invalid_args() {
-        assert!(matches!(
-            parse("/prompt garbage"),
-            SlashCmd::InvalidArgs {
-                command: "prompt",
-                ..
-            }
-        ));
+        assert!(matches!(parse("/prompt garbage"), SlashCmd::InvalidArgs { command: "prompt", .. }));
     }
 
     #[test]
     fn parse_prompt_bad_action_returns_invalid_args() {
-        assert!(matches!(
-            parse("/prompt system garbage"),
-            SlashCmd::InvalidArgs {
-                command: "prompt",
-                ..
-            }
-        ));
+        assert!(matches!(parse("/prompt system garbage"), SlashCmd::InvalidArgs { command: "prompt", .. }));
     }
 
     #[test]
@@ -618,10 +495,7 @@ mod tests {
     #[test]
     fn every_cli_subcommand_has_a_slash_command() {
         for &name in vocab::SUBCOMMANDS {
-            assert!(
-                COMMANDS.iter().any(|c| c.name == name),
-                "vocab subcommand {name:?} missing from slash COMMANDS table"
-            );
+            assert!(COMMANDS.iter().any(|c| c.name == name), "vocab subcommand {name:?} missing from slash COMMANDS table");
         }
     }
 }

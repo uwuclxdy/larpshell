@@ -82,22 +82,14 @@ struct McpContent {
 impl StdioMcpClient {
     pub fn spawn(config: &McpServerConfig) -> Result<Self, String> {
         let mut command = Command::new(&config.command);
-        command
-            .args(&config.args)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null());
+        command.args(&config.args).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
 
         for (key, value) in &config.env {
             command.env(key, value);
         }
 
-        let mut child = command.spawn().map_err(|error| {
-            format!(
-                "failed to spawn MCP server '{}' ({}): {error}",
-                config.name, config.command
-            )
-        })?;
+        let mut child =
+            command.spawn().map_err(|error| format!("failed to spawn MCP server '{}' ({}): {error}", config.name, config.command))?;
 
         let stdin = BufWriter::new(child.stdin.take().ok_or("failed to get stdin")?);
         let child_stdout = BufReader::new(child.stdout.take().ok_or("failed to get stdout")?);
@@ -122,35 +114,16 @@ impl StdioMcpClient {
             }
         });
 
-        Ok(Self {
-            name: config.name.clone(),
-            child,
-            stdin,
-            receiver,
-            request_id: 0,
-        })
+        Ok(Self { name: config.name.clone(), child, stdin, receiver, request_id: 0 })
     }
 
-    fn send_request(
-        &mut self,
-        method: &str,
-        params: Option<serde_json::Value>,
-    ) -> Result<serde_json::Value, String> {
+    fn send_request(&mut self, method: &str, params: Option<serde_json::Value>) -> Result<serde_json::Value, String> {
         self.request_id += 1;
-        let request = JsonRpcRequest {
-            jsonrpc: "2.0",
-            id: self.request_id,
-            method,
-            params,
-        };
+        let request = JsonRpcRequest { jsonrpc: "2.0", id: self.request_id, method, params };
 
-        let json =
-            serde_json::to_string(&request).map_err(|error| format!("serialize error: {error}"))?;
-        writeln!(self.stdin, "{json}")
-            .map_err(|error| format!("write to MCP server '{}': {error}", self.name))?;
-        self.stdin
-            .flush()
-            .map_err(|error| format!("flush to MCP server '{}': {error}", self.name))?;
+        let json = serde_json::to_string(&request).map_err(|error| format!("serialize error: {error}"))?;
+        writeln!(self.stdin, "{json}").map_err(|error| format!("write to MCP server '{}': {error}", self.name))?;
+        self.stdin.flush().map_err(|error| format!("flush to MCP server '{}': {error}", self.name))?;
 
         // A spec-compliant server may emit notifications (messages with no `id`, or an
         // `id` that doesn't match our request) before sending the real response. Keep
@@ -166,10 +139,7 @@ impl StdioMcpClient {
                     return Err(format!("read from MCP server '{}': {error}", self.name));
                 }
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                    return Err(format!(
-                        "MCP server '{}' did not respond within {MCP_REQUEST_TIMEOUT_SECS}s",
-                        self.name
-                    ));
+                    return Err(format!("MCP server '{}' did not respond within {MCP_REQUEST_TIMEOUT_SECS}s", self.name));
                 }
                 Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                     return Err(format!("MCP server '{}' exited unexpectedly", self.name));
@@ -177,14 +147,10 @@ impl StdioMcpClient {
             };
 
             if line.trim().is_empty() {
-                return Err(format!(
-                    "MCP server '{}' returned empty response",
-                    self.name
-                ));
+                return Err(format!("MCP server '{}' returned empty response", self.name));
             }
 
-            let response: JsonRpcResponse = serde_json::from_str(line.trim())
-                .map_err(|error| format!("parse MCP response: {error}"))?;
+            let response: JsonRpcResponse = serde_json::from_str(line.trim()).map_err(|error| format!("parse MCP response: {error}"))?;
 
             // Skip notifications and responses for other request ids.
             if response.id != Some(self.request_id) {
@@ -192,15 +158,10 @@ impl StdioMcpClient {
             }
 
             if let Some(error) = response.error {
-                return Err(format!(
-                    "MCP server '{}' error: {}",
-                    self.name, error.message
-                ));
+                return Err(format!("MCP server '{}' error: {}", self.name, error.message));
             }
 
-            return response
-                .result
-                .ok_or_else(|| format!("MCP server '{}' returned no result", self.name));
+            return response.result.ok_or_else(|| format!("MCP server '{}' returned no result", self.name));
         }
     }
 
@@ -215,24 +176,17 @@ impl StdioMcpClient {
         });
         let _ = self.send_request("initialize", Some(params))?;
 
-        let notification = JsonRpcNotification {
-            jsonrpc: "2.0",
-            method: "notifications/initialized",
-        };
-        let json =
-            serde_json::to_string(&notification).map_err(|error| format!("serialize: {error}"))?;
+        let notification = JsonRpcNotification { jsonrpc: "2.0", method: "notifications/initialized" };
+        let json = serde_json::to_string(&notification).map_err(|error| format!("serialize: {error}"))?;
         writeln!(self.stdin, "{json}").map_err(|error| format!("write notification: {error}"))?;
-        self.stdin
-            .flush()
-            .map_err(|error| format!("flush: {error}"))?;
+        self.stdin.flush().map_err(|error| format!("flush: {error}"))?;
 
         Ok(())
     }
 
     pub fn list_tools(&mut self) -> Result<Vec<ToolDefinition>, String> {
         let result = self.send_request("tools/list", None)?;
-        let tools_result: ToolsListResult =
-            serde_json::from_value(result).map_err(|error| format!("parse tools/list: {error}"))?;
+        let tools_result: ToolsListResult = serde_json::from_value(result).map_err(|error| format!("parse tools/list: {error}"))?;
 
         Ok(tools_result
             .tools
@@ -240,39 +194,24 @@ impl StdioMcpClient {
             .map(|tool| ToolDefinition {
                 name: format!("{}_{}", self.name, tool.name),
                 description: tool.description.unwrap_or_default(),
-                parameters: tool
-                    .input_schema
-                    .unwrap_or_else(|| serde_json::json!({ "type": "object" })),
+                parameters: tool.input_schema.unwrap_or_else(|| serde_json::json!({ "type": "object" })),
             })
             .collect())
     }
 
-    pub fn call_tool(
-        &mut self,
-        tool_name: &str,
-        arguments: &serde_json::Value,
-    ) -> Result<String, String> {
+    pub fn call_tool(&mut self, tool_name: &str, arguments: &serde_json::Value) -> Result<String, String> {
         // Routing guarantees the prefix is present; fall back to the bare name
         // only for callers that already stripped it (e.g. direct test calls).
-        let original_name = tool_name
-            .strip_prefix(self.name.as_str())
-            .and_then(|rest| rest.strip_prefix('_'))
-            .unwrap_or(tool_name);
+        let original_name = tool_name.strip_prefix(self.name.as_str()).and_then(|rest| rest.strip_prefix('_')).unwrap_or(tool_name);
 
         let params = serde_json::json!({
             "name": original_name,
             "arguments": arguments
         });
         let result = self.send_request("tools/call", Some(params))?;
-        let call_result: ToolCallResult =
-            serde_json::from_value(result).map_err(|error| format!("parse tools/call: {error}"))?;
+        let call_result: ToolCallResult = serde_json::from_value(result).map_err(|error| format!("parse tools/call: {error}"))?;
 
-        Ok(call_result
-            .content
-            .iter()
-            .filter_map(|content| content.text.as_deref())
-            .collect::<Vec<_>>()
-            .join("\n"))
+        Ok(call_result.content.iter().filter_map(|content| content.text.as_deref()).collect::<Vec<_>>().join("\n"))
     }
 
     pub fn server_name(&self) -> &str {

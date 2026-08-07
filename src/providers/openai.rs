@@ -92,40 +92,17 @@ struct ResponseToolCallFunction {
 
 impl OpenAICompatibleProvider {
     fn new(
-        base_url: String,
-        api_key: Option<String>,
-        model: String,
-        provider_slug: &'static str,
-        display_name: &'static str,
+        base_url: String, api_key: Option<String>, model: String, provider_slug: &'static str, display_name: &'static str,
     ) -> Result<Self, LarpshellError> {
-        Ok(Self {
-            base: BaseProvider::new()?,
-            base_url,
-            api_key,
-            model,
-            provider_slug,
-            display_name,
-        })
+        Ok(Self { base: BaseProvider::new()?, base_url, api_key, model, provider_slug, display_name })
     }
 
     pub fn openai(config: &OpenAIConfig) -> Result<Self, LarpshellError> {
-        Self::new(
-            config.base_url.clone(),
-            config.api_key.clone(),
-            config.model.clone(),
-            "openai",
-            "OpenAI",
-        )
+        Self::new(config.base_url.clone(), config.api_key.clone(), config.model.clone(), "openai", "OpenAI")
     }
 
     pub fn openrouter(config: &OpenRouterConfig) -> Result<Self, LarpshellError> {
-        Self::new(
-            config.base_url.clone(),
-            config.api_key.clone(),
-            config.model.clone(),
-            "openrouter",
-            "OpenRouter",
-        )
+        Self::new(config.base_url.clone(), config.api_key.clone(), config.model.clone(), "openrouter", "OpenRouter")
     }
 
     fn chat_completions_url(&self) -> String {
@@ -138,13 +115,8 @@ impl OpenAICompatibleProvider {
             return base.to_string();
         }
         let last = base.rsplit('/').next().unwrap_or("");
-        let is_version =
-            last.starts_with('v') && last.chars().nth(1).is_some_and(|c| c.is_ascii_digit());
-        if is_version {
-            format!("{base}/chat/completions")
-        } else {
-            format!("{base}/v1/chat/completions")
-        }
+        let is_version = last.starts_with('v') && last.chars().nth(1).is_some_and(|c| c.is_ascii_digit());
+        if is_version { format!("{base}/chat/completions") } else { format!("{base}/v1/chat/completions") }
     }
 
     async fn do_generate(&self, prompt: &str) -> Result<String, LarpshellError> {
@@ -152,12 +124,7 @@ impl OpenAICompatibleProvider {
 
         let request_body = ChatRequest {
             model: self.model.clone(),
-            messages: vec![RequestMessage {
-                role: "user",
-                content: Some(prompt.to_string()),
-                tool_calls: None,
-                tool_call_id: None,
-            }],
+            messages: vec![RequestMessage { role: "user", content: Some(prompt.to_string()), tool_calls: None, tool_call_id: None }],
             temperature: DEFAULT_TEMPERATURE,
             tools: None,
         };
@@ -169,24 +136,17 @@ impl OpenAICompatibleProvider {
 
         let response = BaseProvider::send_json(request, self.provider_slug).await?;
 
-        let body: ChatResponseBody = response
-            .json()
-            .await
-            .map_err(|e| LarpshellError::InvalidResponse(e.to_string()))?;
+        let body: ChatResponseBody = response.json().await.map_err(|e| LarpshellError::InvalidResponse(e.to_string()))?;
 
         body.choices
             .first()
             .and_then(|choice| choice.message.content.clone())
             .filter(|content| !content.is_empty())
-            .ok_or_else(|| {
-                LarpshellError::InvalidResponse(format!("no response from {}", self.provider_slug))
-            })
+            .ok_or_else(|| LarpshellError::InvalidResponse(format!("no response from {}", self.provider_slug)))
     }
 
     async fn do_generate_with_tools(
-        &self,
-        messages: &[crate::providers::ChatMessage],
-        tools: &[crate::providers::ToolDefinition],
+        &self, messages: &[crate::providers::ChatMessage], tools: &[crate::providers::ToolDefinition],
     ) -> Result<crate::providers::ChatResponse, LarpshellError> {
         use crate::providers::ChatResponse;
 
@@ -203,10 +163,7 @@ impl OpenAICompatibleProvider {
                         .map(|tool_call| RequestToolCall {
                             id: tool_call.id.clone(),
                             r#type: "function".to_string(),
-                            function: RequestToolCallFunction {
-                                name: tool_call.name.clone(),
-                                arguments: tool_call.arguments.to_string(),
-                            },
+                            function: RequestToolCallFunction { name: tool_call.name.clone(), arguments: tool_call.arguments.to_string() },
                         })
                         .collect()
                 }),
@@ -232,12 +189,8 @@ impl OpenAICompatibleProvider {
             )
         };
 
-        let request_body = ChatRequest {
-            model: self.model.clone(),
-            messages: request_messages,
-            temperature: DEFAULT_TEMPERATURE,
-            tools: openai_tools,
-        };
+        let request_body =
+            ChatRequest { model: self.model.clone(), messages: request_messages, temperature: DEFAULT_TEMPERATURE, tools: openai_tools };
 
         let mut request = self.base.client.post(&url).json(&request_body);
         if let Some(ref api_key) = self.api_key {
@@ -246,14 +199,10 @@ impl OpenAICompatibleProvider {
 
         let response = BaseProvider::send_json(request, self.provider_slug).await?;
 
-        let body: ChatResponseBody = response
-            .json()
-            .await
-            .map_err(|e| LarpshellError::InvalidResponse(e.to_string()))?;
+        let body: ChatResponseBody = response.json().await.map_err(|e| LarpshellError::InvalidResponse(e.to_string()))?;
 
-        let choice = body.choices.first().ok_or_else(|| {
-            LarpshellError::InvalidResponse(format!("no response from {}", self.provider_slug))
-        })?;
+        let choice =
+            body.choices.first().ok_or_else(|| LarpshellError::InvalidResponse(format!("no response from {}", self.provider_slug)))?;
 
         if let Some(ref tool_calls) = choice.message.tool_calls
             && !tool_calls.is_empty()
@@ -261,13 +210,9 @@ impl OpenAICompatibleProvider {
             let calls = tool_calls
                 .iter()
                 .map(|tool_call| {
-                    let arguments =
-                        serde_json::from_str(&tool_call.function.arguments).map_err(|e| {
-                            LarpshellError::InvalidResponse(format!(
-                                "malformed tool arguments from {}: {e}",
-                                self.provider_slug
-                            ))
-                        })?;
+                    let arguments = serde_json::from_str(&tool_call.function.arguments).map_err(|e| {
+                        LarpshellError::InvalidResponse(format!("malformed tool arguments from {}: {e}", self.provider_slug))
+                    })?;
                     Ok(crate::providers::ToolCall {
                         id: tool_call.id.clone(),
                         name: tool_call.function.name.clone(),
@@ -284,19 +229,13 @@ impl OpenAICompatibleProvider {
             .content
             .clone()
             .filter(|content| !content.is_empty())
-            .ok_or_else(|| {
-                LarpshellError::InvalidResponse(format!("no content from {}", self.provider_slug))
-            })?;
+            .ok_or_else(|| LarpshellError::InvalidResponse(format!("no content from {}", self.provider_slug)))?;
 
         Ok(ChatResponse::Message(content))
     }
 
     fn display(&self) -> String {
-        format!(
-            "{} ({})",
-            self.display_name,
-            strip_url_for_display(&self.base_url)
-        )
+        format!("{} ({})", self.display_name, strip_url_for_display(&self.base_url))
     }
 }
 
@@ -307,9 +246,7 @@ impl AIProvider for OpenAICompatibleProvider {
     }
 
     async fn generate_with_tools(
-        &self,
-        messages: &[crate::providers::ChatMessage],
-        tools: &[crate::providers::ToolDefinition],
+        &self, messages: &[crate::providers::ChatMessage], tools: &[crate::providers::ToolDefinition],
     ) -> Result<crate::providers::ChatResponse, LarpshellError> {
         self.do_generate_with_tools(messages, tools).await
     }
@@ -338,58 +275,40 @@ mod tests {
     #[test]
     fn chat_completions_url_handles_v1_suffix() {
         let p = make_provider("https://api.openai.com/v1");
-        assert_eq!(
-            p.chat_completions_url(),
-            "https://api.openai.com/v1/chat/completions"
-        );
+        assert_eq!(p.chat_completions_url(), "https://api.openai.com/v1/chat/completions");
     }
 
     #[test]
     fn chat_completions_url_handles_v1_trailing_slash() {
         let p = make_provider("https://api.openai.com/v1/");
-        assert_eq!(
-            p.chat_completions_url(),
-            "https://api.openai.com/v1/chat/completions"
-        );
+        assert_eq!(p.chat_completions_url(), "https://api.openai.com/v1/chat/completions");
     }
 
     #[test]
     fn chat_completions_url_handles_bare_host() {
         let p = make_provider("http://localhost:11434");
-        assert_eq!(
-            p.chat_completions_url(),
-            "http://localhost:11434/v1/chat/completions"
-        );
+        assert_eq!(p.chat_completions_url(), "http://localhost:11434/v1/chat/completions");
     }
 
     #[test]
     fn chat_completions_url_handles_v1beta() {
         // v1beta is a version segment (v + digit) → appends /chat/completions directly
         let p = make_provider("https://example.com/v1beta");
-        assert_eq!(
-            p.chat_completions_url(),
-            "https://example.com/v1beta/chat/completions"
-        );
+        assert_eq!(p.chat_completions_url(), "https://example.com/v1beta/chat/completions");
     }
 
     #[test]
     fn chat_completions_url_handles_v2() {
         // v2 is a version segment (v + digit) → appends /chat/completions directly
         let p = make_provider("https://example.com/v2");
-        assert_eq!(
-            p.chat_completions_url(),
-            "https://example.com/v2/chat/completions"
-        );
+        assert_eq!(p.chat_completions_url(), "https://example.com/v2/chat/completions");
     }
 
     #[test]
     fn chat_completions_url_handles_full_path() {
         // full endpoint URL → used as-is without doubling
         let p = make_provider("https://api.openai.com/v1/chat/completions");
-        assert_eq!(
-            p.chat_completions_url(),
-            "https://api.openai.com/v1/chat/completions"
-        );
+        assert_eq!(p.chat_completions_url(), "https://api.openai.com/v1/chat/completions");
     }
 
     #[test]
@@ -461,10 +380,7 @@ mod tests {
             }]
         }"#;
         let response: ChatResponseBody = serde_json::from_str(json).unwrap();
-        assert_eq!(
-            response.choices[0].message.content.as_deref(),
-            Some("echo hello")
-        );
+        assert_eq!(response.choices[0].message.content.as_deref(), Some("echo hello"));
         assert!(response.choices[0].message.tool_calls.is_none());
     }
 }

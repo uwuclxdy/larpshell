@@ -36,15 +36,13 @@ use common::{CTP_BLUE, EXIT_SIGINT, clear_line, eprint_flush, show_cursor};
 use config::{AgentMode, Config, interactive_setup, load_config};
 use confirmation::style_message_markup;
 use confirmation::{
-    ConfirmResult, ResponseStyle, confirm_execution, confirm_with_explain, display_explanation,
-    display_response, edit_command,
+    ConfirmResult, ResponseStyle, confirm_execution, confirm_with_explain, display_explanation, display_response, edit_command,
 };
 use error::LarpshellError;
 use interactive::{user_input, user_input_prefilled};
 use prompt::{
-    DEFAULT_AGENT_PROMPT, DEFAULT_AGENT_SAFE_PROMPT, DEFAULT_EXPLAIN_PROMPT,
-    DEFAULT_PROMPT_TEMPLATE, create_explain_prompt, create_prompts, create_system_prompt,
-    normalize_model_output, validate_explain_prompt, validate_sys_prompt,
+    DEFAULT_AGENT_PROMPT, DEFAULT_AGENT_SAFE_PROMPT, DEFAULT_EXPLAIN_PROMPT, DEFAULT_PROMPT_TEMPLATE, create_explain_prompt,
+    create_prompts, create_system_prompt, normalize_model_output, validate_explain_prompt, validate_sys_prompt,
 };
 use providers::{AIProvider, create_provider};
 use shell_integration::{auto_setup_shell_function, migrate_nlsh_rs_shell};
@@ -124,9 +122,7 @@ async fn run() -> Result<(), LarpshellError> {
         }
         _ => match select_run_mode(&cli.command) {
             RunMode::OneShot(input) => {
-                let result = process_user_input(&input, &mut runtime, CommandMode::Single)
-                    .await
-                    .map(drop);
+                let result = process_user_input(&input, &mut runtime, CommandMode::Single).await.map(drop);
                 runtime.finish_update().await;
                 result
             }
@@ -171,19 +167,11 @@ fn setup_environment() {
         print_warning(&format!("failed to create prompt files: {error}"));
     }
 
-    if !validate_sys_prompt(
-        config::load_sys_prompt()
-            .as_deref()
-            .unwrap_or(DEFAULT_PROMPT_TEMPLATE),
-    ) {
+    if !validate_sys_prompt(config::load_sys_prompt().as_deref().unwrap_or(DEFAULT_PROMPT_TEMPLATE)) {
         print_warning("system prompt must contain {request} placeholder — using default.");
     }
 
-    if !validate_explain_prompt(
-        config::load_explain_prompt()
-            .as_deref()
-            .unwrap_or(DEFAULT_EXPLAIN_PROMPT),
-    ) {
+    if !validate_explain_prompt(config::load_explain_prompt().as_deref().unwrap_or(DEFAULT_EXPLAIN_PROMPT)) {
         print_warning("explain prompt must contain {command} placeholder — using default.");
     }
 }
@@ -211,9 +199,7 @@ fn do_nlsh_rs_migration() {
 
 fn try_auto_install_shell() {
     if matches!(auto_setup_shell_function(), Ok(true)) {
-        print_warning(
-            "restart shell or run 'source ~/.bashrc' ('source ~/.config/fish/config.fish' for fish).",
-        );
+        print_warning("restart shell or run 'source ~/.bashrc' ('source ~/.config/fish/config.fish' for fish).");
         std::process::exit(0);
     }
 }
@@ -246,9 +232,7 @@ async fn run_piped(runtime: &mut Runtime) -> Result<(), LarpshellError> {
         return Ok(());
     }
 
-    process_user_input(input, runtime, CommandMode::Single)
-        .await
-        .map(drop)
+    process_user_input(input, runtime, CommandMode::Single).await.map(drop)
 }
 
 // ── REPL mode ───────────────────────────────────────────────────────────────
@@ -323,9 +307,7 @@ fn read_next_input(prefill: Option<String>) -> Result<Option<String>, ReplInputE
     };
     match raw {
         Ok(value) => Ok(value),
-        Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {
-            Err(ReplInputError::SigInt)
-        }
+        Err(error) if error.kind() == std::io::ErrorKind::Interrupted => Err(ReplInputError::SigInt),
         Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => Err(ReplInputError::Eof),
         Err(error) => Err(ReplInputError::Io(error)),
     }
@@ -339,19 +321,12 @@ fn print_unless_cancelled(error: &LarpshellError) {
 
 // ── slash command dispatch ──────────────────────────────────────────────────
 
-async fn dispatch_slash_command(
-    cmd: SlashCmd,
-    runtime: &mut Runtime,
-    command_mode: CommandMode,
-) -> Result<SlashOutcome, LarpshellError> {
+async fn dispatch_slash_command(cmd: SlashCmd, runtime: &mut Runtime, command_mode: CommandMode) -> Result<SlashOutcome, LarpshellError> {
     match cmd {
         SlashCmd::Quit => return Ok(SlashOutcome::Quit),
         SlashCmd::Unknown(name) => return Err(LarpshellError::UnknownSlashCommand(name)),
         SlashCmd::InvalidArgs { command, expected } => {
-            return Err(LarpshellError::InvalidSlashArg {
-                command: command.to_string(),
-                expected: expected.to_string(),
-            });
+            return Err(LarpshellError::InvalidSlashArg { command: command.to_string(), expected: expected.to_string() });
         }
         SlashCmd::Api => {
             interactive_setup()?;
@@ -380,9 +355,7 @@ async fn dispatch_slash_command(
                     runtime.config = reload_config()?;
                 }
             } else {
-                cli::print_ok(tool_output_status_message(
-                    runtime.config.verbose_tool_output,
-                ));
+                cli::print_ok(tool_output_status_message(runtime.config.verbose_tool_output));
             }
         }
         SlashCmd::Prompt { kind, action } => handle_prompt_subcommand(&kind, &action)?,
@@ -421,11 +394,7 @@ impl Runtime {
         let config = match load_config() {
             Ok(config) => config,
             Err(LarpshellError::IoError(error)) if error.kind() == std::io::ErrorKind::NotFound => {
-                eprintln!(
-                    "{}",
-                    style_message_markup("run 'larpshell api' to set up your preferred provider.")
-                        .custom_color(CTP_BLUE)
-                );
+                eprintln!("{}", style_message_markup("run 'larpshell api' to set up your preferred provider.").custom_color(CTP_BLUE));
                 return Err(LarpshellError::NoProviderConfigured);
             }
             Err(error) => return Err(error),
@@ -433,12 +402,7 @@ impl Runtime {
         let provider = create_provider(&config)?;
         let tool_registry = Self::build_registry(config.agent);
         let update_task = Some(tokio::task::spawn(update::is_update_available()));
-        Ok(Self {
-            config,
-            provider,
-            tool_registry,
-            update_task,
-        })
+        Ok(Self { config, provider, tool_registry, update_task })
     }
 
     fn reload_all(&mut self) -> Result<(), LarpshellError> {
@@ -468,8 +432,7 @@ impl Runtime {
 }
 
 fn reload_config() -> Result<Config, LarpshellError> {
-    load_config()
-        .map_err(|error| LarpshellError::ConfigError(format!("failed to reload config: {error}")))
+    load_config().map_err(|error| LarpshellError::ConfigError(format!("failed to reload config: {error}")))
 }
 
 fn build_tool_registry(agent_mode: AgentMode) -> ToolRegistry {
@@ -506,17 +469,9 @@ fn build_tool_registry(agent_mode: AgentMode) -> ToolRegistry {
 fn handle_history_subcommand(enable: Option<bool>) -> Result<(), LarpshellError> {
     if let Some(on) = enable {
         config::set_history_enabled(on)?;
-        cli::print_ok(if on {
-            "command history enabled."
-        } else {
-            "command history disabled."
-        });
+        cli::print_ok(if on { "command history enabled." } else { "command history disabled." });
     } else {
-        let status = if config::history_enabled() {
-            "enabled"
-        } else {
-            "disabled"
-        };
+        let status = if config::history_enabled() { "enabled" } else { "disabled" };
         cli::print_ok(&format!("command history is {status}."));
     }
     Ok(())
@@ -529,9 +484,7 @@ fn handle_tool_output_subcommand(enable: Option<bool>) -> Result<(), LarpshellEr
     } else {
         let enabled = match config::load_config() {
             Ok(config) => config.verbose_tool_output,
-            Err(LarpshellError::IoError(error)) if error.kind() == std::io::ErrorKind::NotFound => {
-                true
-            }
+            Err(LarpshellError::IoError(error)) if error.kind() == std::io::ErrorKind::NotFound => true,
             Err(error) => Err(error)?,
         };
         cli::print_ok(tool_output_status_message(enabled));
@@ -540,11 +493,7 @@ fn handle_tool_output_subcommand(enable: Option<bool>) -> Result<(), LarpshellEr
 }
 
 const fn tool_output_status_message(enabled: bool) -> &'static str {
-    if enabled {
-        "verbose tool output: on"
-    } else {
-        "verbose tool output: off"
-    }
+    if enabled { "verbose tool output: on" } else { "verbose tool output: off" }
 }
 
 fn handle_agent_subcommand(mode: Option<AgentMode>) -> Result<(), LarpshellError> {
@@ -554,9 +503,7 @@ fn handle_agent_subcommand(mode: Option<AgentMode>) -> Result<(), LarpshellError
     } else {
         let mode = match config::load_config() {
             Ok(config) => config.agent,
-            Err(LarpshellError::IoError(error)) if error.kind() == std::io::ErrorKind::NotFound => {
-                AgentMode::Off
-            }
+            Err(LarpshellError::IoError(error)) if error.kind() == std::io::ErrorKind::NotFound => AgentMode::Off,
             Err(error) => Err(error)?,
         };
         cli::print_ok(agent_mode_status_message(mode));
@@ -572,10 +519,7 @@ const fn agent_mode_status_message(mode: AgentMode) -> &'static str {
     }
 }
 
-async fn handle_explain_subcommand(
-    cmd_parts: Vec<String>,
-    provider: &dyn AIProvider,
-) -> Result<(), LarpshellError> {
+async fn handle_explain_subcommand(cmd_parts: Vec<String>, provider: &dyn AIProvider) -> Result<(), LarpshellError> {
     if cmd_parts.is_empty() {
         return Err(LarpshellError::NoCommandProvided);
     }
@@ -641,10 +585,7 @@ fn prompt_spec(kind: &PromptKind) -> PromptSpec {
     }
 }
 
-fn handle_prompt_subcommand(
-    kind: &PromptKind,
-    action: &PromptAction,
-) -> Result<(), LarpshellError> {
+fn handle_prompt_subcommand(kind: &PromptKind, action: &PromptAction) -> Result<(), LarpshellError> {
     let spec = prompt_spec(kind);
     match action {
         PromptAction::Show => show_prompt(&spec),
@@ -671,9 +612,7 @@ fn edit_prompt(spec: &PromptSpec) -> Result<(), LarpshellError> {
         if spec.warn_only {
             print_warning(spec.invalid_message);
         } else {
-            return Err(LarpshellError::ConfigError(
-                spec.invalid_message.to_string(),
-            ));
+            return Err(LarpshellError::ConfigError(spec.invalid_message.to_string()));
         }
     }
     Ok(())
@@ -684,10 +623,7 @@ fn reset_prompt(spec: &PromptSpec) -> Result<(), LarpshellError> {
     if path.exists() {
         let bak = backup_prompt_file(&path)?;
         (spec.save)(spec.default)?;
-        cli::print_ok(&format!(
-            "Reset to default (backup saved as {})",
-            bak.file_name().unwrap_or_default().to_string_lossy()
-        ));
+        cli::print_ok(&format!("Reset to default (backup saved as {})", bak.file_name().unwrap_or_default().to_string_lossy()));
     } else {
         (spec.save)(spec.default)?;
         cli::print_ok("Reset to default.");
@@ -721,19 +657,13 @@ impl Write for PromptBackup {
 fn create_unique_backup(path: &std::path::Path) -> Result<PromptBackup, LarpshellError> {
     for attempt in 0..100 {
         let bak = backup_path(path, attempt);
-        match std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&bak)
-        {
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&bak) {
             Ok(file) => return Ok(PromptBackup { file, path: bak }),
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(error) => return Err(LarpshellError::IoError(error)),
         }
     }
-    Err(LarpshellError::ConfigError(
-        "failed to create unique prompt backup".to_string(),
-    ))
+    Err(LarpshellError::ConfigError("failed to create unique prompt backup".to_string()))
 }
 
 fn backup_path(path: &std::path::Path, attempt: u32) -> std::path::PathBuf {
@@ -750,41 +680,23 @@ fn open_in_editor(path: &std::path::Path) -> Result<(), LarpshellError> {
     if status.success() {
         Ok(())
     } else {
-        Err(LarpshellError::IoError(std::io::Error::other(format!(
-            "editor exited with status {status}"
-        ))))
+        Err(LarpshellError::IoError(std::io::Error::other(format!("editor exited with status {status}"))))
     }
 }
 
 // ── command processing ──────────────────────────────────────────────────────
 
-async fn process_user_input(
-    user_input: &str,
-    runtime: &mut Runtime,
-    mode: CommandMode,
-) -> Result<Option<String>, LarpshellError> {
+async fn process_user_input(user_input: &str, runtime: &mut Runtime, mode: CommandMode) -> Result<Option<String>, LarpshellError> {
     if runtime.config.agent.is_enabled() {
-        let registry = runtime
-            .tool_registry
-            .get_or_insert_with(|| build_tool_registry(runtime.config.agent));
-        process_command_agent(
-            user_input,
-            runtime.provider.as_ref(),
-            &runtime.config,
-            mode,
-            registry,
-        )
-        .await
+        let registry = runtime.tool_registry.get_or_insert_with(|| build_tool_registry(runtime.config.agent));
+        process_command_agent(user_input, runtime.provider.as_ref(), &runtime.config, mode, registry).await
     } else {
         process_command(user_input, runtime.provider.as_ref(), &runtime.config, mode).await
     }
 }
 
 async fn process_command(
-    user_input: &str,
-    provider: &dyn AIProvider,
-    config: &Config,
-    mode: CommandMode,
+    user_input: &str, provider: &dyn AIProvider, config: &Config, mode: CommandMode,
 ) -> Result<Option<String>, LarpshellError> {
     let model_name = config.provider_config()?.config.model().to_string();
     let status = StatusLine::start(&format!("generating with {model_name}"));
@@ -807,48 +719,22 @@ async fn process_command(
 }
 
 async fn process_command_agent(
-    user_input: &str,
-    provider: &dyn AIProvider,
-    config: &Config,
-    mode: CommandMode,
-    tool_registry: &ToolRegistry,
+    user_input: &str, provider: &dyn AIProvider, config: &Config, mode: CommandMode, tool_registry: &ToolRegistry,
 ) -> Result<Option<String>, LarpshellError> {
     let response = agent::run_agent_loop(user_input, provider, config, tool_registry).await?;
-    let message = response
-        .message
-        .as_deref()
-        .map(str::trim)
-        .filter(|msg| !msg.is_empty());
-    let command = response
-        .command
-        .as_deref()
-        .map(str::trim)
-        .filter(|cmd| !cmd.is_empty());
+    let message = response.message.as_deref().map(str::trim).filter(|msg| !msg.is_empty());
+    let command = response.command.as_deref().map(str::trim).filter(|cmd| !cmd.is_empty());
 
     if let Some(message) = message {
         display_response(message, ResponseStyle::Message);
         if let Some(command) = command {
-            return confirm_loop(
-                command.to_string(),
-                user_input,
-                provider,
-                &mode,
-                ResponseStyle::Command,
-            )
-            .await;
+            return confirm_loop(command.to_string(), user_input, provider, &mode, ResponseStyle::Command).await;
         }
         return Ok(None);
     }
 
     if let Some(command) = command {
-        return confirm_loop(
-            command.to_string(),
-            user_input,
-            provider,
-            &mode,
-            ResponseStyle::Command,
-        )
-        .await;
+        return confirm_loop(command.to_string(), user_input, provider, &mode, ResponseStyle::Command).await;
     }
 
     match response.kind {
@@ -872,10 +758,7 @@ async fn process_command_agent(
 
 // ── generation with cancellation ────────────────────────────────────────────
 
-async fn generate_with_cancellation(
-    provider: &dyn AIProvider,
-    prompt: &str,
-) -> Result<String, LarpshellError> {
+async fn generate_with_cancellation(provider: &dyn AIProvider, prompt: &str) -> Result<String, LarpshellError> {
     #[cfg(unix)]
     let saved_echo = common::disable_terminal_echo();
 
@@ -905,10 +788,7 @@ async fn generate_with_cancellation(
 ///
 /// The generation body is identical to interactive mode; the two differ only in
 /// how the caller treats `Cancelled` (interactive re-prompts, single-shot exits).
-async fn generate_single_shot(
-    provider: &dyn AIProvider,
-    prompt: &str,
-) -> Result<String, LarpshellError> {
+async fn generate_single_shot(provider: &dyn AIProvider, prompt: &str) -> Result<String, LarpshellError> {
     generate_with_cancellation(provider, prompt).await
 }
 
@@ -926,10 +806,7 @@ enum ConfirmStep {
 
 /// Handles the `Yes`/`No`/`Cancel`/`Edit` arms shared by the with-explain prompt
 /// and the post-explanation prompt. `Explain` is handled by the caller.
-fn resolve_confirm(
-    result: ConfirmResult,
-    command: &mut String,
-) -> Result<ConfirmStep, LarpshellError> {
+fn resolve_confirm(result: ConfirmResult, command: &mut String) -> Result<ConfirmStep, LarpshellError> {
     match result {
         ConfirmResult::Yes => {
             execute_or_print(command)?;
@@ -950,11 +827,7 @@ fn resolve_confirm(
 }
 
 async fn confirm_loop(
-    mut command: String,
-    user_input: &str,
-    provider: &dyn AIProvider,
-    mode: &CommandMode,
-    response_style: ResponseStyle,
+    mut command: String, user_input: &str, provider: &dyn AIProvider, mode: &CommandMode, response_style: ResponseStyle,
 ) -> Result<Option<String>, LarpshellError> {
     let cancelled = 'outer: loop {
         let cmd_lines = display_response(&command, response_style);
@@ -994,10 +867,7 @@ fn execute_or_print(command: &str) -> Result<(), LarpshellError> {
 
 // ── explanation helper ──────────────────────────────────────────────────────
 
-async fn get_explanation(
-    command: &str,
-    provider: &dyn AIProvider,
-) -> Result<String, LarpshellError> {
+async fn get_explanation(command: &str, provider: &dyn AIProvider) -> Result<String, LarpshellError> {
     let effective = config::load_explain_prompt().filter(|prompt| validate_explain_prompt(prompt));
     let query = create_explain_prompt(command, effective.as_deref());
 

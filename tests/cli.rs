@@ -3,9 +3,7 @@ use std::env;
 use std::path::PathBuf;
 
 fn with_saved_cwd(f: impl FnOnce() + std::panic::UnwindSafe) {
-    let _guard = CWD_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _guard = CWD_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let original = env::current_dir().unwrap();
     let result = std::panic::catch_unwind(f);
     env::set_current_dir(&original).unwrap();
@@ -61,9 +59,7 @@ fn cd_tilde_subdir_expands() {
 fn cd_nonexistent_keeps_cwd() {
     with_saved_cwd(|| {
         let before = env::current_dir().unwrap();
-        assert!(
-            execute_shell_command_unlocked("cd /nonexistent_dir_that_should_not_exist").is_err()
-        );
+        assert!(execute_shell_command_unlocked("cd /nonexistent_dir_that_should_not_exist").is_err());
         assert_eq!(env::current_dir().unwrap(), before);
     });
 }
@@ -139,17 +135,8 @@ fn inquire_cancel_and_interrupt_map_to_cancelled() {
     use crate::error::LarpshellError;
     use inquire::InquireError;
 
-    assert!(matches!(
-        map_inquire_cancel(InquireError::OperationCanceled),
-        LarpshellError::Cancelled
-    ));
-    assert!(matches!(
-        map_inquire_cancel(InquireError::OperationInterrupted),
-        LarpshellError::Cancelled
-    ));
+    assert!(matches!(map_inquire_cancel(InquireError::OperationCanceled), LarpshellError::Cancelled));
+    assert!(matches!(map_inquire_cancel(InquireError::OperationInterrupted), LarpshellError::Cancelled));
     // real inquire failures keep their normal conversion, not a silent cancel
-    assert!(matches!(
-        map_inquire_cancel(InquireError::NotTTY),
-        LarpshellError::InquireError(InquireError::NotTTY)
-    ));
+    assert!(matches!(map_inquire_cancel(InquireError::NotTTY), LarpshellError::InquireError(InquireError::NotTTY)));
 }

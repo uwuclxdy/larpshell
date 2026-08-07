@@ -33,18 +33,9 @@ fn target_debug_dir() -> PathBuf {
                 .current_dir(env!("CARGO_MANIFEST_DIR"))
                 .output()
                 .expect("failed to run `cargo metadata`");
-            assert!(
-                output.status.success(),
-                "`cargo metadata` failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-            let meta: serde_json::Value =
-                serde_json::from_slice(&output.stdout).expect("failed to parse `cargo metadata`");
-            meta["target_directory"]
-                .as_str()
-                .map(PathBuf::from)
-                .expect("`cargo metadata` is missing `target_directory`")
-                .join("debug")
+            assert!(output.status.success(), "`cargo metadata` failed: {}", String::from_utf8_lossy(&output.stderr));
+            let meta: serde_json::Value = serde_json::from_slice(&output.stdout).expect("failed to parse `cargo metadata`");
+            meta["target_directory"].as_str().map(PathBuf::from).expect("`cargo metadata` is missing `target_directory`").join("debug")
         })
         .clone()
 }
@@ -62,9 +53,7 @@ fn binary() -> PathBuf {
 }
 
 fn ensure_binary_built() {
-    if TEST_BINARY_OVERRIDE.lock().unwrap().is_some()
-        || option_env!("CARGO_BIN_EXE_larpshell").is_some()
-    {
+    if TEST_BINARY_OVERRIDE.lock().unwrap().is_some() || option_env!("CARGO_BIN_EXE_larpshell").is_some() {
         return;
     }
 
@@ -123,9 +112,7 @@ fn run(home: &std::path::Path, args: &[&str]) -> std::process::Output {
 }
 
 fn temp_home(suffix: &str) -> PathBuf {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("target/tests")
-        .join(format!("larpshell_test_{suffix}"));
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/tests").join(format!("larpshell_test_{suffix}"));
     // Pre-create the bash completion marker so auto_setup_shell_function sees it as
     // already installed and returns Ok(false) instead of exiting the process early.
     let completion_dir = dir.join(".local/share/bash-completion/completions");
@@ -144,10 +131,7 @@ fn mock_ollama(responses: &[&str]) -> u16 {
 
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
-    let responses: Vec<String> = responses
-        .iter()
-        .map(std::string::ToString::to_string)
-        .collect();
+    let responses: Vec<String> = responses.iter().map(std::string::ToString::to_string).collect();
 
     std::thread::spawn(move || {
         for text in responses {
@@ -186,9 +170,7 @@ fn write_ollama_config(home: &std::path::Path, port: u16) {
     fs::create_dir_all(&config_dir).unwrap();
     fs::write(
         config_dir.join("config.toml"),
-        format!(
-            "provider = \"ollama\"\n\n[providers.ollama]\nbase_url = \"http://127.0.0.1:{port}\"\nmodel = \"test\"\n"
-        ),
+        format!("provider = \"ollama\"\n\n[providers.ollama]\nbase_url = \"http://127.0.0.1:{port}\"\nmodel = \"test\"\n"),
     )
     .unwrap();
 }
@@ -197,11 +179,7 @@ fn write_ollama_config(home: &std::path::Path, port: u16) {
 /// prompts and the edit UI actually read from the piped stdin instead of being
 /// auto-approved. The piped bytes represent raw key presses (Y/N/Enter/escape
 /// sequences for arrow keys, etc.).
-fn run_with_stdin_interactive(
-    home: &std::path::Path,
-    args: &[&str],
-    stdin_data: &[u8],
-) -> std::process::Output {
+fn run_with_stdin_interactive(home: &std::path::Path, args: &[&str], stdin_data: &[u8]) -> std::process::Output {
     ensure_binary_built();
     let mut child = Command::new(binary())
         .args(args)
@@ -221,17 +199,11 @@ fn run_with_stdin_interactive(
         let _ = pipe.write_all(&bytes);
     });
 
-    child
-        .wait_with_output()
-        .expect("failed to wait for larpshell")
+    child.wait_with_output().expect("failed to wait for larpshell")
 }
 
 /// Like `run`, but feeds `stdin_data` into the binary's stdin before closing it.
-fn run_with_stdin(
-    home: &std::path::Path,
-    args: &[&str],
-    stdin_data: &[u8],
-) -> std::process::Output {
+fn run_with_stdin(home: &std::path::Path, args: &[&str], stdin_data: &[u8]) -> std::process::Output {
     ensure_binary_built();
     let mut child = Command::new(binary())
         .args(args)
@@ -251,9 +223,7 @@ fn run_with_stdin(
         // dropping `pipe` closes stdin → binary sees EOF
     });
 
-    child
-        .wait_with_output()
-        .expect("failed to wait for larpshell")
+    child.wait_with_output().expect("failed to wait for larpshell")
 }
 
 // ── history subcommand tests ─────────────────────────────────────────────────
@@ -263,22 +233,13 @@ fn history_on_prints_confirmation() {
     let home = temp_home("history_on");
     let out = run(&home, &["history", "on"]);
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        out.status.success(),
-        "history on should exit 0; stderr: {stderr}"
-    );
+    assert!(out.status.success(), "history on should exit 0; stderr: {stderr}");
     assert!(
         stderr.contains("history") && (stderr.contains("on") || stderr.contains("enabled")),
         "expected confirmation message; stderr: {stderr}"
     );
-    let disabled_flag = home
-        .join("config")
-        .join("larpshell")
-        .join(".history-disabled");
-    assert!(
-        !disabled_flag.exists(),
-        ".history-disabled must not exist after 'history on'"
-    );
+    let disabled_flag = home.join("config").join("larpshell").join(".history-disabled");
+    assert!(!disabled_flag.exists(), ".history-disabled must not exist after 'history on'");
 }
 
 #[test]
@@ -287,35 +248,20 @@ fn history_off_creates_disabled_flag_and_prints_confirmation() {
 
     let out = run(&home, &["history", "off"]);
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        out.status.success(),
-        "history off should exit 0; stderr: {stderr}"
-    );
+    assert!(out.status.success(), "history off should exit 0; stderr: {stderr}");
     assert!(
         stderr.contains("history") && (stderr.contains("off") || stderr.contains("disabled")),
         "expected confirmation message; stderr: {stderr}"
     );
-    let disabled_flag = home
-        .join("config")
-        .join("larpshell")
-        .join(".history-disabled");
-    assert!(
-        disabled_flag.exists(),
-        ".history-disabled must exist after 'history off'"
-    );
+    let disabled_flag = home.join("config").join("larpshell").join(".history-disabled");
+    assert!(disabled_flag.exists(), ".history-disabled must exist after 'history off'");
 }
 
 #[test]
 fn history_enabled_by_default() {
     let home = temp_home("history_default");
-    let disabled_flag = home
-        .join("config")
-        .join("larpshell")
-        .join(".history-disabled");
-    assert!(
-        !disabled_flag.exists(),
-        ".history-disabled must not exist in a fresh home"
-    );
+    let disabled_flag = home.join("config").join("larpshell").join(".history-disabled");
+    assert!(!disabled_flag.exists(), ".history-disabled must not exist in a fresh home");
 }
 
 // ── provider config tests ───────────────────────────────────────────────────
@@ -334,9 +280,7 @@ model = "openrouter/auto"
     let config: Config = from_str(config_toml).expect("openrouter TOML should parse");
     assert_eq!(config.active_provider, ActiveProvider::OpenRouter);
 
-    let provider_config = config
-        .provider_config()
-        .expect("openrouter provider config should resolve");
+    let provider_config = config.provider_config().expect("openrouter provider config should resolve");
 
     assert_eq!(provider_config.provider_type, ActiveProvider::OpenRouter);
     match provider_config.config {
@@ -356,9 +300,7 @@ provider = "openrouter"
 "#;
 
     let config: Config = from_str(config_toml).expect("openrouter provider enum should parse");
-    let error = config
-        .provider_config()
-        .expect_err("missing openrouter config should return an error");
+    let error = config.provider_config().expect_err("missing openrouter config should return an error");
 
     match error {
         LarpshellError::ConfigError(message) => {
@@ -381,14 +323,9 @@ model = "openrouter/auto"
 "#;
 
     let config: Config = from_str(config_toml).expect("openrouter TOML should parse");
-    let provider = create_provider(&config)
-        .expect("openrouter provider should be created when support is implemented");
+    let provider = create_provider(&config).expect("openrouter provider should be created when support is implemented");
 
-    assert!(
-        provider.name().contains("OpenRouter"),
-        "expected provider name to identify OpenRouter, got {}",
-        provider.name()
-    );
+    assert!(provider.name().contains("OpenRouter"), "expected provider name to identify OpenRouter, got {}", provider.name());
 }
 
 // ── error formatting tests ──────────────────────────────────────────────────
@@ -425,11 +362,7 @@ model = "test"
 
 #[test]
 fn agent_field_parses_mode_values() {
-    for (value, expected) in [
-        ("off", AgentMode::Off),
-        ("safe", AgentMode::Safe),
-        ("on", AgentMode::On),
-    ] {
+    for (value, expected) in [("off", AgentMode::Off), ("safe", AgentMode::Safe), ("on", AgentMode::On)] {
         let config_toml = format!(
             "provider = \"ollama\"\nagent = \"{value}\"\n\n[providers.ollama]\nbase_url = \"http://localhost:11434\"\nmodel = \"test\"\n"
         );
@@ -470,20 +403,11 @@ fn agent_subcommand_on_prints_confirmation() {
     write_ollama_config(&home, port);
     let out = run(&home, &["agent", "on"]);
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        out.status.success(),
-        "agent on should exit 0; stderr: {stderr}"
-    );
-    assert!(
-        stderr.contains("agent mode: on"),
-        "expected confirmation message; stderr: {stderr}"
-    );
+    assert!(out.status.success(), "agent on should exit 0; stderr: {stderr}");
+    assert!(stderr.contains("agent mode: on"), "expected confirmation message; stderr: {stderr}");
     let config_path = home.join("config").join("larpshell").join("config.toml");
     let contents = fs::read_to_string(config_path).unwrap();
-    assert!(
-        contents.contains("agent = \"on\""),
-        "config should have agent = \"on\""
-    );
+    assert!(contents.contains("agent = \"on\""), "config should have agent = \"on\"");
 }
 
 #[test]
@@ -493,20 +417,11 @@ fn agent_subcommand_safe_prints_confirmation() {
     write_ollama_config(&home, port);
     let out = run(&home, &["agent", "safe"]);
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        out.status.success(),
-        "agent safe should exit 0; stderr: {stderr}"
-    );
-    assert!(
-        stderr.contains("agent mode: safe"),
-        "expected confirmation message; stderr: {stderr}"
-    );
+    assert!(out.status.success(), "agent safe should exit 0; stderr: {stderr}");
+    assert!(stderr.contains("agent mode: safe"), "expected confirmation message; stderr: {stderr}");
     let config_path = home.join("config").join("larpshell").join("config.toml");
     let contents = fs::read_to_string(config_path).unwrap();
-    assert!(
-        contents.contains("agent = \"safe\""),
-        "config should have agent = \"safe\""
-    );
+    assert!(contents.contains("agent = \"safe\""), "config should have agent = \"safe\"");
 }
 
 #[test]
@@ -517,20 +432,11 @@ fn agent_subcommand_off_prints_confirmation() {
     run(&home, &["agent", "on"]);
     let out = run(&home, &["agent", "off"]);
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        out.status.success(),
-        "agent off should exit 0; stderr: {stderr}"
-    );
-    assert!(
-        stderr.contains("agent mode: off"),
-        "expected confirmation message; stderr: {stderr}"
-    );
+    assert!(out.status.success(), "agent off should exit 0; stderr: {stderr}");
+    assert!(stderr.contains("agent mode: off"), "expected confirmation message; stderr: {stderr}");
     let config_path = home.join("config").join("larpshell").join("config.toml");
     let contents = fs::read_to_string(config_path).unwrap();
-    assert!(
-        contents.contains("agent = \"off\""),
-        "config should have agent = \"off\""
-    );
+    assert!(contents.contains("agent = \"off\""), "config should have agent = \"off\"");
 }
 
 #[test]
@@ -544,14 +450,7 @@ fn atomic_write_produces_correct_content_and_no_temp_file() {
 
     atomic_write(&target, content).expect("atomic_write should succeed");
 
-    assert_eq!(
-        fs::read_to_string(&target).unwrap(),
-        content,
-        "target should contain what was written"
-    );
-    assert!(
-        !dir.join("config.tmp").exists(),
-        "temp file must not be left behind after a successful write"
-    );
+    assert_eq!(fs::read_to_string(&target).unwrap(), content, "target should contain what was written");
+    assert!(!dir.join("config.tmp").exists(), "temp file must not be left behind after a successful write");
     let _ = fs::remove_dir_all(&dir);
 }

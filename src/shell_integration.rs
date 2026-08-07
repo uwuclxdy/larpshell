@@ -10,17 +10,9 @@ use crate::error::LarpshellError;
 static ATOMIC_WRITE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 fn atomic_temp_path(path: &Path) -> PathBuf {
-    let mut name = path
-        .file_name()
-        .map_or_else(|| "larpshell".into(), |name| name.to_os_string());
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| duration.as_nanos());
-    name.push(format!(
-        ".{}.{}.tmp",
-        std::process::id(),
-        now + u128::from(ATOMIC_WRITE_COUNTER.fetch_add(1, Ordering::Relaxed))
-    ));
+    let mut name = path.file_name().map_or_else(|| "larpshell".into(), |name| name.to_os_string());
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |duration| duration.as_nanos());
+    name.push(format!(".{}.{}.tmp", std::process::id(), now + u128::from(ATOMIC_WRITE_COUNTER.fetch_add(1, Ordering::Relaxed))));
     path.with_file_name(name)
 }
 
@@ -28,9 +20,8 @@ fn atomic_write(path: &Path, contents: &str) -> Result<(), LarpshellError> {
     let tmp = atomic_temp_path(path);
     let metadata = fs::metadata(path)?;
     let mut file = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
-    if let Err(error) = preserve_permissions(&file, &metadata)
-        .and_then(|()| file.write_all(contents.as_bytes()))
-        .and_then(|()| file.sync_all())
+    if let Err(error) =
+        preserve_permissions(&file, &metadata).and_then(|()| file.write_all(contents.as_bytes())).and_then(|()| file.sync_all())
     {
         let _ = fs::remove_file(&tmp);
         return Err(error.into());
@@ -253,21 +244,13 @@ fn verify_and_fix_autocomplete() -> Result<(), LarpshellError> {
         generate_zsh_autocomplete(),
         Some("# larpshell zsh autocomplete"),
     )?;
-    verify_and_fix_autocomplete_file(
-        &home.join(".config/fish/completions/larpshell.fish"),
-        generate_fish_autocomplete(),
-        None,
-    )?;
+    verify_and_fix_autocomplete_file(&home.join(".config/fish/completions/larpshell.fish"), generate_fish_autocomplete(), None)?;
     Ok(())
 }
 
 /// Rewrites `path` with `header` (if any) + `expected` when its content drifts.
 /// No-ops when the file doesn't exist or already contains the expected content.
-fn verify_and_fix_autocomplete_file(
-    path: &std::path::Path,
-    expected: &str,
-    header: Option<&str>,
-) -> Result<(), LarpshellError> {
+fn verify_and_fix_autocomplete_file(path: &std::path::Path, expected: &str, header: Option<&str>) -> Result<(), LarpshellError> {
     if !path.exists() {
         return Ok(());
     }
@@ -370,11 +353,7 @@ fn setup_fish_integration() -> Result<bool, LarpshellError> {
 
     fs::create_dir_all(&fish_functions_dir)?;
 
-    let mut file = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(&fish_function_path)?;
+    let mut file = OpenOptions::new().create(true).write(true).truncate(true).open(&fish_function_path)?;
 
     writeln!(file, "# larpshell shell integration")?;
     writeln!(file, "{}", generate_fish_function())?;
@@ -409,8 +388,7 @@ fn is_function_start(line: &str, function_sig: &str) -> bool {
 }
 
 fn line_brace_delta(line: &str) -> i32 {
-    i32::try_from(line.matches('{').count()).unwrap_or(i32::MAX)
-        - i32::try_from(line.matches('}').count()).unwrap_or(i32::MAX)
+    i32::try_from(line.matches('{').count()).unwrap_or(i32::MAX) - i32::try_from(line.matches('}').count()).unwrap_or(i32::MAX)
 }
 
 /// Removes a marked function block from shell config content.
@@ -495,15 +473,11 @@ pub fn remove_bash_integration() -> Result<bool, LarpshellError> {
 
     let content = fs::read_to_string(&bashrc_path)?;
 
-    if !content.contains("# larpshell shell integration")
-        && !content.contains("larpshell() {")
-        && !content.contains("larpshell()")
-    {
+    if !content.contains("# larpshell shell integration") && !content.contains("larpshell() {") && !content.contains("larpshell()") {
         return Ok(false);
     }
 
-    let (new_content, found) =
-        remove_marked_function_block(&content, "# larpshell shell integration", "larpshell()");
+    let (new_content, found) = remove_marked_function_block(&content, "# larpshell shell integration", "larpshell()");
 
     if found {
         atomic_write(&bashrc_path, &new_content)?;
@@ -535,11 +509,7 @@ fn setup_bash_autocomplete() -> Result<bool, LarpshellError> {
 
     fs::create_dir_all(&completion_dir)?;
 
-    let mut file = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(&completion_path)?;
+    let mut file = OpenOptions::new().create(true).write(true).truncate(true).open(&completion_path)?;
 
     writeln!(file, "# larpshell bash autocomplete")?;
     writeln!(file, "{}", generate_bash_autocomplete())?;
@@ -563,11 +533,7 @@ fn setup_zsh_autocomplete() -> Result<bool, LarpshellError> {
 
     fs::create_dir_all(&completion_dir)?;
 
-    let mut file = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(&completion_path)?;
+    let mut file = OpenOptions::new().create(true).write(true).truncate(true).open(&completion_path)?;
 
     writeln!(file, "# larpshell zsh autocomplete")?;
     writeln!(file, "{}", generate_zsh_autocomplete())?;
@@ -599,11 +565,7 @@ fn setup_fish_autocomplete() -> Result<bool, LarpshellError> {
 
     fs::create_dir_all(&completion_dir)?;
 
-    let mut file = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(&completion_path)?;
+    let mut file = OpenOptions::new().create(true).write(true).truncate(true).open(&completion_path)?;
 
     writeln!(file, "{}", generate_fish_autocomplete())?;
 
@@ -650,9 +612,7 @@ fn remove_zsh_fpath_block(zshrc: &std::path::Path, marker: &str) -> Result<bool,
             continue;
         }
         if skip {
-            if line.contains(".local/share/zsh/site-functions")
-                || line.contains("autoload -Uz compinit")
-            {
+            if line.contains(".local/share/zsh/site-functions") || line.contains("autoload -Uz compinit") {
                 continue;
             }
             skip = false;
@@ -722,8 +682,7 @@ fn migrate_nlsh_rs_bash() -> Result<bool, LarpshellError> {
     if !content.contains("nlsh-rs()") && !content.contains("# nlsh-rs shell integration") {
         return Ok(false);
     }
-    let (new_content, found) =
-        remove_marked_function_block(&content, "# nlsh-rs shell integration", "nlsh-rs()");
+    let (new_content, found) = remove_marked_function_block(&content, "# nlsh-rs shell integration", "nlsh-rs()");
     if found {
         atomic_write(&bashrc, &new_content)?;
     }
@@ -792,38 +751,23 @@ mod tests {
         // bash first-word list: all subcommands then the help/version flags.
         let bash = generate_bash_autocomplete();
         let expected = format!("{} --help --version", vocab::SUBCOMMANDS.join(" "));
-        assert!(
-            bash.contains(&expected),
-            "bash first-word completion drifted from vocab::SUBCOMMANDS"
-        );
+        assert!(bash.contains(&expected), "bash first-word completion drifted from vocab::SUBCOMMANDS");
         // zsh and fish list each subcommand on its own line.
         let zsh = generate_zsh_autocomplete();
         let fish = generate_fish_autocomplete();
         for &name in vocab::SUBCOMMANDS {
             assert!(zsh.contains(&format!("'{name}:")), "zsh missing {name:?}");
-            assert!(
-                fish.contains(&format!("-a {name} ")),
-                "fish missing {name:?}"
-            );
+            assert!(fish.contains(&format!("-a {name} ")), "fish missing {name:?}");
         }
     }
 
     #[test]
     fn autocomplete_agent_toggles_match_vocab() {
         let joined = vocab::AGENT_TOGGLES.join(" ");
-        assert!(
-            generate_bash_autocomplete().contains(&format!("compgen -W \"{joined}\"")),
-            "bash agent toggles drifted from vocab"
-        );
-        assert!(
-            generate_fish_autocomplete().contains(&format!("-a \"{joined}\"")),
-            "fish agent toggles drifted from vocab"
-        );
+        assert!(generate_bash_autocomplete().contains(&format!("compgen -W \"{joined}\"")), "bash agent toggles drifted from vocab");
+        assert!(generate_fish_autocomplete().contains(&format!("-a \"{joined}\"")), "fish agent toggles drifted from vocab");
         for &t in vocab::AGENT_TOGGLES {
-            assert!(
-                generate_zsh_autocomplete().contains(&format!("'{t}:")),
-                "zsh agent toggle {t:?} missing"
-            );
+            assert!(generate_zsh_autocomplete().contains(&format!("'{t}:")), "zsh agent toggle {t:?} missing");
         }
     }
 
@@ -831,52 +775,28 @@ mod tests {
     fn autocomplete_bool_toggles_match_vocab() {
         // Membership only: completion order is cosmetic and differs per shell.
         for &t in vocab::BOOL_TOGGLES {
-            assert!(
-                generate_bash_autocomplete().contains(t),
-                "bash bool toggle {t:?} missing"
-            );
-            assert!(
-                generate_fish_autocomplete().contains(t),
-                "fish bool toggle {t:?} missing"
-            );
+            assert!(generate_bash_autocomplete().contains(t), "bash bool toggle {t:?} missing");
+            assert!(generate_fish_autocomplete().contains(t), "fish bool toggle {t:?} missing");
         }
     }
 
     #[test]
     fn autocomplete_prompt_kinds_match_vocab() {
         let joined = vocab::PROMPT_KINDS.join(" ");
-        assert!(
-            generate_bash_autocomplete().contains(&format!("compgen -W \"{joined}\"")),
-            "bash prompt kinds drifted from vocab"
-        );
+        assert!(generate_bash_autocomplete().contains(&format!("compgen -W \"{joined}\"")), "bash prompt kinds drifted from vocab");
         for &k in vocab::PROMPT_KINDS {
-            assert!(
-                generate_fish_autocomplete().contains(&format!("-a {k} ")),
-                "fish prompt kind {k:?} missing"
-            );
-            assert!(
-                generate_zsh_autocomplete().contains(&format!("'{k}:")),
-                "zsh prompt kind {k:?} missing"
-            );
+            assert!(generate_fish_autocomplete().contains(&format!("-a {k} ")), "fish prompt kind {k:?} missing");
+            assert!(generate_zsh_autocomplete().contains(&format!("'{k}:")), "zsh prompt kind {k:?} missing");
         }
     }
 
     #[test]
     fn autocomplete_prompt_actions_match_vocab() {
         let joined = vocab::PROMPT_ACTIONS.join(" ");
-        assert!(
-            generate_bash_autocomplete().contains(&format!("compgen -W \"{joined}\"")),
-            "bash prompt actions drifted from vocab"
-        );
-        assert!(
-            generate_fish_autocomplete().contains(&format!("-a \"{joined}\"")),
-            "fish prompt actions drifted from vocab"
-        );
+        assert!(generate_bash_autocomplete().contains(&format!("compgen -W \"{joined}\"")), "bash prompt actions drifted from vocab");
+        assert!(generate_fish_autocomplete().contains(&format!("-a \"{joined}\"")), "fish prompt actions drifted from vocab");
         for &a in vocab::PROMPT_ACTIONS {
-            assert!(
-                generate_zsh_autocomplete().contains(&format!("'{a}:")),
-                "zsh prompt action {a:?} missing"
-            );
+            assert!(generate_zsh_autocomplete().contains(&format!("'{a}:")), "zsh prompt action {a:?} missing");
         }
     }
 
@@ -903,14 +823,9 @@ mod tests {
         let s = generate_bash_autocomplete();
         // history arm must not offer 'safe'; agent arm does
         // The split arms now have history|verbose and agent separately
+        assert!(s.contains("history|verbose)"), "bash autocomplete: history and verbose should share an arm without 'safe'");
         assert!(
-            s.contains("history|verbose)"),
-            "bash autocomplete: history and verbose should share an arm without 'safe'"
-        );
-        assert!(
-            !s.contains(
-                "history|verbose)\n                COMPREPLY=( $(compgen -W \"off safe on\""
-            ),
+            !s.contains("history|verbose)\n                COMPREPLY=( $(compgen -W \"off safe on\""),
             "bash autocomplete: history arm must not offer 'safe'"
         );
     }
@@ -918,19 +833,13 @@ mod tests {
     #[test]
     fn bash_autocomplete_prompt_has_agent_kinds() {
         let s = generate_bash_autocomplete();
-        assert!(
-            s.contains("agent agent-safe"),
-            "bash autocomplete: prompt completions missing 'agent' and 'agent-safe'"
-        );
+        assert!(s.contains("agent agent-safe"), "bash autocomplete: prompt completions missing 'agent' and 'agent-safe'");
     }
 
     #[test]
     fn bash_autocomplete_prompt_action_has_reset() {
         let s = generate_bash_autocomplete();
-        assert!(
-            s.contains("show edit reset"),
-            "bash autocomplete: prompt action completions missing 'reset'"
-        );
+        assert!(s.contains("show edit reset"), "bash autocomplete: prompt action completions missing 'reset'");
     }
 
     #[test]
@@ -942,92 +851,58 @@ mod tests {
     #[test]
     fn zsh_autocomplete_agent_has_safe() {
         let s = generate_zsh_autocomplete();
-        assert!(
-            s.contains("safe:safe mode"),
-            "zsh autocomplete: agent arm missing 'safe' toggle"
-        );
+        assert!(s.contains("safe:safe mode"), "zsh autocomplete: agent arm missing 'safe' toggle");
     }
 
     #[test]
     fn zsh_autocomplete_prompt_has_agent_kinds() {
         let s = generate_zsh_autocomplete();
-        assert!(
-            s.contains("agent:agent prompt"),
-            "zsh autocomplete: prompt kinds missing 'agent'"
-        );
-        assert!(
-            s.contains("agent-safe:agent safe prompt"),
-            "zsh autocomplete: prompt kinds missing 'agent-safe'"
-        );
+        assert!(s.contains("agent:agent prompt"), "zsh autocomplete: prompt kinds missing 'agent'");
+        assert!(s.contains("agent-safe:agent safe prompt"), "zsh autocomplete: prompt kinds missing 'agent-safe'");
     }
 
     #[test]
     fn zsh_autocomplete_prompt_action_has_reset() {
         let s = generate_zsh_autocomplete();
-        assert!(
-            s.contains("reset:reset prompt"),
-            "zsh autocomplete: prompt action missing 'reset'"
-        );
+        assert!(s.contains("reset:reset prompt"), "zsh autocomplete: prompt action missing 'reset'");
     }
 
     #[test]
     fn fish_autocomplete_has_verbose_subcommand() {
         let s = generate_fish_autocomplete();
-        assert!(
-            s.contains("-a verbose"),
-            "fish autocomplete missing 'verbose'"
-        );
+        assert!(s.contains("-a verbose"), "fish autocomplete missing 'verbose'");
     }
 
     #[test]
     fn fish_autocomplete_prompt_has_agent_kinds() {
         let s = generate_fish_autocomplete();
-        assert!(
-            s.contains("-a agent -d 'agent prompt'"),
-            "fish autocomplete: prompt completions missing 'agent'"
-        );
-        assert!(
-            s.contains("-a agent-safe"),
-            "fish autocomplete: prompt completions missing 'agent-safe'"
-        );
+        assert!(s.contains("-a agent -d 'agent prompt'"), "fish autocomplete: prompt completions missing 'agent'");
+        assert!(s.contains("-a agent-safe"), "fish autocomplete: prompt completions missing 'agent-safe'");
     }
 
     #[test]
     fn fish_autocomplete_prompt_action_has_reset() {
         let s = generate_fish_autocomplete();
-        assert!(
-            s.contains("show edit reset"),
-            "fish autocomplete: prompt actions missing 'reset'"
-        );
+        assert!(s.contains("show edit reset"), "fish autocomplete: prompt actions missing 'reset'");
     }
 
     #[test]
     fn bash_function_has_verbose_passthrough() {
         let s = generate_bash_function();
-        assert!(
-            s.contains("verbose"),
-            "bash wrapper function missing 'verbose' passthrough"
-        );
+        assert!(s.contains("verbose"), "bash wrapper function missing 'verbose' passthrough");
     }
 
     #[test]
     fn fish_function_has_verbose_and_agent_passthroughs() {
         let s = generate_fish_function();
-        assert!(
-            s.contains("verbose"),
-            "fish wrapper function missing 'verbose' passthrough"
-        );
-        assert!(
-            s.contains("agent"),
-            "fish wrapper function missing 'agent' passthrough"
-        );
+        assert!(s.contains("verbose"), "fish wrapper function missing 'verbose' passthrough");
+        assert!(s.contains("agent"), "fish wrapper function missing 'agent' passthrough");
     }
 
     #[test]
     fn remove_marked_function_block_handles_one_line_function() {
         let content = "before\n# larpshell shell integration\nlarpshell() { command larpshell \"$@\"; }\nafter\n";
-        let (cleaned, found) =
-            remove_marked_function_block(content, "# larpshell shell integration", "larpshell()");
+        let (cleaned, found) = remove_marked_function_block(content, "# larpshell shell integration", "larpshell()");
 
         assert!(found);
         assert_eq!(cleaned, "before\nafter\n");
@@ -1036,8 +911,7 @@ mod tests {
     #[test]
     fn remove_marked_function_block_preserves_following_config() {
         let content = "# larpshell shell integration\nlarpshell() {\n    command larpshell \"$@\"\n}\nexport PATH=$PATH:/tmp\n";
-        let (cleaned, found) =
-            remove_marked_function_block(content, "# larpshell shell integration", "larpshell()");
+        let (cleaned, found) = remove_marked_function_block(content, "# larpshell shell integration", "larpshell()");
 
         assert!(found);
         assert_eq!(cleaned, "export PATH=$PATH:/tmp\n");
@@ -1046,8 +920,7 @@ mod tests {
     #[test]
     fn remove_marked_function_block_handles_edited_function_signature() {
         let content = "# larpshell shell integration\nfunction larpshell { command larpshell \"$@\"; }\nexport PATH=$PATH:/tmp\n";
-        let (cleaned, found) =
-            remove_marked_function_block(content, "# larpshell shell integration", "larpshell()");
+        let (cleaned, found) = remove_marked_function_block(content, "# larpshell shell integration", "larpshell()");
 
         assert!(found);
         assert_eq!(cleaned, "export PATH=$PATH:/tmp\n");
@@ -1056,8 +929,7 @@ mod tests {
     #[test]
     fn remove_marked_function_block_handles_function_keyword_next_line_brace() {
         let content = "# larpshell shell integration\nfunction larpshell\n{\n    command larpshell \"$@\"\n}\nexport PATH=$PATH:/tmp\n";
-        let (cleaned, found) =
-            remove_marked_function_block(content, "# larpshell shell integration", "larpshell()");
+        let (cleaned, found) = remove_marked_function_block(content, "# larpshell shell integration", "larpshell()");
 
         assert!(found);
         assert_eq!(cleaned, "export PATH=$PATH:/tmp\n");
@@ -1066,8 +938,7 @@ mod tests {
     #[test]
     fn remove_marked_function_block_preserves_config_when_signature_missing() {
         let content = "# larpshell shell integration\nexport PATH=$PATH:/tmp\n";
-        let (cleaned, found) =
-            remove_marked_function_block(content, "# larpshell shell integration", "larpshell()");
+        let (cleaned, found) = remove_marked_function_block(content, "# larpshell shell integration", "larpshell()");
 
         assert!(found);
         assert_eq!(cleaned, "export PATH=$PATH:/tmp\n");
@@ -1075,10 +946,8 @@ mod tests {
 
     #[test]
     fn remove_marked_function_block_preserves_non_function_larpshell_command() {
-        let content =
-            "# larpshell shell integration\nlarpshell --version\nexport PATH=$PATH:/tmp\n";
-        let (cleaned, found) =
-            remove_marked_function_block(content, "# larpshell shell integration", "larpshell()");
+        let content = "# larpshell shell integration\nlarpshell --version\nexport PATH=$PATH:/tmp\n";
+        let (cleaned, found) = remove_marked_function_block(content, "# larpshell shell integration", "larpshell()");
 
         assert!(found);
         assert_eq!(cleaned, "larpshell --version\nexport PATH=$PATH:/tmp\n");
@@ -1087,13 +956,9 @@ mod tests {
     #[test]
     fn remove_marked_function_block_preserves_different_function_name() {
         let content = "# larpshell shell integration\nfunction larpshell_backup { command larpshell \"$@\"; }\nexport PATH=$PATH:/tmp\n";
-        let (cleaned, found) =
-            remove_marked_function_block(content, "# larpshell shell integration", "larpshell()");
+        let (cleaned, found) = remove_marked_function_block(content, "# larpshell shell integration", "larpshell()");
 
         assert!(found);
-        assert_eq!(
-            cleaned,
-            "function larpshell_backup { command larpshell \"$@\"; }\nexport PATH=$PATH:/tmp\n"
-        );
+        assert_eq!(cleaned, "function larpshell_backup { command larpshell \"$@\"; }\nexport PATH=$PATH:/tmp\n");
     }
 }

@@ -52,10 +52,7 @@ impl StatusLine {
             }
         });
 
-        Self {
-            running,
-            handle: Some(handle),
-        }
+        Self { running, handle: Some(handle) }
     }
 
     /// Stops the animation, joins the background thread, clears the status line,

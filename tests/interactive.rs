@@ -1,6 +1,6 @@
 use crate::interactive::{
-    NlshHelper, clear_preview_sequence, cycle_slash_preview, format_preview_row, next_cycle_index,
-    preview_items, render_preview_sequence, selection_ghost,
+    NlshHelper, clear_preview_sequence, cycle_slash_preview, format_preview_row, next_cycle_index, preview_items, render_preview_sequence,
+    selection_ghost,
 };
 use crate::tests;
 use rustyline::Cmd;
@@ -58,13 +58,7 @@ fn format_preview_row_truncates_to_width() {
     // Strips ANSI below, so it stays agnostic to the process-global color
     // override other tests may have toggled.
     let width = 24;
-    let row = format_preview_row(
-        "/uninstall",
-        0,
-        "uninstall larpshell completely",
-        width,
-        false,
-    );
+    let row = format_preview_row("/uninstall", 0, "uninstall larpshell completely", width, false);
     let plain = strip_ansi_escapes::strip_str(&row);
     assert!(plain.chars().count() <= width, "row too wide: {plain:?}");
     assert!(plain.ends_with('…'), "expected ellipsis: {plain:?}");
@@ -76,26 +70,14 @@ fn selected_row_keeps_description_alignment() {
     // lines up whether or not a row is highlighted. Strip ANSI (override-
     // agnostic) and measure display columns, since `❯` is 3 bytes but 1 column.
     let desc_col = |sel| {
-        let row = strip_ansi_escapes::strip_str(format_preview_row(
-            "/api",
-            0,
-            "configure",
-            usize::MAX,
-            sel,
-        ));
+        let row = strip_ansi_escapes::strip_str(format_preview_row("/api", 0, "configure", usize::MAX, sel));
         let prefix = &row[..row.find("configure").unwrap()];
         (UnicodeWidthStr::width(prefix), row)
     };
     let (unselected_col, _) = desc_col(false);
     let (selected_col, selected) = desc_col(true);
-    assert_eq!(
-        unselected_col, selected_col,
-        "selected row must not shift the description column"
-    );
-    assert!(
-        selected.starts_with("❯ "),
-        "selected row needs a marker: {selected:?}"
-    );
+    assert_eq!(unselected_col, selected_col, "selected row must not shift the description column");
+    assert!(selected.starts_with("❯ "), "selected row needs a marker: {selected:?}");
 }
 
 #[test]
@@ -114,11 +96,7 @@ fn preview_items_prefill_command_names() {
     let items = preview_items("/");
     assert!(!items.is_empty(), "slash alone lists every command");
     // Selecting a command prefills the full `/name` into the buffer.
-    assert!(
-        items
-            .iter()
-            .all(|i| i.replacement == i.name && i.name.starts_with('/'))
-    );
+    assert!(items.iter().all(|i| i.replacement == i.name && i.name.starts_with('/')));
     assert!(items.iter().any(|i| i.replacement == "/agent"));
 }
 
@@ -145,10 +123,7 @@ fn selection_ghost_is_untyped_suffix() {
     // No ghost once the selection is fully typed.
     assert_eq!(selection_ghost("/agent", "/agent", 0), None);
     // Argument selections ghost the value tail too.
-    assert_eq!(
-        selection_ghost("/agent ", "/agent ", 0).as_deref(),
-        Some("off")
-    );
+    assert_eq!(selection_ghost("/agent ", "/agent ", 0).as_deref(), Some("off"));
 }
 
 // ── history load/save ─────────────────────────────────────────────────────
@@ -169,17 +144,10 @@ fn history_survives_enabling_mid_session_after_starting_disabled() {
     std::fs::write(config_dir.join(".history"), "prior session command\n").unwrap();
 
     let out = tests::run_with_stdin_interactive(&home, &[], b"/history on\n/quit\n");
-    assert!(
-        out.status.success(),
-        "REPL session should exit cleanly; stderr: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
+    assert!(out.status.success(), "REPL session should exit cleanly; stderr: {}", String::from_utf8_lossy(&out.stderr));
 
     let contents = std::fs::read_to_string(config_dir.join(".history")).unwrap();
-    assert!(
-        contents.contains("prior session command"),
-        "enabling history mid-session must not wipe prior entries: {contents:?}"
-    );
+    assert!(contents.contains("prior session command"), "enabling history mid-session must not wipe prior entries: {contents:?}");
 }
 
 // ── preview clear/redraw escape sequences ───────────────────────────────────
@@ -190,15 +158,8 @@ fn clear_preview_sequence_returns_to_column_zero_before_each_erase() {
     // the cursor already sits to end-of-line, leaving the left half of a
     // removed row on screen.
     let seq = clear_preview_sequence(3);
-    assert_eq!(
-        seq.matches("\n\r\x1b[K").count(),
-        3,
-        "each erased line must return to column 0 first: {seq:?}"
-    );
-    assert!(
-        !seq.contains("\n\x1b[K"),
-        "no erase may happen without a preceding \\r: {seq:?}"
-    );
+    assert_eq!(seq.matches("\n\r\x1b[K").count(), 3, "each erased line must return to column 0 first: {seq:?}");
+    assert!(!seq.contains("\n\x1b[K"), "no erase may happen without a preceding \\r: {seq:?}");
 }
 
 #[test]
@@ -261,10 +222,7 @@ fn format_preview_row_description_ellipsis_fits_a_single_free_column() {
     let max_width = 20; // leaves exactly 1 free column for "/api"'s description
     let row = format_preview_row("/api", 0, "configure API provider", max_width, false);
     let plain = strip_ansi_escapes::strip_str(&row);
-    assert!(
-        UnicodeWidthStr::width(plain.as_str()) <= max_width,
-        "row must not exceed the terminal width: {plain:?}"
-    );
+    assert!(UnicodeWidthStr::width(plain.as_str()) <= max_width, "row must not exceed the terminal width: {plain:?}");
     assert!(plain.ends_with('…'), "expected ellipsis: {plain:?}");
 }
 
@@ -276,10 +234,7 @@ fn format_preview_row_clamps_prefix_on_narrow_terminal() {
     let max_width = 5;
     let row = format_preview_row("/uninstall", 0, "uninstall larpshell", max_width, false);
     let plain = strip_ansi_escapes::strip_str(&row);
-    assert!(
-        UnicodeWidthStr::width(plain.as_str()) <= max_width,
-        "row must fit in {max_width} columns: {plain:?}"
-    );
+    assert!(UnicodeWidthStr::width(plain.as_str()) <= max_width, "row must fit in {max_width} columns: {plain:?}");
 }
 
 #[test]
@@ -290,26 +245,11 @@ fn format_preview_row_column_padding_uses_display_width_not_byte_length() {
     // description column relative to an ASCII name of the same width.
     colored::control::set_override(false);
     // "café" is 5 bytes but 4 display columns, same as "abcd".
-    let ascii = strip_ansi_escapes::strip_str(format_preview_row(
-        "abcd",
-        0,
-        "same width as café",
-        usize::MAX,
-        false,
-    ));
-    let multibyte = strip_ansi_escapes::strip_str(format_preview_row(
-        "café",
-        0,
-        "same width as abcd",
-        usize::MAX,
-        false,
-    ));
+    let ascii = strip_ansi_escapes::strip_str(format_preview_row("abcd", 0, "same width as café", usize::MAX, false));
+    let multibyte = strip_ansi_escapes::strip_str(format_preview_row("café", 0, "same width as abcd", usize::MAX, false));
     let ascii_desc_col = UnicodeWidthStr::width(&ascii[..ascii.find("same").unwrap()]);
     let multibyte_desc_col = UnicodeWidthStr::width(&multibyte[..multibyte.find("same").unwrap()]);
-    assert_eq!(
-        ascii_desc_col, multibyte_desc_col,
-        "description column must align by display width, not byte length"
-    );
+    assert_eq!(ascii_desc_col, multibyte_desc_col, "description column must align by display width, not byte length");
 }
 
 // ── cycle keeps the cursor at line end ──────────────────────────────────────
