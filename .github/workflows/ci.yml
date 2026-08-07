@@ -38,8 +38,12 @@ env:
   CARGO_PROFILE_RELEASE_LTO: "false"
   CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
 
+# A `v*` tag push runs release.yml only, never CI: the `on.push.branches` filter
+# already excludes tag refs, and the per-job `if` keeps checks off tag/release refs
+# even if that trigger is later broadened. PRs (refs/pull/*) and branch pushes run.
 jobs:
   fmt:
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -56,6 +60,7 @@ jobs:
   # no windows target, so the matrix stays linux + macos; fmt/deny/audit are
   # OS-independent and stay ubuntu-only below.
   check:
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
     name: check / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
@@ -79,8 +84,11 @@ jobs:
       - uses: taiki-e/install-action@nextest
       - name: clippy (-D warnings)
         run: cargo clippy --all-targets --all-features --release -- -D warnings
+      # `--no-fail-fast` so a red run reports every failure instead of a prefix: nextest
+      # cancels at the first one, so you fix what you were shown, push, and are handed
+      # more — which reads like a regression your own fix caused, at a build per round.
       - name: test
-        run: cargo nextest run --release --all-targets --all-features
+        run: cargo nextest run --release --all-targets --all-features --no-fail-fast
       # nextest can't run doctests, so cover them with cargo test. Self-gates on
       # a doctest target so a bin-only crate (no lib) skips instead of erroring
       # with "no library targets found". shell: bash so the linux/mac legs both
@@ -104,6 +112,7 @@ jobs:
           path: target/release/larpshell
 
   deny:
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -112,6 +121,7 @@ jobs:
           command: check advisories licenses bans sources
 
   audit:
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
