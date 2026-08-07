@@ -12,6 +12,12 @@ fn with_saved_cwd(f: impl FnOnce() + std::panic::UnwindSafe) {
     }
 }
 
+/// Canonicalized `/tmp` so path equality holds on macOS where `/tmp` is a
+/// symlink to `/private/tmp` and `current_dir()` returns the physical path.
+fn tmp_dir() -> PathBuf {
+    std::fs::canonicalize("/tmp").unwrap_or_else(|_| PathBuf::from("/tmp"))
+}
+
 #[test]
 fn empty_command_is_noop() {
     assert!(execute_shell_command("").is_ok());
@@ -31,7 +37,7 @@ fn cd_bare_goes_home() {
 fn cd_absolute_path() {
     with_saved_cwd(|| {
         execute_shell_command_unlocked("cd /tmp").unwrap();
-        assert_eq!(env::current_dir().unwrap(), PathBuf::from("/tmp"));
+        assert_eq!(env::current_dir().unwrap(), tmp_dir());
     });
 }
 
@@ -68,7 +74,7 @@ fn cd_nonexistent_keeps_cwd() {
 fn compound_cd_changes_cwd() {
     with_saved_cwd(|| {
         execute_shell_command_unlocked("cd /tmp && echo ok").unwrap();
-        assert_eq!(env::current_dir().unwrap(), PathBuf::from("/tmp"));
+        assert_eq!(env::current_dir().unwrap(), tmp_dir());
     });
 }
 
@@ -87,7 +93,7 @@ fn positional_arg_mutation_cannot_retarget_cwd_capture() {
         let target = env::temp_dir().join("larpshell_should_not_receive_cwd");
         let _ = std::fs::remove_file(&target);
         execute_shell_command_unlocked(&format!("set -- {}; cd /tmp", target.display())).unwrap();
-        assert_eq!(env::current_dir().unwrap(), PathBuf::from("/tmp"));
+        assert_eq!(env::current_dir().unwrap(), tmp_dir());
         assert!(!target.exists());
     });
 }
