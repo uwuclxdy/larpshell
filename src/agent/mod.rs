@@ -373,7 +373,16 @@ where
 
         let response = response?;
 
-        if let Some(text) = handle_agent_response(response, tool_registry, &mut messages, config.verbose_tool_output, &mut confirm_tool)? {
+        // Every blocking thing the agent does happens under this call: the
+        // confirmation prompt waiting on a human, MCP stdio reads, subprocess
+        // waits, filesystem walks, the blocking fetch. Handing the worker's queue
+        // to another thread keeps a single-worker runtime from stalling whatever
+        // else it holds (the update check) for the length of a tool call.
+        let final_response = tokio::task::block_in_place(|| {
+            handle_agent_response(response, tool_registry, &mut messages, config.verbose_tool_output, &mut confirm_tool)
+        })?;
+
+        if let Some(text) = final_response {
             return Ok(text);
         }
     }
@@ -476,7 +485,7 @@ mod tests {
         assert!(!prompt.contains("use the run_command tool"));
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn run_agent_loop_returns_command_without_tool_calls() {
         let provider = MockProvider::new(vec![ChatResponse::Message("COMMAND: ls -la".to_string())]);
         let tool_registry = ToolRegistry::with_builtins(AgentMode::Safe);
@@ -496,7 +505,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn run_agent_loop_returns_message_without_tool_calls() {
         let provider = MockProvider::new(vec![ChatResponse::Message("MESSAGE: no command needed".to_string())]);
         let tool_registry = ToolRegistry::with_builtins(AgentMode::Safe);
@@ -515,7 +524,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn run_agent_loop_returns_message_and_command_from_single_response() {
         let provider = MockProvider::new(vec![ChatResponse::Message(
             "MESSAGE: package needed by:\nlarpshell\nCOMMAND: sudo pacman -S webkit2gtk-4.1".to_string(),
@@ -538,7 +547,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn run_agent_loop_preserves_multiline_command_payload() {
         let provider = MockProvider::new(vec![ChatResponse::Message("COMMAND: echo one\necho two".to_string())]);
         let tool_registry = ToolRegistry::with_builtins(AgentMode::Safe);
@@ -558,7 +567,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn run_agent_loop_preserves_multiline_message_payload() {
         let provider = MockProvider::new(vec![ChatResponse::Message("MESSAGE: first line\nsecond line".to_string())]);
         let tool_registry = ToolRegistry::with_builtins(AgentMode::Safe);
@@ -579,7 +588,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn run_agent_loop_executes_tool_call_and_returns_follow_up_message() {
         let directory = make_test_directory("list_files");
         fs::write(directory.join("hello.txt"), "hello").unwrap();
@@ -618,7 +627,7 @@ mod tests {
         assert!(captured_messages[1].iter().any(|message| message.role == Role::Tool && message.content.is_some()));
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn run_agent_loop_returns_max_iterations_error() {
         let tool_call = crate::providers::ToolCall {
             id: "tool-1".to_string(),
