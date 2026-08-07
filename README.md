@@ -2,7 +2,7 @@
 
 <img src="media/larplarplarpsahur.png" alt="larpshell" align="right" width="260" />
 
-Why learn shell commands when you can just larp ts? Takuji and larptok approved.
+Why learn shell commands or lose time googling and alt-tabbing?
 
 [![Crates.io](https://shields.uwuclxdy.dev/crates/v/larpshell)](https://crates.io/crates/larpshell)
 [![Release](https://github.com/uwuclxdy/larpshell/actions/workflows/release.yml/badge.svg)](https://github.com/uwuclxdy/larpshell/actions/workflows/release.yml)
