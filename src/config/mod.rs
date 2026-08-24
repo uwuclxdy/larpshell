@@ -17,7 +17,9 @@ pub use migration::{migrate_from_nlsh_rs, migrate_macos_config_dir};
 #[serde(rename_all = "lowercase")]
 pub enum ActiveProvider {
     Gemini,
+    Anthropic,
     Ollama,
+    LMStudio,
     OpenRouter,
     #[serde(rename = "openai")]
     OpenAI,
@@ -28,7 +30,9 @@ impl ActiveProvider {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Gemini => "gemini",
+            Self::Anthropic => "anthropic",
             Self::Ollama => "ollama",
+            Self::LMStudio => "lmstudio",
             Self::OpenRouter => "openrouter",
             Self::OpenAI => "openai",
         }
@@ -38,7 +42,9 @@ impl ActiveProvider {
     pub fn display_name(self) -> &'static str {
         match self {
             Self::Gemini => "Gemini API",
+            Self::Anthropic => "Anthropic",
             Self::Ollama => "Ollama",
+            Self::LMStudio => "LM Studio",
             Self::OpenRouter => "OpenRouter",
             Self::OpenAI => "OpenAI Compatible",
         }
@@ -119,7 +125,9 @@ pub struct ProviderProfile {
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum ProviderSpecificConfig {
     Gemini(GeminiConfig),
+    Anthropic(AnthropicConfig),
     Ollama(OllamaConfig),
+    LMStudio(LMStudioConfig),
     OpenRouter(OpenRouterConfig),
     #[serde(rename = "openai")]
     OpenAI(OpenAIConfig),
@@ -129,7 +137,9 @@ impl ProviderSpecificConfig {
     pub fn provider_type(&self) -> ActiveProvider {
         match self {
             Self::Gemini(_) => ActiveProvider::Gemini,
+            Self::Anthropic(_) => ActiveProvider::Anthropic,
             Self::Ollama(_) => ActiveProvider::Ollama,
+            Self::LMStudio(_) => ActiveProvider::LMStudio,
             Self::OpenRouter(_) => ActiveProvider::OpenRouter,
             Self::OpenAI(_) => ActiveProvider::OpenAI,
         }
@@ -138,7 +148,9 @@ impl ProviderSpecificConfig {
     pub fn model(&self) -> &str {
         match self {
             Self::Gemini(config) => &config.model,
+            Self::Anthropic(config) => &config.model,
             Self::Ollama(config) => &config.model,
+            Self::LMStudio(config) => &config.model,
             Self::OpenRouter(config) => &config.model,
             Self::OpenAI(config) => &config.model,
         }
@@ -146,8 +158,9 @@ impl ProviderSpecificConfig {
 
     pub fn base_url(&self) -> Option<&str> {
         match self {
-            Self::Gemini(_) => None,
+            Self::Gemini(_) | Self::Anthropic(_) => None,
             Self::Ollama(config) => Some(&config.base_url),
+            Self::LMStudio(config) => Some(&config.base_url),
             Self::OpenRouter(config) => Some(&config.base_url),
             Self::OpenAI(config) => Some(&config.base_url),
         }
@@ -161,7 +174,19 @@ pub struct GeminiConfig {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AnthropicConfig {
+    pub api_key: String,
+    pub model: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct OllamaConfig {
+    pub base_url: String,
+    pub model: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct LMStudioConfig {
     pub base_url: String,
     pub model: String,
 }
@@ -408,7 +433,9 @@ pub fn save_config(config: &Config) -> Result<(), LarpshellError> {
 
 const PROVIDER_OPTIONS: &[(&str, ActiveProvider)] = &[
     ("Gemini API", ActiveProvider::Gemini),
+    ("Anthropic", ActiveProvider::Anthropic),
     ("Ollama", ActiveProvider::Ollama),
+    ("LM Studio", ActiveProvider::LMStudio),
     ("OpenRouter", ActiveProvider::OpenRouter),
     ("OpenAI Compatible", ActiveProvider::OpenAI),
 ];
@@ -541,8 +568,16 @@ fn configure_provider(kind: ActiveProvider, existing: Option<&ProviderSpecificCo
             ProviderSpecificConfig::Gemini(config) => Some(config),
             _ => None,
         })),
+        ActiveProvider::Anthropic => configure_anthropic(existing.and_then(|c| match c {
+            ProviderSpecificConfig::Anthropic(config) => Some(config),
+            _ => None,
+        })),
         ActiveProvider::Ollama => configure_ollama(existing.and_then(|c| match c {
             ProviderSpecificConfig::Ollama(config) => Some(config),
+            _ => None,
+        })),
+        ActiveProvider::LMStudio => configure_lmstudio(existing.and_then(|c| match c {
+            ProviderSpecificConfig::LMStudio(config) => Some(config),
             _ => None,
         })),
         ActiveProvider::OpenRouter => configure_openrouter(existing.and_then(|c| match c {
@@ -573,6 +608,13 @@ fn configure_gemini(existing: Option<&GeminiConfig>) -> Result<ProviderSpecificC
     Ok(ProviderSpecificConfig::Gemini(GeminiConfig { api_key, model }))
 }
 
+fn configure_anthropic(existing: Option<&AnthropicConfig>) -> Result<ProviderSpecificConfig, LarpshellError> {
+    let api_key = prompt_api_key("Anthropic API key", existing.map(|e| e.api_key.as_str()))?;
+    let model = prompt_model_name(Some(existing.map_or("claude-sonnet-4-6", |e| e.model.as_str())))?;
+
+    Ok(ProviderSpecificConfig::Anthropic(AnthropicConfig { api_key, model }))
+}
+
 fn configure_ollama(existing: Option<&OllamaConfig>) -> Result<ProviderSpecificConfig, LarpshellError> {
     let url_default = existing.map_or("http://localhost:11434", |e| e.base_url.as_str());
     let base_url = prompt_input("Ollama base URL", Some(url_default))?;
@@ -580,6 +622,15 @@ fn configure_ollama(existing: Option<&OllamaConfig>) -> Result<ProviderSpecificC
     let model = prompt_model_name(existing.map(|e| e.model.as_str()))?;
 
     Ok(ProviderSpecificConfig::Ollama(OllamaConfig { base_url, model }))
+}
+
+fn configure_lmstudio(existing: Option<&LMStudioConfig>) -> Result<ProviderSpecificConfig, LarpshellError> {
+    let url_default = existing.map_or("http://localhost:1234", |e| e.base_url.as_str());
+    let base_url = prompt_input("LM Studio base URL", Some(url_default))?;
+
+    let model = prompt_model_name(existing.map(|e| e.model.as_str()))?;
+
+    Ok(ProviderSpecificConfig::LMStudio(LMStudioConfig { base_url, model }))
 }
 
 fn configure_openrouter(existing: Option<&OpenRouterConfig>) -> Result<ProviderSpecificConfig, LarpshellError> {

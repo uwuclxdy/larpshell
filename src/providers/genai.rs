@@ -1,5 +1,5 @@
 use crate::common::DEFAULT_PROVIDER_TIMEOUT_SECS;
-use crate::config::{GeminiConfig, OllamaConfig, OpenAIConfig, OpenRouterConfig};
+use crate::config::{AnthropicConfig, GeminiConfig, LMStudioConfig, OllamaConfig, OpenAIConfig, OpenRouterConfig};
 use crate::error::LarpshellError;
 use crate::providers::{AIProvider, ChatMessage, ChatResponse, Role, ToolCall, ToolDefinition};
 use async_trait::async_trait;
@@ -11,13 +11,13 @@ use genai::resolver::{AuthData, Endpoint};
 use genai::{Client, ModelIden, ServiceTarget};
 use std::time::Duration;
 
-/// All four provider kinds ride the genai adapters; the only per-kind state is
+/// All provider kinds ride the genai adapters; the only per-kind state is
 /// the adapter selection, the base URL, and the display label.
 pub struct GenaiProvider {
     client: Client,
     model: String,
     provider_slug: &'static str,
-    /// Display suffix: the model for Gemini, the host for URL-based kinds.
+    /// Display suffix: the model for key-only kinds, the host for URL-based kinds.
     display_suffix: String,
     display_name: &'static str,
 }
@@ -31,6 +31,31 @@ impl GenaiProvider {
             provider_slug: "gemini",
             display_suffix: config.model.clone(),
             display_name: "Gemini",
+        })
+    }
+
+    pub fn anthropic(config: &AnthropicConfig) -> Result<Self, LarpshellError> {
+        let client = build_client(AdapterKind::Anthropic, None, Some(&config.api_key))?;
+        Ok(Self {
+            client,
+            model: config.model.clone(),
+            provider_slug: "anthropic",
+            display_suffix: config.model.clone(),
+            display_name: "Anthropic",
+        })
+    }
+
+    pub fn lmstudio(config: &LMStudioConfig) -> Result<Self, LarpshellError> {
+        // LM Studio speaks the OpenAI wire format on its local server; the
+        // openai adapter plus a resolved base URL is the whole adapter.
+        let base_url = openai_compat_base_url(&config.base_url);
+        let client = build_client(AdapterKind::OpenAI, Some(&base_url), None)?;
+        Ok(Self {
+            client,
+            model: config.model.clone(),
+            provider_slug: "lmstudio",
+            display_suffix: strip_url_for_display(&config.base_url).to_string(),
+            display_name: "LM Studio",
         })
     }
 
@@ -418,11 +443,13 @@ mod tests {
     }
 
     #[test]
-    fn provider_kind_mapping_covers_all_four_kinds() {
+    fn provider_kind_mapping_covers_all_six_kinds() {
         // Guards the ProviderSpecificConfig -> constructor match in
         // providers/mod.rs: every kind must have a GenaiProvider constructor.
         let gemini = ProviderSpecificConfig::Gemini(GeminiConfig { api_key: "k".into(), model: "m".into() });
+        let anthropic = ProviderSpecificConfig::Anthropic(AnthropicConfig { api_key: "k".into(), model: "m".into() });
         let ollama = ProviderSpecificConfig::Ollama(OllamaConfig { base_url: "http://localhost:11434".into(), model: "m".into() });
+        let lmstudio = ProviderSpecificConfig::LMStudio(LMStudioConfig { base_url: "http://localhost:1234".into(), model: "m".into() });
         let openrouter =
             ProviderSpecificConfig::OpenRouter(OpenRouterConfig { base_url: "https://x/v1".into(), api_key: None, model: "m".into() });
         let openai = ProviderSpecificConfig::OpenAI(OpenAIConfig { base_url: "https://x/v1".into(), api_key: None, model: "m".into() });
@@ -431,8 +458,16 @@ mod tests {
             ProviderSpecificConfig::Gemini(config) => assert!(GenaiProvider::gemini(&config).is_ok()),
             _ => unreachable!(),
         }
+        match anthropic {
+            ProviderSpecificConfig::Anthropic(config) => assert!(GenaiProvider::anthropic(&config).is_ok()),
+            _ => unreachable!(),
+        }
         match ollama {
             ProviderSpecificConfig::Ollama(config) => assert!(GenaiProvider::ollama(&config).is_ok()),
+            _ => unreachable!(),
+        }
+        match lmstudio {
+            ProviderSpecificConfig::LMStudio(config) => assert!(GenaiProvider::lmstudio(&config).is_ok()),
             _ => unreachable!(),
         }
         match openrouter {

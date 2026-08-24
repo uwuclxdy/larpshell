@@ -83,7 +83,7 @@ pub const fn generate_zsh_autocomplete() -> &'static str {
 _larpshell() {
     local -a commands
     commands=(
-        'api:configure API provider (Gemini, Ollama, OpenRouter, LM Studio, OpenAI)'
+        'api:configure API provider (Gemini, Anthropic, Ollama, LM Studio, OpenRouter, OpenAI Compatible)'
         'provider:switch to a saved provider'
         'agent:set agent mode (off, safe, on)'
         'explain:explain a shell command'
@@ -144,7 +144,7 @@ _larpshell"#
 pub const fn generate_fish_autocomplete() -> &'static str {
     r#"# larpshell autocomplete
 complete -c larpshell -f
-complete -c larpshell -n "__fish_use_subcommand" -a api -d 'configure API provider (Gemini, Ollama, OpenRouter, LM Studio, OpenAI)'
+complete -c larpshell -n "__fish_use_subcommand" -a api -d 'configure API provider (Gemini, Anthropic, Ollama, LM Studio, OpenRouter, OpenAI Compatible)'
 complete -c larpshell -n "__fish_use_subcommand" -a provider -d 'switch to a saved provider'
 complete -c larpshell -n "__fish_use_subcommand" -a agent -d 'set agent mode'
 complete -c larpshell -n "__fish_use_subcommand" -a explain -d 'explain a shell command'

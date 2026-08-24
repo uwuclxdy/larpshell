@@ -298,6 +298,96 @@ model = "openrouter/auto"
 }
 
 #[test]
+fn anthropic_config_parsing_and_resolution_succeeds() {
+    let config_toml = r#"
+provider = "anthropic"
+
+[[providers]]
+name = "anthropic"
+kind = "anthropic"
+api_key = "sk-ant-test"
+model = "claude-sonnet-4-6"
+"#;
+
+    let config: Config = from_str(config_toml).expect("anthropic TOML should parse");
+    assert_eq!(config.active_provider, "anthropic");
+
+    let provider_config = config.provider_config().expect("anthropic provider config should resolve");
+
+    assert_eq!(provider_config.provider_type(), ActiveProvider::Anthropic);
+    match provider_config {
+        ProviderSpecificConfig::Anthropic(anthropic) => {
+            assert_eq!(anthropic.api_key, "sk-ant-test");
+            assert_eq!(anthropic.model, "claude-sonnet-4-6");
+        }
+        other => panic!("expected Anthropic config, got {other:?}"),
+    }
+}
+
+#[test]
+fn lmstudio_config_parsing_and_resolution_succeeds() {
+    let config_toml = r#"
+provider = "lmstudio"
+
+[[providers]]
+name = "lmstudio"
+kind = "lmstudio"
+base_url = "http://localhost:1234"
+model = "llama-3.2-1b"
+"#;
+
+    let config: Config = from_str(config_toml).expect("lmstudio TOML should parse");
+    assert_eq!(config.active_provider, "lmstudio");
+
+    let provider_config = config.provider_config().expect("lmstudio provider config should resolve");
+
+    assert_eq!(provider_config.provider_type(), ActiveProvider::LMStudio);
+    match provider_config {
+        ProviderSpecificConfig::LMStudio(lmstudio) => {
+            assert_eq!(lmstudio.base_url, "http://localhost:1234");
+            assert_eq!(lmstudio.model, "llama-3.2-1b");
+        }
+        other => panic!("expected LMStudio config, got {other:?}"),
+    }
+}
+
+#[test]
+fn create_provider_with_anthropic_config_reports_anthropic_name() {
+    let config_toml = r#"
+provider = "anthropic"
+
+[[providers]]
+name = "anthropic"
+kind = "anthropic"
+api_key = "sk-ant-test"
+model = "claude-sonnet-4-6"
+"#;
+
+    let config: Config = from_str(config_toml).expect("anthropic TOML should parse");
+    let provider = create_provider(&config).expect("anthropic provider should be created");
+
+    assert!(provider.name().contains("Anthropic"), "expected provider name to identify Anthropic, got {}", provider.name());
+}
+
+#[test]
+fn create_provider_with_lmstudio_config_reports_lm_studio_name() {
+    let config_toml = r#"
+provider = "lmstudio"
+
+[[providers]]
+name = "lmstudio"
+kind = "lmstudio"
+base_url = "http://localhost:1234"
+model = "llama-3.2-1b"
+"#;
+
+    let config: Config = from_str(config_toml).expect("lmstudio TOML should parse");
+    let provider = create_provider(&config).expect("lmstudio provider should be created");
+
+    assert!(provider.name().contains("LM Studio"), "expected provider name to identify LM Studio, got {}", provider.name());
+}
+
+#[test]
 fn openrouter_missing_provider_config_returns_config_error() {
     let config_toml = r#"
 provider = "openrouter"
