@@ -3,7 +3,7 @@ use crate::error::LarpshellError;
 use crate::providers::create_provider;
 use std::ffi::OsString;
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -385,6 +385,63 @@ model = "llama-3.2-1b"
     let provider = create_provider(&config).expect("lmstudio provider should be created");
 
     assert!(provider.name().contains("LM Studio"), "expected provider name to identify LM Studio, got {}", provider.name());
+}
+
+/// Pins the lmstudio wire contract through the public constructor: the request
+/// must hit `/v1/chat/completions` and send an empty `Bearer ` header, the
+/// shapes a wrong adapter kind would not produce.
+#[tokio::test]
+async fn lmstudio_provider_hits_chat_completions_with_bearer_header() {
+    use std::sync::mpsc;
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (tx, rx) = mpsc::channel();
+
+    std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut request = String::new();
+        let mut buf = [0u8; 4096];
+        loop {
+            let read = stream.read(&mut buf).unwrap_or(0);
+            if read == 0 {
+                break;
+            }
+            request.push_str(&String::from_utf8_lossy(&buf[..read]));
+            if request.contains("\r\n\r\n") {
+                break;
+            }
+        }
+        tx.send(request.to_lowercase()).unwrap();
+        let body = r#"{"id":"chatcmpl-mock","object":"chat.completion","created":1,"model":"test","choices":[{"index":0,"message":{"role":"assistant","content":"ls"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":1,"total_tokens":6}}"#;
+        let http = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        let _ = stream.write_all(http.as_bytes());
+    });
+
+    let config_toml = format!(
+        r#"
+provider = "lmstudio"
+
+[[providers]]
+name = "lmstudio"
+kind = "lmstudio"
+base_url = "http://127.0.0.1:{port}"
+model = "test"
+"#
+    );
+    let config: Config = from_str(&config_toml).expect("lmstudio TOML should parse");
+    let provider = create_provider(&config).expect("lmstudio provider should be created");
+
+    let text = provider.generate("list files").await.unwrap();
+    assert_eq!(text, "ls");
+
+    let request = rx.recv().unwrap();
+    assert!(request.starts_with("post /v1/chat/completions "), "unexpected request line: {request}");
+    assert!(request.contains("authorization: bearer"), "bearer header missing: {request}");
 }
 
 #[test]

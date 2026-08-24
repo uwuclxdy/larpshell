@@ -747,37 +747,51 @@ mod tests {
     #[test]
     fn provider_kind_wire_names_match_kind_strings() {
         assert_eq!(ActiveProvider::Gemini.as_str(), "gemini");
+        assert_eq!(ActiveProvider::Anthropic.as_str(), "anthropic");
         assert_eq!(ActiveProvider::Ollama.as_str(), "ollama");
+        assert_eq!(ActiveProvider::LMStudio.as_str(), "lmstudio");
         assert_eq!(ActiveProvider::OpenRouter.as_str(), "openrouter");
         assert_eq!(ActiveProvider::OpenAI.as_str(), "openai");
     }
 
     #[test]
     fn provider_profile_roundtrips_through_toml() {
-        let profile = ProviderProfile {
-            name: "home-ollama".to_string(),
-            config: ProviderSpecificConfig::Ollama(OllamaConfig {
-                base_url: "http://localhost:11434".to_string(),
-                model: "llama3".to_string(),
-            }),
-        };
-        let config = Config {
-            active_provider: "home-ollama".to_string(),
-            providers: vec![profile],
-            agent: AgentMode::Off,
-            verbose_tool_output: true,
-        };
+        let profiles = vec![
+            ProviderProfile {
+                name: "home-ollama".to_string(),
+                config: ProviderSpecificConfig::Ollama(OllamaConfig {
+                    base_url: "http://localhost:11434".to_string(),
+                    model: "llama3".to_string(),
+                }),
+            },
+            ProviderProfile {
+                name: "anthropic".to_string(),
+                config: ProviderSpecificConfig::Anthropic(AnthropicConfig {
+                    api_key: "sk-ant-test".to_string(),
+                    model: "claude-sonnet-4-6".to_string(),
+                }),
+            },
+        ];
+        let config =
+            Config { active_provider: "home-ollama".to_string(), providers: profiles, agent: AgentMode::Off, verbose_tool_output: true };
 
         let toml_string = toml::to_string_pretty(&config).unwrap();
         let parsed: Config = toml::from_str(&toml_string).unwrap();
 
         assert_eq!(parsed.active_provider, "home-ollama");
-        assert_eq!(parsed.providers.len(), 1);
+        assert_eq!(parsed.providers.len(), 2);
         let parsed_profile = &parsed.providers[0];
         assert_eq!(parsed_profile.name, "home-ollama");
         assert!(matches!(parsed_profile.config, ProviderSpecificConfig::Ollama(_)));
         assert_eq!(parsed_profile.config.model(), "llama3");
         assert_eq!(parsed_profile.config.base_url(), Some("http://localhost:11434"));
+
+        let parsed_anthropic = &parsed.providers[1];
+        assert_eq!(parsed_anthropic.name, "anthropic");
+        assert!(matches!(parsed_anthropic.config, ProviderSpecificConfig::Anthropic(_)));
+        assert_eq!(parsed_anthropic.config.model(), "claude-sonnet-4-6");
+        assert_eq!(parsed_anthropic.config.base_url(), None);
+        assert!(toml_string.contains("kind = \"anthropic\""), "serialized tag missing: {toml_string}");
     }
 
     #[test]

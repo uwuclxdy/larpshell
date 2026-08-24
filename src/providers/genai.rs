@@ -35,7 +35,14 @@ impl GenaiProvider {
     }
 
     pub fn anthropic(config: &AnthropicConfig) -> Result<Self, LarpshellError> {
-        let client = build_client(AdapterKind::Anthropic, None, Some(&config.api_key))?;
+        Self::anthropic_at(config, None)
+    }
+
+    /// The anthropic endpoint is fixed in production. The base-URL seam exists
+    /// so the wire test can point the client at a local mock and pin the
+    /// adapter's request contract (path plus auth header).
+    fn anthropic_at(config: &AnthropicConfig, base_url: Option<&str>) -> Result<Self, LarpshellError> {
+        let client = build_client(AdapterKind::Anthropic, base_url, Some(&config.api_key))?;
         Ok(Self {
             client,
             model: config.model.clone(),
@@ -242,7 +249,8 @@ fn build_client(kind: AdapterKind, base_url: Option<&str>, api_key: Option<&str>
     let base = base_url.map(str::to_string);
     // An empty key is meaningful: it sends `Bearer ` with no credential, which
     // keyless local servers (LM Studio) accept. Never resolve to `None`, which
-    // genai turns into a missing-key error before any request leaves.
+    // genai falls back to the adapter's default auth (an ambient env key, or a
+    // missing-key error when none is set).
     let key = api_key.unwrap_or_default().to_string();
 
     let mut builder = Client::builder().with_adapter_kind(kind).with_reqwest(http_client);
@@ -444,8 +452,8 @@ mod tests {
 
     #[test]
     fn provider_kind_mapping_covers_all_six_kinds() {
-        // Guards the ProviderSpecificConfig -> constructor match in
-        // providers/mod.rs: every kind must have a GenaiProvider constructor.
+        // Every kind must have a GenaiProvider constructor; create_provider's
+        // match over ProviderSpecificConfig stays compile-time exhaustive.
         let gemini = ProviderSpecificConfig::Gemini(GeminiConfig { api_key: "k".into(), model: "m".into() });
         let anthropic = ProviderSpecificConfig::Anthropic(AnthropicConfig { api_key: "k".into(), model: "m".into() });
         let ollama = ProviderSpecificConfig::Ollama(OllamaConfig { base_url: "http://localhost:11434".into(), model: "m".into() });
@@ -478,5 +486,54 @@ mod tests {
             ProviderSpecificConfig::OpenAI(config) => assert!(GenaiProvider::openai(&config).is_ok()),
             _ => unreachable!(),
         }
+    }
+
+    /// Pins the anthropic wire contract through the real constructor body: the
+    /// request must hit `/messages` on the resolved base URL and carry the key
+    /// in `x-api-key`, not any other header or path a wrong adapter kind would
+    /// produce.
+    #[tokio::test]
+    async fn anthropic_adapter_hits_messages_endpoint_with_x_api_key() {
+        use std::io::{Read as _, Write as _};
+        use std::net::TcpListener;
+        use std::sync::mpsc;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (tx, rx) = mpsc::channel();
+
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = String::new();
+            let mut buf = [0u8; 4096];
+            loop {
+                let read = stream.read(&mut buf).unwrap_or(0);
+                if read == 0 {
+                    break;
+                }
+                request.push_str(&String::from_utf8_lossy(&buf[..read]));
+                if request.contains("\r\n\r\n") {
+                    break;
+                }
+            }
+            tx.send(request.to_lowercase()).unwrap();
+            let body = r#"{"id":"msg_mock","type":"message","role":"assistant","model":"claude-sonnet-4-6","content":[{"type":"text","text":"ls"}],"stop_reason":"end_turn","usage":{"input_tokens":5,"output_tokens":1}}"#;
+            let http = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            let _ = stream.write_all(http.as_bytes());
+        });
+
+        let config = AnthropicConfig { api_key: "sk-ant-test".into(), model: "claude-sonnet-4-6".into() };
+        let provider = GenaiProvider::anthropic_at(&config, Some(&format!("http://127.0.0.1:{port}/"))).unwrap();
+
+        let text = provider.generate("list files").await.unwrap();
+        assert_eq!(text, "ls");
+
+        let request = rx.recv().unwrap();
+        assert!(request.starts_with("post /messages "), "unexpected request line: {request}");
+        assert!(request.contains("x-api-key: sk-ant-test"), "anthropic key header missing: {request}");
     }
 }
