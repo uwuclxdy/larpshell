@@ -69,8 +69,10 @@ larpshell api
 | *Provider* | *Notes* |
 |----------|-------|
 | **Gemini** | Free API key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
+| **Anthropic** | Claude models via a paid API key (default `claude-sonnet-4-6`) |
 | **OpenRouter** | Free models available with `openrouter/auto` (default, [free models list](https://openrouter.ai/models?q=free)) |
 | **Ollama** | API key optional |
+| **LM Studio** | local models at `http://localhost:1234` (default, no key) |
 | **OpenAI-compatible** | any compatible API (custom base URL support) |
 
 ## Usage

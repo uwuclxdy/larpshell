@@ -49,9 +49,11 @@ Select provider and enter credentials. Config is stored in `~/.config/larpshell/
 ## Supported Providers
 
 - **Gemini [FREE]** - free access to the group (gemini) fleshlight at [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
+- **Anthropic** - claude models via a paid API key (default `claude-sonnet-4-6`)
 - **OpenRouter [FREE]** - access to free models with `openrouter/auto`
 - **Ollama** - local models
-- **OpenAI-Compatible APIs** - chatgpt or compatible APIs (LMStudio, Groq, etc.)
+- **LM Studio** - local models at `http://localhost:1234` (default, no key)
+- **OpenAI-Compatible APIs** - chatgpt or compatible APIs (Groq, DeepSeek, etc.)
 
 > You can get free OpenRouter model access at https://openrouter.ai/models?q=free
 
