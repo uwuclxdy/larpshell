@@ -1,7 +1,4 @@
-mod base;
-mod gemini;
-mod ollama;
-mod openai;
+mod genai;
 
 use crate::config::{Config, ProviderSpecificConfig};
 use crate::error::LarpshellError;
@@ -15,17 +12,6 @@ pub enum Role {
     User,
     Assistant,
     Tool,
-}
-
-impl Role {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Role::System => "system",
-            Role::User => "user",
-            Role::Assistant => "assistant",
-            Role::Tool => "tool",
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -122,10 +108,10 @@ pub trait AIProvider: Send + Sync {
 
 pub fn create_provider(config: &Config) -> Result<Box<dyn AIProvider>, LarpshellError> {
     match config.provider_config()? {
-        ProviderSpecificConfig::Gemini(config) => Ok(Box::new(gemini::GeminiProvider::new(&config)?)),
-        ProviderSpecificConfig::Ollama(config) => Ok(Box::new(ollama::OllamaProvider::new(&config)?)),
-        ProviderSpecificConfig::OpenRouter(config) => Ok(Box::new(openai::OpenAICompatibleProvider::openrouter(&config)?)),
-        ProviderSpecificConfig::OpenAI(config) => Ok(Box::new(openai::OpenAICompatibleProvider::openai(&config)?)),
+        ProviderSpecificConfig::Gemini(config) => Ok(Box::new(genai::GenaiProvider::gemini(&config)?)),
+        ProviderSpecificConfig::Ollama(config) => Ok(Box::new(genai::GenaiProvider::ollama(&config)?)),
+        ProviderSpecificConfig::OpenRouter(config) => Ok(Box::new(genai::GenaiProvider::openrouter(&config)?)),
+        ProviderSpecificConfig::OpenAI(config) => Ok(Box::new(genai::GenaiProvider::openai(&config)?)),
     }
 }
 
