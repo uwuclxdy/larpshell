@@ -89,19 +89,24 @@ impl GenaiProvider {
                 Role::Assistant => {
                     if let Some(tool_calls) = message.tool_calls.as_ref() {
                         // Thought signatures (Gemini thinking models) travel in
-                        // the tool call and must be re-emitted before the calls
-                        // on the next turn.
-                        let genai_calls: Vec<GenaiToolCall> = tool_calls
-                            .iter()
-                            .map(|tool_call| GenaiToolCall {
+                        // the tool call and must be re-emitted on the next turn.
+                        // Interleave each signature directly before its call:
+                        // genai's gemini conversion attaches only the last
+                        // pending thought to the next call, so all-signatures-
+                        // first would mispair or orphan them.
+                        let mut parts: Vec<ContentPart> = Vec::new();
+                        for tool_call in tool_calls {
+                            if let Some(signature) = tool_call.thought_signature.as_ref() {
+                                parts.push(ContentPart::ThoughtSignature(signature.clone()));
+                            }
+                            parts.push(ContentPart::ToolCall(GenaiToolCall {
                                 call_id: tool_call.id.clone(),
                                 fn_name: tool_call.name.clone(),
                                 fn_arguments: tool_call.arguments.clone(),
                                 thought_signatures: None,
-                            })
-                            .collect();
-                        let signatures: Vec<String> = tool_calls.iter().filter_map(|call| call.thought_signature.clone()).collect();
-                        genai_messages.push(GenaiChatMessage::assistant_tool_calls_with_thoughts(genai_calls, signatures));
+                            }));
+                        }
+                        genai_messages.push(GenaiChatMessage::assistant(MessageContent::from_parts(parts)));
                     } else {
                         genai_messages.push(GenaiChatMessage::assistant(message.content.clone().unwrap_or_default()));
                     }
@@ -300,19 +305,43 @@ mod tests {
     }
 
     #[test]
-    fn chat_request_carries_thought_signatures_before_tool_calls() {
-        let messages = vec![ChatMessage::assistant_tool_calls(vec![ToolCall {
-            id: "call-1".to_string(),
-            name: "search".to_string(),
-            arguments: serde_json::json!({}),
-            thought_signature: Some("sig-1".to_string()),
-        }])];
+    fn chat_request_interleaves_thought_signatures_before_each_tool_call() {
+        let messages = vec![ChatMessage::assistant_tool_calls(vec![
+            ToolCall {
+                id: "call-1".to_string(),
+                name: "search".to_string(),
+                arguments: serde_json::json!({}),
+                thought_signature: Some("sig-1".to_string()),
+            },
+            ToolCall {
+                id: "call-2".to_string(),
+                name: "read_file".to_string(),
+                arguments: serde_json::json!({}),
+                thought_signature: Some("sig-2".to_string()),
+            },
+        ])];
 
         let request = GenaiProvider::chat_request(&messages, &[]);
         let message = &request.messages[0];
         let parts = message.content.parts();
-        assert!(matches!(parts[0], ContentPart::ThoughtSignature(_)));
-        assert!(matches!(parts[1], ContentPart::ToolCall(_)));
+        // sig-1 must sit directly before call-1, sig-2 directly before call-2:
+        // genai's gemini conversion attaches only the last pending thought to
+        // the next call, so grouped-first parts would mispair or orphan them.
+        assert_eq!(parts.len(), 4);
+        match (&parts[0], &parts[1], &parts[2], &parts[3]) {
+            (
+                ContentPart::ThoughtSignature(first),
+                ContentPart::ToolCall(first_call),
+                ContentPart::ThoughtSignature(second),
+                ContentPart::ToolCall(second_call),
+            ) => {
+                assert_eq!(first, "sig-1");
+                assert_eq!(first_call.fn_name, "search");
+                assert_eq!(second, "sig-2");
+                assert_eq!(second_call.fn_name, "read_file");
+            }
+            other => panic!("expected interleaved thought/tool parts, got {other:?}"),
+        }
     }
 
     #[test]
