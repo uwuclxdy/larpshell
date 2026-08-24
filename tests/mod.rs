@@ -273,20 +273,22 @@ fn openrouter_config_parsing_and_resolution_succeeds() {
     let config_toml = r#"
 provider = "openrouter"
 
-[providers.openrouter]
+[[providers]]
+name = "openrouter"
+kind = "openrouter"
 base_url = "https://openrouter.ai/api/v1"
 api_key = "test-openrouter-key"
 model = "openrouter/auto"
 "#;
 
     let config: Config = from_str(config_toml).expect("openrouter TOML should parse");
-    assert_eq!(config.active_provider, ActiveProvider::OpenRouter);
+    assert_eq!(config.active_provider, "openrouter");
 
     let provider_config = config.provider_config().expect("openrouter provider config should resolve");
 
-    assert_eq!(provider_config.provider_type, ActiveProvider::OpenRouter);
-    match provider_config.config {
-        ProviderSpecificConfig::OpenRouter { openrouter } => {
+    assert_eq!(provider_config.provider_type(), ActiveProvider::OpenRouter);
+    match provider_config {
+        ProviderSpecificConfig::OpenRouter(openrouter) => {
             assert_eq!(openrouter.base_url, "https://openrouter.ai/api/v1");
             assert_eq!(openrouter.api_key.as_deref(), Some("test-openrouter-key"));
             assert_eq!(openrouter.model, "openrouter/auto");
@@ -318,7 +320,9 @@ fn create_provider_with_openrouter_config_reports_openrouter_name() {
     let config_toml = r#"
 provider = "openrouter"
 
-[providers.openrouter]
+[[providers]]
+name = "openrouter"
+kind = "openrouter"
 base_url = "https://openrouter.ai/api/v1"
 api_key = "test-openrouter-key"
 model = "openrouter/auto"
@@ -353,7 +357,9 @@ fn agent_field_defaults_to_off() {
     let config_toml = r#"
 provider = "ollama"
 
-[providers.ollama]
+[[providers]]
+name = "ollama"
+kind = "ollama"
 base_url = "http://localhost:11434"
 model = "test"
 "#;
@@ -366,7 +372,7 @@ model = "test"
 fn agent_field_parses_mode_values() {
     for (value, expected) in [("off", AgentMode::Off), ("safe", AgentMode::Safe), ("on", AgentMode::On)] {
         let config_toml = format!(
-            "provider = \"ollama\"\nagent = \"{value}\"\n\n[providers.ollama]\nbase_url = \"http://localhost:11434\"\nmodel = \"test\"\n"
+            "provider = \"ollama\"\nagent = \"{value}\"\n\n[[providers]]\nname = \"ollama\"\nkind = \"ollama\"\nbase_url = \"http://localhost:11434\"\nmodel = \"test\"\n"
         );
         let config: Config = from_str(&config_toml).expect("should parse agent mode");
         assert_eq!(config.agent, expected);
@@ -377,7 +383,7 @@ fn agent_field_parses_mode_values() {
 fn agent_field_parses_legacy_bool_values() {
     for (value, expected) in [("false", AgentMode::Off), ("true", AgentMode::On)] {
         let config_toml = format!(
-            "provider = \"ollama\"\nagent = {value}\n\n[providers.ollama]\nbase_url = \"http://localhost:11434\"\nmodel = \"test\"\n"
+            "provider = \"ollama\"\nagent = {value}\n\n[[providers]]\nname = \"ollama\"\nkind = \"ollama\"\nbase_url = \"http://localhost:11434\"\nmodel = \"test\"\n"
         );
         let config: Config = from_str(&config_toml).expect("should parse legacy bool agent");
         assert_eq!(config.agent, expected);
@@ -390,7 +396,9 @@ fn verbose_tool_output_field_parses_false() {
 provider = "ollama"
 verbose_tool_output = false
 
-[providers.ollama]
+[[providers]]
+name = "ollama"
+kind = "ollama"
 base_url = "http://localhost:11434"
 model = "test"
 "#;

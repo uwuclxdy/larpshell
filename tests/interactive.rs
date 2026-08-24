@@ -116,8 +116,8 @@ fn preview_items_empty_for_non_slash() {
 
 #[test]
 fn selection_ghost_is_untyped_suffix() {
-    // base "/" lists all commands; index 1 is `/agent` (after `/api`).
-    assert_eq!(selection_ghost("/", "/", 1).as_deref(), Some("agent"));
+    // base "/" lists all commands; index 1 is `/provider` (after `/api`).
+    assert_eq!(selection_ghost("/", "/", 1).as_deref(), Some("provider"));
     // The typed prefix is stripped, leaving only the part to suggest.
     assert_eq!(selection_ghost("/ag", "/ag", 0).as_deref(), Some("ent"));
     // No ghost once the selection is fully typed.

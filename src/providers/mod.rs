@@ -121,12 +121,11 @@ pub trait AIProvider: Send + Sync {
 }
 
 pub fn create_provider(config: &Config) -> Result<Box<dyn AIProvider>, LarpshellError> {
-    let provider = config.provider_config()?;
-    match &provider.config {
-        ProviderSpecificConfig::Gemini { gemini } => Ok(Box::new(gemini::GeminiProvider::new(gemini)?)),
-        ProviderSpecificConfig::Ollama { ollama } => Ok(Box::new(ollama::OllamaProvider::new(ollama)?)),
-        ProviderSpecificConfig::OpenRouter { openrouter } => Ok(Box::new(openai::OpenAICompatibleProvider::openrouter(openrouter)?)),
-        ProviderSpecificConfig::OpenAI { openai } => Ok(Box::new(openai::OpenAICompatibleProvider::openai(openai)?)),
+    match config.provider_config()? {
+        ProviderSpecificConfig::Gemini(config) => Ok(Box::new(gemini::GeminiProvider::new(&config)?)),
+        ProviderSpecificConfig::Ollama(config) => Ok(Box::new(ollama::OllamaProvider::new(&config)?)),
+        ProviderSpecificConfig::OpenRouter(config) => Ok(Box::new(openai::OpenAICompatibleProvider::openrouter(&config)?)),
+        ProviderSpecificConfig::OpenAI(config) => Ok(Box::new(openai::OpenAICompatibleProvider::openai(&config)?)),
     }
 }
 

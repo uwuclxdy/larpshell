@@ -37,6 +37,7 @@ pub struct CliArgs {
 #[derive(Debug)]
 pub enum Subcommands {
     Api,
+    Provider { name: Option<String> },
     Uninstall,
     History { enable: Option<bool> },
     Verbose { enable: Option<bool> },
@@ -81,6 +82,12 @@ struct Cli {
 enum Commands {
     /// Manage the API key for the active provider
     Api,
+    /// Switch to a saved provider profile
+    Provider {
+        /// Profile name; omit to pick from a menu
+        #[arg(value_name = "NAME")]
+        name: Option<String>,
+    },
     /// Remove larpshell and its shell integration
     Uninstall,
     /// Enable or disable command history logging
@@ -144,6 +151,7 @@ pub fn parse_cli_args() -> CliArgs {
 
     let subcommand = match cli.subcommand {
         Some(Commands::Api) => Some(Subcommands::Api),
+        Some(Commands::Provider { name }) => Some(Subcommands::Provider { name }),
         Some(Commands::Uninstall) => Some(Subcommands::Uninstall),
         Some(Commands::History { toggle }) => {
             Some(Subcommands::History { enable: toggle.map(|toggle| matches!(toggle, ClapBoolToggle::On)) })

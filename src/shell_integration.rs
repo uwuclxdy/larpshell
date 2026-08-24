@@ -52,7 +52,7 @@ pub const fn generate_bash_autocomplete() -> &'static str {
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
     if [ $COMP_CWORD -eq 1 ]; then
-        COMPREPLY=( $(compgen -W "api agent history verbose prompt explain uninstall --help --version" -- "$cur") )
+        COMPREPLY=( $(compgen -W "api provider agent history verbose prompt explain uninstall --help --version" -- "$cur") )
     elif [ $COMP_CWORD -eq 2 ]; then
         case "$prev" in
             agent)
@@ -84,6 +84,7 @@ _larpshell() {
     local -a commands
     commands=(
         'api:configure API provider (Gemini, Ollama, OpenRouter, LM Studio, OpenAI)'
+        'provider:switch to a saved provider'
         'agent:set agent mode (off, safe, on)'
         'explain:explain a shell command'
         'history:enable or disable prompt history'
@@ -144,6 +145,7 @@ pub const fn generate_fish_autocomplete() -> &'static str {
     r#"# larpshell autocomplete
 complete -c larpshell -f
 complete -c larpshell -n "__fish_use_subcommand" -a api -d 'configure API provider (Gemini, Ollama, OpenRouter, LM Studio, OpenAI)'
+complete -c larpshell -n "__fish_use_subcommand" -a provider -d 'switch to a saved provider'
 complete -c larpshell -n "__fish_use_subcommand" -a agent -d 'set agent mode'
 complete -c larpshell -n "__fish_use_subcommand" -a explain -d 'explain a shell command'
 complete -c larpshell -n "__fish_use_subcommand" -a history -d 'enable or disable prompt history'
@@ -170,7 +172,7 @@ pub const fn generate_bash_function() -> &'static str {
     fi
 
     case "$1" in
-        api|agent|explain|history|verbose|uninstall|prompt|--help|-h|--version|-V)
+        api|provider|agent|explain|history|verbose|uninstall|prompt|--help|-h|--version|-V)
             command larpshell "$@"
             return $?
             ;;
@@ -198,7 +200,7 @@ pub const fn generate_fish_function() -> &'static str {
     end
 
     switch $argv[1]
-        case api agent explain history verbose uninstall prompt --help -h --version -V
+        case api provider agent explain history verbose uninstall prompt --help -h --version -V
             command larpshell $argv
             return $status
     end

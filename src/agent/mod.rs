@@ -361,7 +361,7 @@ async fn run_agent_loop_with_confirm<F>(
 where
     F: FnMut(&ToolCall) -> ToolConfirmResult,
 {
-    let model = config.provider_config()?.config.model().to_string();
+    let model = config.provider_config()?.model().to_string();
     let (mut messages, tool_definitions) = agent_context(user_input, config, tool_registry);
 
     for iteration in 0..MAX_AGENT_ITERATIONS {
@@ -399,7 +399,7 @@ pub async fn run_agent_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{ActiveProvider, Config, MultiProviderConfig, OllamaConfig, ProviderSpecificConfig};
+    use crate::config::{Config, OllamaConfig, ProviderProfile, ProviderSpecificConfig};
     use crate::providers::{ChatResponse, Role, ToolDefinition};
     use async_trait::async_trait;
     use std::collections::VecDeque;
@@ -435,11 +435,14 @@ mod tests {
 
     fn test_config() -> Config {
         Config {
-            active_provider: ActiveProvider::Ollama,
-            providers: MultiProviderConfig {
-                ollama: Some(OllamaConfig { base_url: "http://localhost:11434".to_string(), model: "llama3".to_string() }),
-                ..Default::default()
-            },
+            active_provider: "ollama".to_string(),
+            providers: vec![ProviderProfile {
+                name: "ollama".to_string(),
+                config: ProviderSpecificConfig::Ollama(OllamaConfig {
+                    base_url: "http://localhost:11434".to_string(),
+                    model: "llama3".to_string(),
+                }),
+            }],
             agent: AgentMode::Safe,
             verbose_tool_output: true,
         }
@@ -649,7 +652,7 @@ mod tests {
     #[test]
     fn test_config_uses_ollama_provider() {
         let provider_config = test_config().provider_config().unwrap();
-        assert!(matches!(provider_config.config, ProviderSpecificConfig::Ollama { .. }));
+        assert!(matches!(provider_config, ProviderSpecificConfig::Ollama(_)));
     }
 
     #[test]

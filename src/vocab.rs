@@ -14,7 +14,7 @@
 /// names from its `Commands` variants and the completion scripts spell them out
 /// as literals, so nothing reads this slice at runtime.
 #[cfg(test)]
-pub const SUBCOMMANDS: &[&str] = &["api", "agent", "history", "verbose", "prompt", "explain", "uninstall"];
+pub const SUBCOMMANDS: &[&str] = &["api", "provider", "agent", "history", "verbose", "prompt", "explain", "uninstall"];
 
 /// `agent` mode toggle values, in `off, safe, on` order.
 pub const AGENT_TOGGLES: &[&str] = &["off", "safe", "on"];

@@ -1,4 +1,4 @@
-use inquire::{Confirm, Password, PasswordDisplayMode};
+use inquire::{Password, PasswordDisplayMode};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::fs;
 use std::fs::OpenOptions;
@@ -8,7 +8,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::cli::{map_inquire_cancel, print_error, print_ok, print_warning, prompt_input, prompt_select, render_config};
-use crate::common::clear_n_lines;
 use crate::confirmation::style_message_markup;
 use crate::error::LarpshellError;
 mod migration;
@@ -22,6 +21,28 @@ pub enum ActiveProvider {
     OpenRouter,
     #[serde(rename = "openai")]
     OpenAI,
+}
+
+impl ActiveProvider {
+    /// Serde wire name, also the default profile name for the kind.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Gemini => "gemini",
+            Self::Ollama => "ollama",
+            Self::OpenRouter => "openrouter",
+            Self::OpenAI => "openai",
+        }
+    }
+
+    /// Label shown in setup menus and status output.
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::Gemini => "Gemini API",
+            Self::Ollama => "Ollama",
+            Self::OpenRouter => "OpenRouter",
+            Self::OpenAI => "OpenAI Compatible",
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
@@ -64,9 +85,9 @@ where
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Config {
     #[serde(rename = "provider")]
-    pub active_provider: ActiveProvider,
+    pub active_provider: String,
     #[serde(default)]
-    pub providers: MultiProviderConfig,
+    pub providers: Vec<ProviderProfile>,
     #[serde(default, deserialize_with = "deserialize_agent_mode")]
     pub agent: AgentMode,
     #[serde(default = "default_verbose_tool_output")]
@@ -74,75 +95,61 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn provider_config(&self) -> Result<ProviderConfig, LarpshellError> {
-        macro_rules! require {
-            ($opt:expr, $name:literal) => {
-                $opt.clone()
-                    .ok_or_else(|| LarpshellError::ConfigError(concat!($name, " config not found for active provider").to_string()))?
-            };
-        }
-        let (provider_type, config) = match self.active_provider {
-            ActiveProvider::Gemini => {
-                (ActiveProvider::Gemini, ProviderSpecificConfig::Gemini { gemini: require!(self.providers.gemini, "gemini") })
-            }
-            ActiveProvider::Ollama => {
-                (ActiveProvider::Ollama, ProviderSpecificConfig::Ollama { ollama: require!(self.providers.ollama, "ollama") })
-            }
-            ActiveProvider::OpenRouter => (
-                ActiveProvider::OpenRouter,
-                ProviderSpecificConfig::OpenRouter { openrouter: require!(self.providers.openrouter, "openrouter") },
-            ),
-            ActiveProvider::OpenAI => {
-                (ActiveProvider::OpenAI, ProviderSpecificConfig::OpenAI { openai: require!(self.providers.openai, "openai") })
-            }
-        };
-        Ok(ProviderConfig { provider_type, config })
+    /// The active profile's kind-specific settings.
+    pub fn provider_config(&self) -> Result<ProviderSpecificConfig, LarpshellError> {
+        let profile = self
+            .providers
+            .iter()
+            .find(|profile| profile.name == self.active_provider)
+            .ok_or_else(|| LarpshellError::ConfigError(format!("config not found for active provider \"{}\"", self.active_provider)))?;
+        Ok(profile.config.clone())
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
-pub struct MultiProviderConfig {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub gemini: Option<GeminiConfig>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ollama: Option<OllamaConfig>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub openrouter: Option<OpenRouterConfig>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub openai: Option<OpenAIConfig>,
-}
-
-#[derive(Debug, Clone)]
-pub struct ProviderConfig {
-    pub provider_type: ActiveProvider,
+/// One saved provider instance. `name` is the toggling key; `config` carries
+/// `kind` plus the kind-specific fields, flattened into the same TOML table.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ProviderProfile {
+    pub name: String,
+    #[serde(flatten)]
     pub config: ProviderSpecificConfig,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(untagged)]
+#[serde(tag = "kind", rename_all = "lowercase")]
 pub enum ProviderSpecificConfig {
-    Gemini { gemini: GeminiConfig },
-    Ollama { ollama: OllamaConfig },
-    OpenRouter { openrouter: OpenRouterConfig },
-    OpenAI { openai: OpenAIConfig },
+    Gemini(GeminiConfig),
+    Ollama(OllamaConfig),
+    OpenRouter(OpenRouterConfig),
+    #[serde(rename = "openai")]
+    OpenAI(OpenAIConfig),
 }
 
 impl ProviderSpecificConfig {
+    pub fn provider_type(&self) -> ActiveProvider {
+        match self {
+            Self::Gemini(_) => ActiveProvider::Gemini,
+            Self::Ollama(_) => ActiveProvider::Ollama,
+            Self::OpenRouter(_) => ActiveProvider::OpenRouter,
+            Self::OpenAI(_) => ActiveProvider::OpenAI,
+        }
+    }
+
     pub fn model(&self) -> &str {
         match self {
-            Self::Gemini { gemini } => &gemini.model,
-            Self::Ollama { ollama } => &ollama.model,
-            Self::OpenRouter { openrouter } => &openrouter.model,
-            Self::OpenAI { openai } => &openai.model,
+            Self::Gemini(config) => &config.model,
+            Self::Ollama(config) => &config.model,
+            Self::OpenRouter(config) => &config.model,
+            Self::OpenAI(config) => &config.model,
         }
     }
 
     pub fn base_url(&self) -> Option<&str> {
         match self {
-            Self::Gemini { .. } => None,
-            Self::Ollama { ollama } => Some(&ollama.base_url),
-            Self::OpenRouter { openrouter } => Some(&openrouter.base_url),
-            Self::OpenAI { openai } => Some(&openai.base_url),
+            Self::Gemini(_) => None,
+            Self::Ollama(config) => Some(&config.base_url),
+            Self::OpenRouter(config) => Some(&config.base_url),
+            Self::OpenAI(config) => Some(&config.base_url),
         }
     }
 }
@@ -318,8 +325,8 @@ const fn default_verbose_tool_output() -> bool {
 
 fn default_config() -> Config {
     Config {
-        active_provider: ActiveProvider::Ollama,
-        providers: MultiProviderConfig::default(),
+        active_provider: String::new(),
+        providers: Vec::new(),
         agent: AgentMode::Off,
         verbose_tool_output: default_verbose_tool_output(),
     }
@@ -407,141 +414,170 @@ const PROVIDER_OPTIONS: &[(&str, ActiveProvider)] = &[
     ("OpenAI Compatible", ActiveProvider::OpenAI),
 ];
 
+const ADD_NEW_PROVIDER: &str = "+ add new provider";
+
+/// `/api` entry point: pick a saved profile to reconfigure, or add a new one.
+/// The touched profile becomes active.
 pub fn interactive_setup() -> Result<(), LarpshellError> {
     let existing_config = load_config().ok();
-    let current_provider = existing_config.as_ref().map(|c| c.active_provider);
-    let default_index = current_provider.and_then(|cp| PROVIDER_OPTIONS.iter().position(|(_, variant)| *variant == cp)).unwrap_or(0);
-    let selection = prompt_select("Select API Provider", &provider_options_with_marker(current_provider), default_index)?;
-    let (provider_display_name, selected_variant) = PROVIDER_OPTIONS[selection];
+    let mut profiles = existing_config.as_ref().map(|c| c.providers.clone()).unwrap_or_default();
+    let current_index = existing_config.as_ref().and_then(|c| c.profiles_active_index());
 
-    let mut multi_providers = existing_config.as_ref().map(|c| c.providers.clone()).unwrap_or_default();
+    let mut items: Vec<String> = profiles.iter().map(profile_menu_label).collect();
+    items.push(ADD_NEW_PROVIDER.to_string());
+    let selection = prompt_select("Select provider", &items, current_index.unwrap_or(0))?;
 
-    let should_reuse_saved = should_reuse_saved_credentials(&multi_providers, selected_variant, current_provider)?;
-
-    let active_provider = if should_reuse_saved {
-        selected_variant
+    let (active_name, active_config) = if selection == items.len() - 1 {
+        let new_profile = configure_new_profile(&profiles)?;
+        profiles.push(new_profile.clone());
+        (new_profile.name, new_profile.config)
     } else {
-        let new_config = configure_provider(selected_variant, &multi_providers)?;
-        apply_provider_config(&mut multi_providers, &new_config);
-        new_config.provider_type
+        let profile = &mut profiles[selection];
+        let existing = profile.config.clone();
+        profile.config = configure_provider(existing.provider_type(), Some(&existing))?;
+        (profile.name.clone(), profile.config.clone())
     };
 
     let config = Config {
-        active_provider,
-        providers: multi_providers,
+        active_provider: active_name.clone(),
+        providers: profiles,
         agent: existing_config.as_ref().map_or(AgentMode::Off, |c| c.agent),
         verbose_tool_output: existing_config.as_ref().is_none_or(|c| c.verbose_tool_output),
     };
 
     save_config(&config)?;
-    display_config_summary(&config, provider_display_name)?;
+    display_config_summary(&active_config, &active_name);
 
     Ok(())
 }
 
-/// Provider labels for the select menu, marking the active one with a plain-text
-/// ` (current)` suffix. No ANSI is baked into the label so it neither overrides
-/// the shared selected-row color nor skews the fuzzy-filter score.
-fn provider_options_with_marker(current_provider: Option<ActiveProvider>) -> Vec<String> {
-    PROVIDER_OPTIONS
-        .iter()
-        .map(|(name, variant)| if Some(*variant) == current_provider { format!("{name} (current)") } else { (*name).to_string() })
-        .collect()
-}
-
-fn provider_has_saved_credentials(providers: &MultiProviderConfig, selected_variant: ActiveProvider) -> bool {
-    match selected_variant {
-        ActiveProvider::Gemini => providers.gemini.is_some(),
-        ActiveProvider::Ollama => providers.ollama.is_some(),
-        ActiveProvider::OpenRouter => {
-            providers.openrouter.as_ref().and_then(|config| config.api_key.as_deref()).is_some_and(|api_key| !api_key.trim().is_empty())
-        }
-        ActiveProvider::OpenAI => providers.openai.is_some(),
+impl Config {
+    fn profiles_active_index(&self) -> Option<usize> {
+        self.providers.iter().position(|p| p.name == self.active_provider)
     }
 }
 
-fn should_reuse_saved_credentials(
-    providers: &MultiProviderConfig, selected_variant: ActiveProvider, current_provider: Option<ActiveProvider>,
-) -> Result<bool, LarpshellError> {
-    if !provider_has_saved_credentials(providers, selected_variant) || Some(selected_variant) == current_provider {
-        return Ok(false);
+/// `/provider` entry point: select a saved profile to activate.
+pub fn interactive_provider_switch() -> Result<(), LarpshellError> {
+    let mut config = load_config_or_default()?;
+    if config.providers.is_empty() {
+        return Err(LarpshellError::ConfigError("no saved providers — run 'larpshell api' first".to_string()));
     }
 
-    let result = Confirm::new("Use saved credentials?")
-        .with_default(true)
-        .with_render_config(render_config())
-        .prompt()
-        .map_err(map_inquire_cancel)?;
-    // Move up over the persisted "? … Yes" answer line before erasing; a single
-    // clear would only wipe the blank line inquire leaves below it.
-    clear_n_lines(2);
-    Ok(result)
+    let items: Vec<String> = config.providers.iter().map(|p| profile_menu_label_with_current(p, &config.active_provider)).collect();
+    let selection = prompt_select("Switch to provider", &items, config.profiles_active_index().unwrap_or(0))?;
+    config.active_provider = config.providers[selection].name.clone();
+    save_config(&config)?;
+    print_ok(&format!("switched to provider \"{}\"", config.active_provider));
+
+    Ok(())
 }
 
-fn configure_provider(selected_variant: ActiveProvider, providers: &MultiProviderConfig) -> Result<ProviderConfig, LarpshellError> {
-    match selected_variant {
-        ActiveProvider::Gemini => configure_gemini(providers.gemini.as_ref()),
-        ActiveProvider::Ollama => configure_ollama(providers.ollama.as_ref()),
-        ActiveProvider::OpenRouter => configure_openrouter(providers.openrouter.as_ref()),
-        ActiveProvider::OpenAI => configure_openai(providers.openai.as_ref()),
+/// Activates a saved profile by name without any prompt.
+pub fn set_active_provider(name: &str) -> Result<(), LarpshellError> {
+    let mut config = load_config_or_default()?;
+    if !config.providers.iter().any(|profile| profile.name == name) {
+        return Err(LarpshellError::ConfigError(format!("no provider named \"{name}\"")));
+    }
+    config.active_provider = name.to_string();
+    save_config(&config)
+}
+
+fn profile_menu_label(profile: &ProviderProfile) -> String {
+    format!("{} — {} ({})", profile.name, profile.config.provider_type().display_name(), profile.config.model())
+}
+
+fn profile_menu_label_with_current(profile: &ProviderProfile, active_name: &str) -> String {
+    let label = profile_menu_label(profile);
+    if profile.name == active_name { format!("{label} (current)") } else { label }
+}
+
+/// First name for a new profile of this kind: the kind string, then
+/// `<kind>-2`, `<kind>-3`, … while taken.
+fn unique_profile_name(kind: ActiveProvider, profiles: &[ProviderProfile]) -> String {
+    let base = kind.as_str();
+    if !profiles.iter().any(|p| p.name == base) {
+        return base.to_string();
+    }
+    for n in 2.. {
+        let candidate = format!("{base}-{n}");
+        if !profiles.iter().any(|p| p.name == candidate) {
+            return candidate;
+        }
+    }
+    unreachable!("integer suffix space is infinite")
+}
+
+fn configure_new_profile(profiles: &[ProviderProfile]) -> Result<ProviderProfile, LarpshellError> {
+    let kind_labels: Vec<String> = PROVIDER_OPTIONS.iter().map(|(label, _)| (*label).to_string()).collect();
+    let selection = prompt_select("Select provider type", &kind_labels, 0)?;
+    let kind = PROVIDER_OPTIONS[selection].1;
+
+    let default_name = unique_profile_name(kind, profiles);
+    let name = loop {
+        let input = prompt_input("Profile name", Some(&default_name))?;
+        if input.is_empty() {
+            print_error("Profile name cannot be empty");
+            continue;
+        }
+        if profiles.iter().any(|p| p.name == input) {
+            print_error("A provider with this name already exists");
+            continue;
+        }
+        break input;
+    };
+
+    Ok(ProviderProfile { name, config: configure_provider(kind, None)? })
+}
+
+fn configure_provider(kind: ActiveProvider, existing: Option<&ProviderSpecificConfig>) -> Result<ProviderSpecificConfig, LarpshellError> {
+    match kind {
+        ActiveProvider::Gemini => configure_gemini(existing.and_then(|c| match c {
+            ProviderSpecificConfig::Gemini(config) => Some(config),
+            _ => None,
+        })),
+        ActiveProvider::Ollama => configure_ollama(existing.and_then(|c| match c {
+            ProviderSpecificConfig::Ollama(config) => Some(config),
+            _ => None,
+        })),
+        ActiveProvider::OpenRouter => configure_openrouter(existing.and_then(|c| match c {
+            ProviderSpecificConfig::OpenRouter(config) => Some(config),
+            _ => None,
+        })),
+        ActiveProvider::OpenAI => configure_openai(existing.and_then(|c| match c {
+            ProviderSpecificConfig::OpenAI(config) => Some(config),
+            _ => None,
+        })),
     }
 }
 
-fn apply_provider_config(providers: &mut MultiProviderConfig, config: &ProviderConfig) {
-    match &config.config {
-        ProviderSpecificConfig::Gemini { gemini } => {
-            providers.gemini = Some(gemini.clone());
-        }
-        ProviderSpecificConfig::Ollama { ollama } => {
-            providers.ollama = Some(ollama.clone());
-        }
-        ProviderSpecificConfig::OpenRouter { openrouter } => {
-            providers.openrouter = Some(openrouter.clone());
-        }
-        ProviderSpecificConfig::OpenAI { openai } => {
-            providers.openai = Some(openai.clone());
-        }
-    }
-}
-
-fn display_config_summary(config: &Config, provider_name: &str) -> Result<(), LarpshellError> {
+fn display_config_summary(config: &ProviderSpecificConfig, name: &str) {
     print_ok("Configuration saved!");
     eprintln!();
-    eprintln!("{}", style_message_markup(&format!("Provider: {provider_name}")));
-
-    let provider_config = config.provider_config()?;
-    let specific = &provider_config.config;
-    eprintln!("{}", style_message_markup(&format!("Model: {}", specific.model())));
-    if let Some(url) = specific.base_url() {
+    eprintln!("{}", style_message_markup(&format!("Provider: {name}")));
+    eprintln!("{}", style_message_markup(&format!("Model: {}", config.model())));
+    if let Some(url) = config.base_url() {
         eprintln!("{}", style_message_markup(&format!("Base URL: {url}")));
     }
-
-    Ok(())
 }
 
-fn configure_gemini(existing: Option<&GeminiConfig>) -> Result<ProviderConfig, LarpshellError> {
+fn configure_gemini(existing: Option<&GeminiConfig>) -> Result<ProviderSpecificConfig, LarpshellError> {
     let api_key = prompt_api_key("Gemini API key", existing.map(|e| e.api_key.as_str()))?;
     let model = prompt_model_name(Some(existing.map_or("gemini-flash-latest", |e| e.model.as_str())))?;
 
-    Ok(ProviderConfig {
-        provider_type: ActiveProvider::Gemini,
-        config: ProviderSpecificConfig::Gemini { gemini: GeminiConfig { api_key, model } },
-    })
+    Ok(ProviderSpecificConfig::Gemini(GeminiConfig { api_key, model }))
 }
 
-fn configure_ollama(existing: Option<&OllamaConfig>) -> Result<ProviderConfig, LarpshellError> {
+fn configure_ollama(existing: Option<&OllamaConfig>) -> Result<ProviderSpecificConfig, LarpshellError> {
     let url_default = existing.map_or("http://localhost:11434", |e| e.base_url.as_str());
     let base_url = prompt_input("Ollama base URL", Some(url_default))?;
 
     let model = prompt_model_name(existing.map(|e| e.model.as_str()))?;
 
-    Ok(ProviderConfig {
-        provider_type: ActiveProvider::Ollama,
-        config: ProviderSpecificConfig::Ollama { ollama: OllamaConfig { base_url, model } },
-    })
+    Ok(ProviderSpecificConfig::Ollama(OllamaConfig { base_url, model }))
 }
 
-fn configure_openrouter(existing: Option<&OpenRouterConfig>) -> Result<ProviderConfig, LarpshellError> {
+fn configure_openrouter(existing: Option<&OpenRouterConfig>) -> Result<ProviderSpecificConfig, LarpshellError> {
     let url_default = existing.map_or("https://openrouter.ai/api/v1", |e| e.base_url.as_str());
     let base_url = prompt_input("OpenRouter base URL", Some(url_default))?;
 
@@ -550,13 +586,10 @@ fn configure_openrouter(existing: Option<&OpenRouterConfig>) -> Result<ProviderC
     let model_default = existing.map_or("openrouter/auto", |e| e.model.as_str());
     let model = prompt_input("Model name", Some(model_default))?;
 
-    Ok(ProviderConfig {
-        provider_type: ActiveProvider::OpenRouter,
-        config: ProviderSpecificConfig::OpenRouter { openrouter: OpenRouterConfig { base_url, api_key, model } },
-    })
+    Ok(ProviderSpecificConfig::OpenRouter(OpenRouterConfig { base_url, api_key, model }))
 }
 
-fn configure_openai(existing: Option<&OpenAIConfig>) -> Result<ProviderConfig, LarpshellError> {
+fn configure_openai(existing: Option<&OpenAIConfig>) -> Result<ProviderSpecificConfig, LarpshellError> {
     let url_default = existing.map_or("https://api.openai.com/v1", |e| e.base_url.as_str());
     let base_url = prompt_input("API base URL", Some(url_default))?;
 
@@ -568,10 +601,7 @@ fn configure_openai(existing: Option<&OpenAIConfig>) -> Result<ProviderConfig, L
 
     let model = prompt_model_name(existing.map(|e| e.model.as_str()))?;
 
-    Ok(ProviderConfig {
-        provider_type: ActiveProvider::OpenAI,
-        config: ProviderSpecificConfig::OpenAI { openai: OpenAIConfig { base_url, api_key, model } },
-    })
+    Ok(ProviderSpecificConfig::OpenAI(OpenAIConfig { base_url, api_key, model }))
 }
 
 /// A masked, single-entry password prompt (no confirmation step) themed with the
@@ -648,80 +678,120 @@ fn prompt_model_name(default: Option<&str>) -> Result<String, LarpshellError> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_provider_default_index_gemini() {
-        let idx = PROVIDER_OPTIONS.iter().position(|(_, v)| *v == ActiveProvider::Gemini).unwrap_or(0);
-        assert_eq!(idx, 0);
-    }
-
-    #[test]
-    fn test_provider_default_index_ollama() {
-        let idx = PROVIDER_OPTIONS.iter().position(|(_, v)| *v == ActiveProvider::Ollama).unwrap_or(0);
-        assert_eq!(idx, 1);
-    }
-
-    #[test]
-    fn test_provider_default_index_openrouter() {
-        let idx = PROVIDER_OPTIONS.iter().position(|(_, v)| *v == ActiveProvider::OpenRouter).unwrap_or(0);
-        assert_eq!(idx, 2);
-    }
-
-    #[test]
-    fn test_provider_default_index_openai() {
-        let idx = PROVIDER_OPTIONS.iter().position(|(_, v)| *v == ActiveProvider::OpenAI).unwrap_or(0);
-        assert_eq!(idx, 3);
-    }
-
-    #[test]
-    fn openrouter_saved_credentials_require_api_key() {
-        let providers = MultiProviderConfig {
-            openrouter: Some(OpenRouterConfig {
-                base_url: "https://openrouter.ai/api/v1".to_string(),
-                api_key: None,
-                model: "openrouter/auto".to_string(),
+    fn ollama_profile(name: &str) -> ProviderProfile {
+        ProviderProfile {
+            name: name.to_string(),
+            config: ProviderSpecificConfig::Ollama(OllamaConfig {
+                base_url: "http://localhost:11434".to_string(),
+                model: "llama3".to_string(),
             }),
-            ..Default::default()
-        };
-
-        assert!(!provider_has_saved_credentials(&providers, ActiveProvider::OpenRouter));
-    }
-
-    #[test]
-    fn openrouter_saved_credentials_reject_blank_api_key() {
-        let providers = MultiProviderConfig {
-            openrouter: Some(OpenRouterConfig {
-                base_url: "https://openrouter.ai/api/v1".to_string(),
-                api_key: Some("   ".to_string()),
-                model: "openrouter/auto".to_string(),
-            }),
-            ..Default::default()
-        };
-
-        assert!(!provider_has_saved_credentials(&providers, ActiveProvider::OpenRouter));
-    }
-
-    #[test]
-    fn openrouter_saved_credentials_accept_saved_api_key() {
-        let providers = MultiProviderConfig {
-            openrouter: Some(OpenRouterConfig {
-                base_url: "https://openrouter.ai/api/v1".to_string(),
-                api_key: Some("sk-or-v1-test".to_string()),
-                model: "openrouter/auto".to_string(),
-            }),
-            ..Default::default()
-        };
-
-        assert!(provider_has_saved_credentials(&providers, ActiveProvider::OpenRouter));
-    }
-
-    #[test]
-    fn provider_options_mark_current_with_plain_text() {
-        let opts = provider_options_with_marker(Some(ActiveProvider::Ollama));
-        assert!(opts[1].contains("(current)"), "active provider labelled: {:?}", opts[1]);
-        assert!(!opts[0].contains("(current)"));
-        for opt in &opts {
-            assert!(!opt.contains('\u{1b}'), "labels must not bake in ANSI: {opt:?}");
         }
+    }
+
+    #[test]
+    fn provider_kind_wire_names_match_kind_strings() {
+        assert_eq!(ActiveProvider::Gemini.as_str(), "gemini");
+        assert_eq!(ActiveProvider::Ollama.as_str(), "ollama");
+        assert_eq!(ActiveProvider::OpenRouter.as_str(), "openrouter");
+        assert_eq!(ActiveProvider::OpenAI.as_str(), "openai");
+    }
+
+    #[test]
+    fn provider_profile_roundtrips_through_toml() {
+        let profile = ProviderProfile {
+            name: "home-ollama".to_string(),
+            config: ProviderSpecificConfig::Ollama(OllamaConfig {
+                base_url: "http://localhost:11434".to_string(),
+                model: "llama3".to_string(),
+            }),
+        };
+        let config = Config {
+            active_provider: "home-ollama".to_string(),
+            providers: vec![profile],
+            agent: AgentMode::Off,
+            verbose_tool_output: true,
+        };
+
+        let toml_string = toml::to_string_pretty(&config).unwrap();
+        let parsed: Config = toml::from_str(&toml_string).unwrap();
+
+        assert_eq!(parsed.active_provider, "home-ollama");
+        assert_eq!(parsed.providers.len(), 1);
+        let parsed_profile = &parsed.providers[0];
+        assert_eq!(parsed_profile.name, "home-ollama");
+        assert!(matches!(parsed_profile.config, ProviderSpecificConfig::Ollama(_)));
+        assert_eq!(parsed_profile.config.model(), "llama3");
+        assert_eq!(parsed_profile.config.base_url(), Some("http://localhost:11434"));
+    }
+
+    #[test]
+    fn openai_profile_with_api_key_deserializes_as_openai_not_openrouter() {
+        let toml_string = r#"
+provider = "my-openai"
+
+[[providers]]
+name = "my-openai"
+kind = "openai"
+base_url = "https://api.openai.com/v1"
+api_key = "sk-test"
+model = "gpt-4"
+"#;
+
+        let config: Config = toml::from_str(toml_string).unwrap();
+        let provider_config = config.provider_config().unwrap();
+        assert_eq!(provider_config.provider_type(), ActiveProvider::OpenAI);
+        match provider_config {
+            ProviderSpecificConfig::OpenAI(config) => assert_eq!(config.api_key.as_deref(), Some("sk-test")),
+            other => panic!("expected OpenAI config, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn provider_config_resolves_by_active_name() {
+        let config = Config {
+            active_provider: "home-ollama".to_string(),
+            providers: vec![ollama_profile("home-ollama"), ollama_profile("office-ollama")],
+            agent: AgentMode::Off,
+            verbose_tool_output: true,
+        };
+
+        let provider_config = config.provider_config().unwrap();
+        assert_eq!(provider_config.provider_type(), ActiveProvider::Ollama);
+        assert_eq!(provider_config.model(), "llama3");
+    }
+
+    #[test]
+    fn provider_config_errors_for_unknown_active_name() {
+        let config = Config {
+            active_provider: "missing".to_string(),
+            providers: vec![ollama_profile("home-ollama")],
+            agent: AgentMode::Off,
+            verbose_tool_output: true,
+        };
+
+        match config.provider_config().unwrap_err() {
+            LarpshellError::ConfigError(message) => {
+                assert!(message.contains("missing"));
+                assert!(message.contains("config not found"));
+            }
+            other => panic!("expected ConfigError, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unique_profile_name_appends_suffix_when_taken() {
+        let profiles = vec![ollama_profile("ollama")];
+        assert_eq!(unique_profile_name(ActiveProvider::Ollama, &profiles), "ollama-2");
+        assert_eq!(unique_profile_name(ActiveProvider::Ollama, &[]), "ollama");
+    }
+
+    #[test]
+    fn profile_menu_label_marks_current_with_plain_text() {
+        let label = profile_menu_label_with_current(&ollama_profile("home-ollama"), "home-ollama");
+        assert!(label.contains("(current)"));
+        assert!(!label.contains('\u{1b}'), "labels must not bake in ANSI: {label:?}");
+        let other = profile_menu_label_with_current(&ollama_profile("office-ollama"), "home-ollama");
+        assert!(!other.contains("(current)"));
     }
 
     #[test]

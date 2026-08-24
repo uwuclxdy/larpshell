@@ -337,6 +337,12 @@ async fn dispatch_slash_command(cmd: SlashCmd, runtime: &mut Runtime, command_mo
                 runtime.reload_all()?;
             }
         }
+        SlashCmd::Provider { name } => {
+            switch_provider(name.as_deref())?;
+            if command_mode == CommandMode::Interactive {
+                runtime.reload_all()?;
+            }
+        }
         SlashCmd::Agent { mode: agent_mode } => {
             if let Some(mode) = agent_mode {
                 config::set_agent_mode(mode)?;
@@ -381,6 +387,7 @@ fn print_slash_command_help() {
 fn dispatch_provider_less_subcommand(sub: &cli::Subcommands) -> Result<(), LarpshellError> {
     match sub {
         cli::Subcommands::Api => interactive_setup(),
+        cli::Subcommands::Provider { name } => switch_provider(name.as_deref()),
         cli::Subcommands::Uninstall => uninstall_larpshell(),
         cli::Subcommands::History { enable } => handle_history_subcommand(*enable),
         cli::Subcommands::Verbose { enable } => handle_tool_output_subcommand(*enable),
@@ -468,6 +475,19 @@ fn build_tool_registry(agent_mode: AgentMode) -> ToolRegistry {
 }
 
 // ── subcommand handlers ─────────────────────────────────────────────────────
+
+/// Shared `/provider` and `larpshell provider` body: menu without a name,
+/// direct activation with one.
+fn switch_provider(name: Option<&str>) -> Result<(), LarpshellError> {
+    match name {
+        Some(profile_name) => {
+            config::set_active_provider(profile_name)?;
+            cli::print_ok(&format!("switched to provider \"{profile_name}\""));
+        }
+        None => config::interactive_provider_switch()?,
+    }
+    Ok(())
+}
 
 fn handle_history_subcommand(enable: Option<bool>) -> Result<(), LarpshellError> {
     if let Some(on) = enable {
@@ -701,7 +721,7 @@ async fn process_user_input(user_input: &str, runtime: &mut Runtime, mode: Comma
 async fn process_command(
     user_input: &str, provider: &dyn AIProvider, config: &Config, mode: CommandMode,
 ) -> Result<Option<String>, LarpshellError> {
-    let model_name = config.provider_config()?.config.model().to_string();
+    let model_name = config.provider_config()?.model().to_string();
     let status = StatusLine::start(&format!("generating with {model_name}"));
 
     let effective_sys = config::load_sys_prompt().filter(|prompt| validate_sys_prompt(prompt));

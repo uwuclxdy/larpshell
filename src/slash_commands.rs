@@ -46,6 +46,7 @@ static AGENT_TOGGLES: &[ArgChoice] = &[
 
 pub const COMMANDS: &[SlashCommand] = &[
     SlashCommand { name: "api", description: "configure API provider" },
+    SlashCommand { name: "provider", description: "switch to a saved provider" },
     SlashCommand { name: "agent", description: "enable or disable agent mode" },
     SlashCommand { name: "explain", description: "explain a shell command" },
     SlashCommand { name: "history", description: "enable or disable prompt history" },
@@ -136,6 +137,7 @@ pub fn filter(typed: &str) -> Vec<&'static SlashCommand> {
 pub enum SlashCmd {
     Agent { mode: Option<AgentMode> },
     Api,
+    Provider { name: Option<String> },
     Uninstall,
     History { enable: Option<bool> },
     Verbose { enable: Option<bool> },
@@ -193,6 +195,7 @@ pub fn parse(input: &str) -> SlashCmd {
             Err((cmd, expected)) => SlashCmd::InvalidArgs { command: cmd, expected },
         },
         Some("/api") => SlashCmd::Api,
+        Some("/provider") => SlashCmd::Provider { name: parts.next().map(std::string::ToString::to_string) },
         Some("/uninstall") => SlashCmd::Uninstall,
         Some("/help") => SlashCmd::Help,
         Some("/quit") => SlashCmd::Quit,
@@ -234,8 +237,9 @@ mod tests {
     #[test]
     fn filter_prefix_matches_command() {
         let results = filter("/p");
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].name, "prompt");
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].name, "provider");
+        assert_eq!(results[1].name, "prompt");
     }
 
     #[test]
@@ -265,6 +269,22 @@ mod tests {
     #[test]
     fn parse_api() {
         assert!(matches!(parse("/api"), SlashCmd::Api));
+    }
+
+    #[test]
+    fn parse_provider_without_name_opens_menu() {
+        match parse("/provider") {
+            SlashCmd::Provider { name } => assert_eq!(name, None),
+            _ => panic!("expected Provider"),
+        }
+    }
+
+    #[test]
+    fn parse_provider_with_name_switches_directly() {
+        match parse("/provider home-ollama") {
+            SlashCmd::Provider { name } => assert_eq!(name.as_deref(), Some("home-ollama")),
+            _ => panic!("expected Provider"),
+        }
     }
 
     #[test]
