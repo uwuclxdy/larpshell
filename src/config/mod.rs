@@ -208,21 +208,20 @@ fn migrate_txt_prompt(md_path: &Path) {
     }
 }
 
-/// Resolves the config base directory with XDG semantics on all unix
-/// (`XDG_CONFIG_HOME` when absolute, else `~/.config`), matching `dirs::config_dir()`
-/// on Linux. On non-unix, delegates to `dirs::config_dir()` unchanged.
+/// Resolves the config base directory: an absolute `XDG_CONFIG_HOME` wins on
+/// every platform (tests sandbox through it), else the platform default —
+/// `~/.config` on unix, `dirs::config_dir()` elsewhere.
 fn config_base_dir() -> Option<PathBuf> {
-    #[cfg(unix)]
-    {
-        std::env::var_os("XDG_CONFIG_HOME")
-            .filter(|p| PathBuf::from(p).is_absolute())
-            .map(PathBuf::from)
-            .or_else(|| dirs::home_dir().map(|h| h.join(".config")))
-    }
-    #[cfg(not(unix))]
-    {
-        dirs::config_dir()
-    }
+    std::env::var_os("XDG_CONFIG_HOME").filter(|p| PathBuf::from(p).is_absolute()).map(PathBuf::from).or_else(|| {
+        #[cfg(unix)]
+        {
+            dirs::home_dir().map(|h| h.join(".config"))
+        }
+        #[cfg(not(unix))]
+        {
+            dirs::config_dir()
+        }
+    })
 }
 
 pub fn ensure_config_dir() -> Result<PathBuf, LarpshellError> {
