@@ -115,7 +115,7 @@ async fn run() -> Result<(), LarpshellError> {
         return dispatch_provider_less_subcommand(sub);
     }
 
-    let mut runtime = Runtime::create()?;
+    let mut runtime = Runtime::create().await?;
 
     match cli.subcommand {
         Some(cli::Subcommands::Explain { command }) => {
@@ -334,13 +334,13 @@ async fn dispatch_slash_command(cmd: SlashCmd, runtime: &mut Runtime, command_mo
         SlashCmd::Api => {
             interactive_setup()?;
             if command_mode == CommandMode::Interactive {
-                runtime.reload_all()?;
+                runtime.reload_all().await?;
             }
         }
         SlashCmd::Provider { name } => {
             switch_provider(name.as_deref())?;
             if command_mode == CommandMode::Interactive {
-                runtime.reload_all()?;
+                runtime.reload_all().await?;
             }
         }
         SlashCmd::Agent { mode: agent_mode } => {
@@ -348,7 +348,7 @@ async fn dispatch_slash_command(cmd: SlashCmd, runtime: &mut Runtime, command_mo
                 config::set_agent_mode(mode)?;
                 cli::print_ok(agent_mode_status_message(mode));
                 if command_mode == CommandMode::Interactive {
-                    runtime.reload_agent()?;
+                    runtime.reload_agent().await?;
                 }
             } else {
                 cli::print_ok(agent_mode_status_message(runtime.config.agent));
@@ -400,7 +400,7 @@ fn dispatch_provider_less_subcommand(sub: &cli::Subcommands) -> Result<(), Larps
 // ── Runtime ─────────────────────────────────────────────────────────────────
 
 impl Runtime {
-    fn create() -> Result<Self, LarpshellError> {
+    async fn create() -> Result<Self, LarpshellError> {
         let config = match load_config() {
             Ok(config) => config,
             Err(LarpshellError::IoError(error)) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -410,28 +410,28 @@ impl Runtime {
             Err(error) => return Err(error),
         };
         let provider = create_provider(&config)?;
-        let tool_registry = Self::build_registry(config.agent);
+        let tool_registry = Self::build_registry(config.agent).await;
         let update_task = Some(tokio::task::spawn(update::is_update_available()));
         Ok(Self { config, provider, tool_registry, update_task })
     }
 
-    fn reload_all(&mut self) -> Result<(), LarpshellError> {
+    async fn reload_all(&mut self) -> Result<(), LarpshellError> {
         let config = reload_config()?;
         self.provider = create_provider(&config)?;
-        self.tool_registry = Self::build_registry(config.agent);
+        self.tool_registry = Self::build_registry(config.agent).await;
         self.config = config;
         Ok(())
     }
 
-    fn reload_agent(&mut self) -> Result<(), LarpshellError> {
+    async fn reload_agent(&mut self) -> Result<(), LarpshellError> {
         let config = reload_config()?;
-        self.tool_registry = Self::build_registry(config.agent);
+        self.tool_registry = Self::build_registry(config.agent).await;
         self.config = config;
         Ok(())
     }
 
-    fn build_registry(mode: AgentMode) -> Option<ToolRegistry> {
-        mode.is_enabled().then(|| build_tool_registry(mode))
+    async fn build_registry(mode: AgentMode) -> Option<ToolRegistry> {
+        if mode.is_enabled() { Some(build_tool_registry(mode).await) } else { None }
     }
 
     async fn finish_update(&mut self) {
@@ -445,29 +445,23 @@ fn reload_config() -> Result<Config, LarpshellError> {
     load_config().map_err(|error| LarpshellError::ConfigError(format!("failed to reload config: {error}")))
 }
 
-fn build_tool_registry(agent_mode: AgentMode) -> ToolRegistry {
+async fn build_tool_registry(agent_mode: AgentMode) -> ToolRegistry {
     let mut registry = ToolRegistry::with_builtins(agent_mode);
     for mcp_config in agent::mcp::load_mcp_configs() {
-        match agent::mcp::StdioMcpClient::spawn(&mcp_config) {
-            Ok(mut client) => {
-                if let Err(error) = client.initialize() {
-                    print_warning(&format!("MCP server '{}': {error}", mcp_config.name));
-                    continue;
-                }
-                match client.list_tools() {
-                    Ok(tools) => match registry.add_mcp_client(client) {
-                        Ok(()) => {
-                            for tool in tools {
-                                registry.register_mcp_tool(tool);
-                            }
+        match agent::mcp::StdioMcpClient::spawn(&mcp_config).await {
+            Ok(client) => match client.list_tools().await {
+                Ok(tools) => match registry.add_mcp_client(client) {
+                    Ok(()) => {
+                        for tool in tools {
+                            registry.register_mcp_tool(tool);
                         }
-                        Err(error) => print_warning(&error),
-                    },
-                    Err(error) => {
-                        print_warning(&format!("MCP server '{}': {error}", mcp_config.name));
                     }
+                    Err(error) => print_warning(&error),
+                },
+                Err(error) => {
+                    print_warning(&format!("MCP server '{}': {error}", mcp_config.name));
                 }
-            }
+            },
             Err(error) => print_warning(&error),
         }
     }
@@ -711,7 +705,13 @@ fn open_in_editor(path: &std::path::Path) -> Result<(), LarpshellError> {
 
 async fn process_user_input(user_input: &str, runtime: &mut Runtime, mode: CommandMode) -> Result<Option<String>, LarpshellError> {
     if runtime.config.agent.is_enabled() {
-        let registry = runtime.tool_registry.get_or_insert_with(|| build_tool_registry(runtime.config.agent));
+        if runtime.tool_registry.is_none() {
+            runtime.tool_registry = Some(build_tool_registry(runtime.config.agent).await);
+        }
+        let registry = match runtime.tool_registry.as_ref() {
+            Some(registry) => registry,
+            None => unreachable!("tool registry ensured above"),
+        };
         process_command_agent(user_input, runtime.provider.as_ref(), &runtime.config, mode, registry).await
     } else {
         process_command(user_input, runtime.provider.as_ref(), &runtime.config, mode).await
