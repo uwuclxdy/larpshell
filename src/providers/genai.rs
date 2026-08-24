@@ -49,7 +49,8 @@ impl GenaiProvider {
     }
 
     pub fn openrouter(config: &OpenRouterConfig) -> Result<Self, LarpshellError> {
-        let client = build_client(AdapterKind::OpenRouter, Some(&config.base_url), config.api_key.as_deref())?;
+        let base_url = openai_compat_base_url(&config.base_url);
+        let client = build_client(AdapterKind::OpenRouter, Some(&base_url), config.api_key.as_deref())?;
         Ok(Self {
             client,
             model: config.model.clone(),
@@ -60,7 +61,8 @@ impl GenaiProvider {
     }
 
     pub fn openai(config: &OpenAIConfig) -> Result<Self, LarpshellError> {
-        let client = build_client(AdapterKind::OpenAI, Some(&config.base_url), config.api_key.as_deref())?;
+        let base_url = openai_compat_base_url(&config.base_url);
+        let client = build_client(AdapterKind::OpenAI, Some(&base_url), config.api_key.as_deref())?;
         Ok(Self {
             client,
             model: config.model.clone(),
@@ -160,17 +162,7 @@ impl AIProvider for GenaiProvider {
         let response =
             self.client.exec_chat(&self.model, request, None).await.map_err(|error| map_genai_error(error, self.provider_slug))?;
 
-        let tool_calls: Vec<ToolCall> = response
-            .content
-            .tool_calls()
-            .iter()
-            .map(|tool_call| ToolCall {
-                id: tool_call.call_id.clone(),
-                name: tool_call.fn_name.clone(),
-                arguments: tool_call.fn_arguments.clone(),
-                thought_signature: tool_call.thought_signatures.as_ref().and_then(|signatures| signatures.first().cloned()),
-            })
-            .collect();
+        let tool_calls = extract_tool_calls(&response);
 
         if !tool_calls.is_empty() {
             return Ok(ChatResponse::ToolCalls(tool_calls));
@@ -186,6 +178,27 @@ impl AIProvider for GenaiProvider {
     fn name(&self) -> String {
         format!("{} ({})", self.display_name, self.display_suffix)
     }
+}
+
+/// Maps genai tool calls back to larpshell's shape. The gemini adapter
+/// attaches every thought signature of a batch to its first tool call;
+/// distribute them back per call, positionally.
+fn extract_tool_calls(response: &genai::chat::ChatResponse) -> Vec<ToolCall> {
+    let shared_signatures: Vec<String> =
+        response.content.tool_calls().iter().find_map(|call| call.thought_signatures.clone()).unwrap_or_default();
+
+    response
+        .content
+        .tool_calls()
+        .iter()
+        .enumerate()
+        .map(|(index, tool_call)| ToolCall {
+            id: tool_call.call_id.clone(),
+            name: tool_call.fn_name.clone(),
+            arguments: tool_call.fn_arguments.clone(),
+            thought_signature: shared_signatures.get(index).cloned(),
+        })
+        .collect()
 }
 
 /// One reqwest client shared across adapters; `with_reqwest` injects it into
@@ -220,11 +233,16 @@ fn build_client(kind: AdapterKind, base_url: Option<&str>, api_key: Option<&str>
 
 fn map_genai_error(error: genai::Error, provider: &str) -> LarpshellError {
     match error {
-        genai::Error::HttpError { status, body, .. } => LarpshellError::from_http_status_with_retry_header(status, provider, &body, None),
+        // Non-2xx from the non-streaming path (everything larpshell calls).
         genai::Error::WebAdapterCall { webc_error, .. } | genai::Error::WebModelCall { webc_error, .. } => match webc_error {
+            genai::webc::Error::ResponseFailedStatus { status, body, headers } => {
+                let retry_after = headers.get(reqwest::header::RETRY_AFTER).and_then(|value| value.to_str().ok()).map(str::to_owned);
+                LarpshellError::from_http_status_with_retry_header(status, provider, &body, retry_after.as_deref())
+            }
             genai::webc::Error::Reqwest(reqwest_error) => LarpshellError::from_reqwest(&reqwest_error, provider),
             other => LarpshellError::InvalidResponse(format!("{provider} error: {other}")),
         },
+        genai::Error::HttpError { status, body, .. } => LarpshellError::from_http_status_with_retry_header(status, provider, &body, None),
         other => LarpshellError::InvalidResponse(format!("{provider} error: {other}")),
     }
 }
@@ -232,6 +250,20 @@ fn map_genai_error(error: genai::Error, provider: &str) -> LarpshellError {
 /// Strips scheme prefix and trailing slashes from a URL for display purposes.
 fn strip_url_for_display(url: &str) -> &str {
     url.trim_start_matches("http://").trim_start_matches("https://").trim_end_matches('/')
+}
+
+/// Normalizes an OpenAI-compatible base URL for genai's adapter, which joins
+/// `chat/completions` with RFC 3986 last-segment replacement. A trailing slash
+/// makes the join append; bare hosts get `/v1/` inserted, a full endpoint path
+/// is stripped back so the join re-adds it once.
+fn openai_compat_base_url(base: &str) -> String {
+    let base = base.trim_end_matches('/');
+    if let Some(prefix) = base.strip_suffix("/chat/completions") {
+        return format!("{}/", prefix.trim_end_matches('/'));
+    }
+    let last = base.rsplit('/').next().unwrap_or("");
+    let is_version = last.starts_with('v') && last.chars().nth(1).is_some_and(|c| c.is_ascii_digit());
+    if is_version { format!("{base}/") } else { format!("{base}/v1/") }
 }
 
 #[cfg(test)]
@@ -287,6 +319,73 @@ mod tests {
     fn strip_url_for_display_strips_scheme_and_slashes() {
         assert_eq!(strip_url_for_display("http://localhost:11434/"), "localhost:11434");
         assert_eq!(strip_url_for_display("https://api.openai.com/v1"), "api.openai.com/v1");
+    }
+
+    #[test]
+    fn openai_compat_base_url_handles_v1_suffix() {
+        assert_eq!(openai_compat_base_url("https://api.openai.com/v1"), "https://api.openai.com/v1/");
+    }
+
+    #[test]
+    fn openai_compat_base_url_handles_trailing_slash() {
+        assert_eq!(openai_compat_base_url("https://api.openai.com/v1/"), "https://api.openai.com/v1/");
+    }
+
+    #[test]
+    fn openai_compat_base_url_handles_bare_host() {
+        assert_eq!(openai_compat_base_url("http://localhost:11434"), "http://localhost:11434/v1/");
+    }
+
+    #[test]
+    fn openai_compat_base_url_handles_version_like_path_segments() {
+        assert_eq!(openai_compat_base_url("https://example.com/v1beta"), "https://example.com/v1beta/");
+        assert_eq!(openai_compat_base_url("https://example.com/v2"), "https://example.com/v2/");
+    }
+
+    #[test]
+    fn openai_compat_base_url_handles_full_path() {
+        assert_eq!(openai_compat_base_url("https://api.openai.com/v1/chat/completions"), "https://api.openai.com/v1/");
+    }
+
+    #[test]
+    fn openai_compat_base_url_handles_nested_version_path() {
+        // OpenRouter default: last segment is v1, so the join appends after it.
+        assert_eq!(openai_compat_base_url("https://openrouter.ai/api/v1"), "https://openrouter.ai/api/v1/");
+    }
+
+    #[test]
+    fn extract_tool_calls_distributes_shared_signatures_positionally() {
+        use genai::chat::{ChatResponse as GenaiChatResponse, ToolCall as GenaiToolCall};
+
+        let content = MessageContent::from_parts(vec![
+            ContentPart::ToolCall(GenaiToolCall {
+                call_id: "call-1".into(),
+                fn_name: "search".into(),
+                fn_arguments: serde_json::json!({}),
+                thought_signatures: Some(vec!["sig-1".to_string(), "sig-2".to_string()]),
+            }),
+            ContentPart::ToolCall(GenaiToolCall {
+                call_id: "call-2".into(),
+                fn_name: "read_file".into(),
+                fn_arguments: serde_json::json!({}),
+                thought_signatures: None,
+            }),
+        ]);
+        let response = GenaiChatResponse {
+            content,
+            reasoning_content: None,
+            model_iden: genai::ModelIden::from_static(AdapterKind::Gemini, "test"),
+            provider_model_iden: genai::ModelIden::from_static(AdapterKind::Gemini, "test"),
+            stop_reason: None,
+            usage: Default::default(),
+            captured_raw_body: None,
+            response_id: None,
+        };
+
+        let calls = extract_tool_calls(&response);
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].thought_signature.as_deref(), Some("sig-1"));
+        assert_eq!(calls[1].thought_signature.as_deref(), Some("sig-2"));
     }
 
     #[test]

@@ -203,6 +203,11 @@ mod tests {
     /// tool listing, and a tool call through the rmcp client.
     #[tokio::test(flavor = "multi_thread")]
     async fn stdio_client_lists_and_calls_tools() {
+        if std::process::Command::new("python3").arg("--version").output().is_err() {
+            eprintln!("skipping: python3 not available for the mock MCP server");
+            return;
+        }
+
         let dir = std::env::temp_dir().join(format!("larpshell_mcp_test_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();

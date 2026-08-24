@@ -419,7 +419,13 @@ const ADD_NEW_PROVIDER: &str = "+ add new provider";
 /// `/api` entry point: pick a saved profile to reconfigure, or add a new one.
 /// The touched profile becomes active.
 pub fn interactive_setup() -> Result<(), LarpshellError> {
-    let existing_config = load_config().ok();
+    // A malformed config must not be overwritten by the setup flow: only a
+    // missing file starts fresh.
+    let existing_config = match load_config() {
+        Ok(config) => Some(config),
+        Err(LarpshellError::IoError(error)) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error),
+    };
     let mut profiles = existing_config.as_ref().map(|c| c.providers.clone()).unwrap_or_default();
     let current_index = existing_config.as_ref().and_then(|c| c.profiles_active_index());
 

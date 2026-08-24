@@ -372,6 +372,7 @@ fn provider_switch_by_name_updates_config() {
     let config_path = home.join("config").join("larpshell").join("config.toml");
     let contents = fs::read_to_string(config_path).unwrap();
     assert!(contents.contains("provider = \"office-ollama\""), "config should have switched provider: {contents}");
+    assert!(contents.contains("name = \"home-ollama\""), "switching must not drop the sibling profile; config: {contents}");
 }
 
 #[test]
@@ -383,6 +384,77 @@ fn provider_switch_unknown_name_errors() {
     assert!(!out.status.success(), "unknown provider name should fail");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("no provider named"), "expected lookup error; stderr: {stderr}");
+}
+
+// ── openai-compatible provider tests ────────────────────────────────────────
+
+/// Starts a one-shot server answering with `status` + `body` (raw JSON for the
+/// response payload) and recording the first request line.
+fn mock_openai_with_status(status: u16, body: &'static str) -> (u16, std::sync::Arc<std::sync::Mutex<Option<String>>>) {
+    use std::io::Read;
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(None));
+
+    let seen_clone = seen.clone();
+    std::thread::spawn(move || {
+        let Ok((mut stream, _)) = listener.accept() else {
+            return;
+        };
+        let mut buf = vec![0u8; 8192];
+        let read = stream.read(&mut buf).unwrap_or(0);
+        let request = String::from_utf8_lossy(&buf[..read]);
+        let request_line = request.lines().next().unwrap_or("").to_string();
+        *seen_clone.lock().unwrap() = Some(request_line);
+
+        let reason = if status == 200 { "OK" } else { "Error" };
+        let http = format!(
+            "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        let _ = stream.write_all(http.as_bytes());
+    });
+
+    (port, seen)
+}
+
+fn write_openai_config(home: &std::path::Path, port: u16) {
+    let config_dir = home.join("config").join("larpshell");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::write(
+        config_dir.join("config.toml"),
+        format!(
+            "provider = \"openai\"\n\n[[providers]]\nname = \"openai\"\nkind = \"openai\"\nbase_url = \"http://127.0.0.1:{port}/v1\"\nmodel = \"gpt-test\"\n"
+        ),
+    )
+    .unwrap();
+}
+
+#[test]
+fn openai_compat_generation_hits_v1_chat_completions_path() {
+    let home = temp_home("openai_path");
+    let (port, seen) = mock_openai_with_status(200, r#"{"choices":[{"message":{"content":"COMMAND: ls -la"}}]}"#);
+    write_openai_config(&home, port);
+
+    let out = run(&home, &["show disk usage"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "generation should succeed; stderr: {stderr}");
+
+    let request_line = seen.lock().unwrap().clone().expect("mock should have seen a request");
+    assert!(request_line.starts_with("POST /v1/chat/completions "), "base URL /v1 must survive URL joining; got {request_line:?}");
+}
+
+#[test]
+fn openai_compat_401_prints_auth_failed() {
+    let home = temp_home("openai_401");
+    let (port, _seen) = mock_openai_with_status(401, r#"{"error":{"message":"invalid api key"}}"#);
+    write_openai_config(&home, port);
+
+    let out = run(&home, &["show disk usage"]);
+    assert!(!out.status.success(), "401 should fail the run");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("auth failed") && stderr.contains("invalid API key"), "expected friendly auth failure; stderr: {stderr}");
 }
 
 // ── error formatting tests ──────────────────────────────────────────────────
