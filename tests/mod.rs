@@ -334,6 +334,57 @@ model = "openrouter/auto"
     assert!(provider.name().contains("OpenRouter"), "expected provider name to identify OpenRouter, got {}", provider.name());
 }
 
+// ── provider switch subcommand tests ────────────────────────────────────────
+
+fn write_two_profile_config(home: &std::path::Path) {
+    let config_dir = home.join("config").join("larpshell");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::write(
+        config_dir.join("config.toml"),
+        r#"provider = "home-ollama"
+
+[[providers]]
+name = "home-ollama"
+kind = "ollama"
+base_url = "http://127.0.0.1:11434"
+model = "llama3"
+
+[[providers]]
+name = "office-ollama"
+kind = "ollama"
+base_url = "http://192.168.1.50:11434"
+model = "llama3"
+"#,
+    )
+    .unwrap();
+}
+
+#[test]
+fn provider_switch_by_name_updates_config() {
+    let home = temp_home("provider_switch");
+    write_two_profile_config(&home);
+
+    let out = run(&home, &["provider", "office-ollama"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "provider switch should exit 0; stderr: {stderr}");
+    assert!(stderr.contains("office-ollama"), "expected confirmation; stderr: {stderr}");
+
+    let config_path = home.join("config").join("larpshell").join("config.toml");
+    let contents = fs::read_to_string(config_path).unwrap();
+    assert!(contents.contains("provider = \"office-ollama\""), "config should have switched provider: {contents}");
+}
+
+#[test]
+fn provider_switch_unknown_name_errors() {
+    let home = temp_home("provider_switch_unknown");
+    write_two_profile_config(&home);
+
+    let out = run(&home, &["provider", "nope"]);
+    assert!(!out.status.success(), "unknown provider name should fail");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("no provider named"), "expected lookup error; stderr: {stderr}");
+}
+
 // ── error formatting tests ──────────────────────────────────────────────────
 
 #[test]
