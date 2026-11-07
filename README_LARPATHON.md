@@ -33,7 +33,7 @@ cargo install larpshell
 
 from source, latest commit:
 ```bash
-curl -sSL https://raw.githubusercontent.com/uwuclxdy/larpshell/main/install.sh | sh
+curl -sSL https://raw.githubusercontent.com/uwuclxdy/larpshell/mommy/install.sh | sh
 ```
 
 ## Setup
