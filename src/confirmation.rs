@@ -675,6 +675,9 @@ fn confirmation_prompt(mode: ConfirmPromptMode) -> usize {
 /// Presents the command for inline editing. The caller must have already cleared the
 /// confirmation prompt lines from the terminal. Returns the edited command on Enter,
 /// or `None` when the edit is cancelled (Ctrl+C, Esc, or EOF).
+///
+/// Redraws use relative moves and no DECSC/DECRC save/restore, so a scroll at the
+/// bottom of the screen cannot desync the redraw.
 pub fn edit_command(current: &str) -> Option<String> {
     read_confirm(|read_key| edit_loop(current, read_key))
 }

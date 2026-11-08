@@ -25,6 +25,8 @@ tokio-util = "0.7.19"
 # `charset` (default) only powers `text_with_charset`; provider bodies are UTF-8
 # JSON, and `text()` has a non-charset path. `rustls` re-enables what `default-tls`
 # would have given us anyway.
+# `blocking` is deliberate: the tool executor is synchronous, and dropping it would
+# hide the blocking inside an async executor rather than remove it.
 reqwest = { version = "0.13.4", default-features = false, features = ["blocking", "json", "rustls", "http2", "system-proxy"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"

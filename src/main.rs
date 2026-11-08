@@ -82,6 +82,8 @@ enum SlashOutcome {
 
 // ── main ────────────────────────────────────────────────────────────────────
 
+// Must stay multi-thread: the agent tool path parks a worker in `block_in_place`,
+// which panics on a current-thread runtime.
 #[tokio::main]
 async fn main() -> ExitCode {
     match run().await {
@@ -248,7 +250,7 @@ async fn run_repl(runtime: &mut Runtime) -> Result<(), LarpshellError> {
             Ok(Some(input)) => input,
             Ok(None) => continue,
             // Ctrl-C cancels the current line, not the session: clear it and
-            // re-prompt. Ctrl-D/EOF (below) remains the only exit path.
+            // re-prompt. Ctrl-D/EOF and /quit are the exit paths.
             Err(ReplInputError::SigInt) => {
                 clear_line();
                 continue;

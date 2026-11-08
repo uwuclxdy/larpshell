@@ -488,6 +488,8 @@ mod tests {
         assert!(!prompt.contains("use the run_command tool"));
     }
 
+    // multi_thread to match main: the agent tool path parks in `block_in_place`,
+    // which panics on a current-thread runtime.
     #[tokio::test(flavor = "multi_thread")]
     async fn run_agent_loop_returns_command_without_tool_calls() {
         let provider = MockProvider::new(vec![ChatResponse::Message("COMMAND: ls -la".to_string())]);

@@ -12,7 +12,8 @@ use unicode_width::UnicodeWidthChar;
 pub const EXIT_SIGINT: i32 = 130;
 pub const DEFAULT_PROVIDER_TIMEOUT_SECS: u64 = 30;
 
-// Catppuccin Mocha palette — terminal truecolor tokens
+// Catppuccin Mocha palette — terminal truecolor tokens. CTP_PRIMARY is the brand mark's
+// color, used by the mark, the key anchors and the update notice; CTP_BLUE is the working accent.
 pub const CTP_PRIMARY: colored::CustomColor = colored::CustomColor { r: 0xE0, g: 0x7B, b: 0x53 }; // Claude Orange
 pub const CTP_BLUE: colored::CustomColor = colored::CustomColor { r: 0x89, g: 0xb4, b: 0xfa };
 pub const CTP_GREEN: colored::CustomColor = colored::CustomColor { r: 0xa6, g: 0xe3, b: 0xa1 };
