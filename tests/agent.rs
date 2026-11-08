@@ -12,13 +12,9 @@ fn clean_home(suffix: &str) -> std::path::PathBuf {
 fn run_clean_home(home: &std::path::Path, args: &[&str]) -> std::process::Output {
     ensure_binary_built();
     let config_dir = home.join(".config");
-    std::process::Command::new(binary())
-        .args(args)
-        .env("HOME", home)
-        .env("XDG_CONFIG_HOME", &config_dir)
-        .env("NO_COLOR", "1")
-        .output()
-        .expect("failed to run larpshell")
+    spawn_with_retry(|| {
+        std::process::Command::new(binary()).args(args).env("HOME", home).env("XDG_CONFIG_HOME", &config_dir).env("NO_COLOR", "1").output()
+    })
 }
 
 fn clean_home_config_path(home: &std::path::Path) -> std::path::PathBuf {
@@ -69,14 +65,15 @@ fn assert_prompt_show_uses_default(suffix: &str, args: &[&str], placeholder: &st
 fn run_clean_home_with_editor(home: &std::path::Path, args: &[&str], editor: &std::path::Path) -> std::process::Output {
     ensure_binary_built();
     let config_dir = home.join(".config");
-    std::process::Command::new(binary())
-        .args(args)
-        .env("HOME", home)
-        .env("XDG_CONFIG_HOME", &config_dir)
-        .env("EDITOR", editor)
-        .env("NO_COLOR", "1")
-        .output()
-        .expect("failed to run larpshell")
+    spawn_with_retry(|| {
+        std::process::Command::new(binary())
+            .args(args)
+            .env("HOME", home)
+            .env("XDG_CONFIG_HOME", &config_dir)
+            .env("EDITOR", editor)
+            .env("NO_COLOR", "1")
+            .output()
+    })
 }
 
 fn agent_safe_prompt_path(home: &std::path::Path) -> std::path::PathBuf {

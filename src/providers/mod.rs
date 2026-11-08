@@ -81,6 +81,8 @@ pub enum ChatResponse {
     ToolCalls(Vec<ToolCall>),
 }
 
+// the lint fires on async_trait's generated methods, not on anything written here.
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait AIProvider: Send + Sync {
     async fn generate(&self, prompt: &str) -> Result<String, LarpshellError>;

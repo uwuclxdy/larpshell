@@ -102,15 +102,82 @@ fn ensure_binary_built_skips_nested_cargo_when_override_is_present() {
     ensure_binary_built();
 }
 
+#[test]
+fn spawn_with_retry_succeeds_after_transient_spawn_errors() {
+    let mut attempts = 0;
+    let () = spawn_with_retry(|| {
+        attempts += 1;
+        if attempts <= 2 {
+            // 26 = ETXTBSY, the relink race the retry exists for.
+            return Err(std::io::Error::from_raw_os_error(26));
+        }
+        Ok(())
+    });
+    assert_eq!(attempts, 3, "both transient failures must be retried");
+}
+
+#[test]
+fn spawn_with_retry_panics_on_a_non_transient_spawn_error() {
+    let attempts = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let seen = attempts.clone();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+        let () = spawn_with_retry_until(std::time::Instant::now() + std::time::Duration::from_secs(30), move || {
+            seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Err(std::io::Error::from_raw_os_error(13)) // EACCES: not one of the retried errors
+        });
+    }));
+    assert!(result.is_err(), "a non-transient error must panic, not retry");
+    assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 1, "a non-transient error must be surfaced on its first attempt");
+}
+
+#[test]
+fn spawn_with_retry_panics_once_the_deadline_has_passed() {
+    let attempts = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let seen = attempts.clone();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+        spawn_with_retry_until(std::time::Instant::now(), move || {
+            seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if seen.load(std::sync::atomic::Ordering::SeqCst) <= 1 {
+                Err(std::io::Error::from_raw_os_error(26)) // ETXTBSY: transient
+            } else {
+                Ok(())
+            }
+        })
+    }));
+    assert!(result.is_err(), "an expired deadline must panic instead of retrying");
+    assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 1, "an expired deadline must not spend a second attempt");
+}
+
+// nextest runs one process per test, and each process's `ensure_binary_built` can rebuild and
+// relink the binary while sibling tests exec it (ETXTBSY, or NotFound mid-rebuild) — a
+// test-file edit dirties the bin too, because tests/mod.rs is `#[path]`-included into it. The
+// rebuild window outlives a short backoff, so retry both errors until a deadline.
+fn spawn_with_retry<T>(f: impl FnMut() -> std::io::Result<T>) -> T {
+    spawn_with_retry_until(std::time::Instant::now() + std::time::Duration::from_secs(30), f)
+}
+
+fn spawn_with_retry_until<T>(deadline: std::time::Instant, mut f: impl FnMut() -> std::io::Result<T>) -> T {
+    let mut delay = std::time::Duration::from_millis(50);
+    loop {
+        match f() {
+            Ok(value) => return value,
+            Err(e) if matches!(e.raw_os_error(), Some(26) | Some(2)) => {
+                if std::time::Instant::now() >= deadline {
+                    panic!("failed to run larpshell: {e}");
+                }
+                std::thread::sleep(delay);
+                delay = (delay * 2).min(std::time::Duration::from_secs(2));
+            }
+            Err(e) => panic!("failed to run larpshell: {e}"),
+        }
+    }
+}
+
 fn run(home: &std::path::Path, args: &[&str]) -> std::process::Output {
     ensure_binary_built();
-    Command::new(binary())
-        .args(args)
-        .env("HOME", home)
-        .env("XDG_CONFIG_HOME", home.join("config"))
-        .env("NO_COLOR", "1")
-        .output()
-        .expect("failed to run larpshell")
+    spawn_with_retry(|| {
+        Command::new(binary()).args(args).env("HOME", home).env("XDG_CONFIG_HOME", home.join("config")).env("NO_COLOR", "1").output()
+    })
 }
 
 fn temp_home(suffix: &str) -> PathBuf {
@@ -183,17 +250,18 @@ fn write_ollama_config(home: &std::path::Path, port: u16) {
 /// sequences for arrow keys, etc.).
 fn run_with_stdin_interactive(home: &std::path::Path, args: &[&str], stdin_data: &[u8]) -> std::process::Output {
     ensure_binary_built();
-    let mut child = Command::new(binary())
-        .args(args)
-        .env("HOME", home)
-        .env("XDG_CONFIG_HOME", home.join("config"))
-        .env("NO_COLOR", "1")
-        .env("LARPSHELL_FORCE_INTERACTIVE", "1")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("failed to spawn larpshell");
+    let mut child = spawn_with_retry(|| {
+        Command::new(binary())
+            .args(args)
+            .env("HOME", home)
+            .env("XDG_CONFIG_HOME", home.join("config"))
+            .env("NO_COLOR", "1")
+            .env("LARPSHELL_FORCE_INTERACTIVE", "1")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+    });
 
     let bytes = stdin_data.to_vec();
     let mut pipe = child.stdin.take().unwrap();
@@ -207,16 +275,17 @@ fn run_with_stdin_interactive(home: &std::path::Path, args: &[&str], stdin_data:
 /// Like `run`, but feeds `stdin_data` into the binary's stdin before closing it.
 fn run_with_stdin(home: &std::path::Path, args: &[&str], stdin_data: &[u8]) -> std::process::Output {
     ensure_binary_built();
-    let mut child = Command::new(binary())
-        .args(args)
-        .env("HOME", home)
-        .env("XDG_CONFIG_HOME", home.join("config"))
-        .env("NO_COLOR", "1")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("failed to spawn larpshell");
+    let mut child = spawn_with_retry(|| {
+        Command::new(binary())
+            .args(args)
+            .env("HOME", home)
+            .env("XDG_CONFIG_HOME", home.join("config"))
+            .env("NO_COLOR", "1")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+    });
 
     let bytes = stdin_data.to_vec();
     let mut pipe = child.stdin.take().unwrap();
