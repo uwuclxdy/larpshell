@@ -173,9 +173,12 @@ Interactive mode supports:
 
 - `/api`
 - `/agent [off|safe|on]`
+- `/context [all|single-prompt]`
 - `/explain <command>`
 - `/history [on|off]`
+- `/provider [<name>]`
 - `/prompt [system|explain|agent|agent-safe] [show|edit|reset]`
+- `/verbose [on|off]`
 - `/help`
 - `/quit`
 - `/uninstall`
@@ -196,6 +199,8 @@ In the REPL, `! <command>` runs a shell command directly.
 Use the CLI or slash commands to show, edit, or reset them.
 
 Prompt history is on by default. Toggle it with `larpshell history on|off` or `/history on|off`.
+
+Conversation context is on by default in the REPL: each request carries the session's last 8 earlier requests and their commands (declined and failed ones marked as not executed, long ones truncated), so a followup like `i meant the tmp filesystem` resolves in context. `/context single-prompt` sends each request alone; `/context all` turns it back on.
 
 ## Shell integration
 
