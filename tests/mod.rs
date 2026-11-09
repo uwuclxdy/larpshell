@@ -774,6 +774,130 @@ fn agent_subcommand_safe_prints_confirmation() {
     assert!(contents.contains("agent = \"safe\""), "config should have agent = \"safe\"");
 }
 
+// ── scripted / slow mock helpers ─────────────────────────────────────────────
+
+/// Records every request body it receives and answers each connection with the
+/// next entry of `responses`: a `RAW_HTTP:`-prefixed entry is written verbatim
+/// (it must carry its own status line, headers and body); a `CHAT_JSON:`
+/// entry is served as raw ollama chat JSON; anything else is wrapped in the
+/// ollama chat format like [`mock_ollama`]. Returns the port plus every
+/// received request, headers included, in arrival order.
+// temp: dead until the pending provider-test rows land; drop the allows on the last landing.
+#[allow(dead_code)]
+fn mock_ollama_scripted(responses: &[&str]) -> (u16, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let responses: Vec<String> = responses.iter().map(std::string::ToString::to_string).collect();
+    let requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+
+    let seen = requests.clone();
+    std::thread::spawn(move || {
+        for text in responses {
+            let Ok((mut stream, _)) = listener.accept() else {
+                break;
+            };
+            let request = read_full_request(&mut stream);
+            seen.lock().unwrap().push(String::from_utf8_lossy(&request).into_owned());
+
+            if let Some(raw) = text.strip_prefix("RAW_HTTP:") {
+                let _ = stream.write_all(raw.as_bytes());
+                continue;
+            }
+            let body = if let Some(raw_json) = text.strip_prefix("CHAT_JSON:") {
+                raw_json.to_string()
+            } else {
+                serde_json::json!({ "message": { "content": text } }).to_string()
+            };
+            let http = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            let _ = stream.write_all(http.as_bytes());
+        }
+    });
+
+    (port, requests)
+}
+
+/// Reads until the headers plus their `Content-Length` body have arrived (a
+/// single read can stop mid-body, which would truncate a captured request).
+#[allow(dead_code)]
+fn read_full_request(stream: &mut std::net::TcpStream) -> Vec<u8> {
+    let mut request = Vec::new();
+    let mut buf = [0u8; 16384];
+    loop {
+        let read = stream.read(&mut buf).unwrap_or(0);
+        if read == 0 {
+            break;
+        }
+        request.extend_from_slice(&buf[..read]);
+        if let Some(header_end) = find_subsequence(&request, b"\r\n\r\n")
+            && let Some(length) = content_length(&request[..header_end])
+            && request.len() >= header_end + 4 + length
+        {
+            break;
+        }
+    }
+    request
+}
+
+#[allow(dead_code)]
+fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack.windows(needle.len()).position(|window| window == needle)
+}
+
+#[allow(dead_code)]
+fn content_length(headers: &[u8]) -> Option<usize> {
+    let text = String::from_utf8_lossy(headers);
+    text.lines().find_map(|line| {
+        let (name, value) = line.split_once(':')?;
+        name.eq_ignore_ascii_case("content-length").then(|| value.trim().parse().ok())?
+    })
+}
+
+/// Answers each connection with the next of `responses` after sleeping
+/// `delay`, so a request-level timeout ticks while the client waits.
+#[allow(dead_code)]
+fn mock_ollama_slow(responses: &[&str], delay: std::time::Duration) -> u16 {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let responses: Vec<String> = responses.iter().map(std::string::ToString::to_string).collect();
+
+    std::thread::spawn(move || {
+        for text in responses {
+            let Ok((mut stream, _)) = listener.accept() else {
+                break;
+            };
+            std::thread::sleep(delay);
+            let body = serde_json::json!({ "message": { "content": text } }).to_string();
+            let http = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            let _ = stream.write_all(http.as_bytes());
+        }
+    });
+
+    port
+}
+
+/// `write_ollama_config` with a per-profile `timeout_secs` line (`None` omits it).
+#[allow(dead_code)]
+fn write_ollama_config_with_timeout(home: &std::path::Path, port: u16, timeout_secs: Option<u64>) {
+    let timeout_line = timeout_secs.map(|secs| format!("timeout_secs = {secs}\n")).unwrap_or_default();
+    let config_dir = home.join("config").join("larpshell");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::write(
+        config_dir.join("config.toml"),
+        format!(
+            "provider = \"ollama\"\n\n[[providers]]\nname = \"ollama\"\nkind = \"ollama\"\n{timeout_line}base_url = \"http://127.0.0.1:{port}\"\nmodel = \"test\"\n"
+        ),
+    )
+    .unwrap();
+}
+
 #[test]
 fn agent_subcommand_off_prints_confirmation() {
     let home = temp_home("agent_off");
