@@ -40,6 +40,10 @@ impl ChatMessage {
         Self { role: Role::System, content: Some(content.into()), tool_calls: None, tool_call_id: None, tool_call_name: None }
     }
 
+    pub fn assistant(content: impl Into<String>) -> Self {
+        Self { role: Role::Assistant, content: Some(content.into()), tool_calls: None, tool_call_id: None, tool_call_name: None }
+    }
+
     pub fn tool_result(tool_call_id: impl Into<String>, tool_call_name: impl Into<String>, content: impl Into<String>) -> Self {
         Self {
             role: Role::Tool,

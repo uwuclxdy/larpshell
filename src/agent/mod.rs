@@ -8,7 +8,7 @@ use crate::cli::print_warning;
 #[cfg(unix)]
 use crate::common::RawModeGuard;
 use crate::common::{CTP_BLUE, CTP_GREEN, CTP_OVERLAY0, CTP_PRIMARY, CTP_RED, CTP_YELLOW, clear_line};
-use crate::config::{AgentMode, Config, load_agent_prompt, load_agent_safe_prompt, load_sys_prompt};
+use crate::config::{AgentMode, Config, ContextMode, load_agent_prompt, load_agent_safe_prompt, load_sys_prompt};
 use crate::confirmation::style_message_markup;
 use crate::error::LarpshellError;
 use crate::prompt::{
@@ -17,6 +17,7 @@ use crate::prompt::{
 };
 use crate::providers::{AIProvider, ChatMessage, ChatResponse, ToolCall};
 use crate::status::StatusLine;
+use crate::{CONTEXT_COMMAND_CAP, CONTEXT_REQUEST_CAP, SessionTurn, cap_chars, context_turns};
 use tools::ToolRegistry;
 
 const MAX_AGENT_ITERATIONS: usize = 25;
@@ -134,15 +135,35 @@ const fn denied_tool_result() -> &'static str {
     "Tool call denied by user. Try a different approach or produce the final response."
 }
 
-fn initial_agent_messages(user_input: &str, config: &Config) -> Vec<ChatMessage> {
+/// Prior turns as real user/assistant messages, so the agent sees the session's
+/// earlier exchanges as conversation history rather than text inside the
+/// current request.
+fn prior_turn_messages(turns: &[SessionTurn]) -> Vec<ChatMessage> {
+    context_turns(turns)
+        .iter()
+        .flat_map(|turn| {
+            [
+                ChatMessage::user(cap_chars(&turn.request, CONTEXT_REQUEST_CAP)),
+                ChatMessage::assistant(cap_chars(&turn.command, CONTEXT_COMMAND_CAP)),
+            ]
+        })
+        .collect()
+}
+
+fn initial_agent_messages(user_input: &str, config: &Config, turns: &[SessionTurn]) -> Vec<ChatMessage> {
     let system_prompt = build_agent_system_prompt(config.agent, user_input);
-    vec![ChatMessage::system(system_prompt), ChatMessage::user(user_input)]
+    let mut messages = vec![ChatMessage::system(system_prompt)];
+    if config.context_mode == ContextMode::All {
+        messages.extend(prior_turn_messages(turns));
+    }
+    messages.push(ChatMessage::user(user_input));
+    messages
 }
 
 fn agent_context(
-    user_input: &str, config: &Config, tool_registry: &ToolRegistry,
+    user_input: &str, config: &Config, tool_registry: &ToolRegistry, turns: &[SessionTurn],
 ) -> (Vec<ChatMessage>, Vec<crate::providers::ToolDefinition>) {
-    (initial_agent_messages(user_input, config), tool_registry.definitions())
+    (initial_agent_messages(user_input, config, turns), tool_registry.definitions())
 }
 
 fn handle_tool_calls<F>(
@@ -356,13 +377,13 @@ fn command_not_allowed_tip(error: &str) -> Option<String> {
 }
 
 async fn run_agent_loop_with_confirm<F>(
-    user_input: &str, provider: &dyn AIProvider, config: &Config, tool_registry: &ToolRegistry, mut confirm_tool: F,
+    user_input: &str, provider: &dyn AIProvider, config: &Config, tool_registry: &ToolRegistry, turns: &[SessionTurn], mut confirm_tool: F,
 ) -> Result<FinalResponse, LarpshellError>
 where
     F: FnMut(&ToolCall) -> ToolConfirmResult,
 {
     let model = config.provider_config()?.model().to_string();
-    let (mut messages, tool_definitions) = agent_context(user_input, config, tool_registry);
+    let (mut messages, tool_definitions) = agent_context(user_input, config, tool_registry, turns);
 
     for iteration in 0..MAX_AGENT_ITERATIONS {
         let label = if iteration == 0 { format!("agent · {model}") } else { "thinking".to_string() };
@@ -391,15 +412,15 @@ where
 }
 
 pub async fn run_agent_loop(
-    user_input: &str, provider: &dyn AIProvider, config: &Config, tool_registry: &ToolRegistry,
+    user_input: &str, provider: &dyn AIProvider, config: &Config, tool_registry: &ToolRegistry, turns: &[SessionTurn],
 ) -> Result<FinalResponse, LarpshellError> {
-    run_agent_loop_with_confirm(user_input, provider, config, tool_registry, |_| confirm_tool_call()).await
+    run_agent_loop_with_confirm(user_input, provider, config, tool_registry, turns, |_| confirm_tool_call()).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{Config, OllamaConfig, ProviderProfile, ProviderSpecificConfig};
+    use crate::config::{Config, ContextMode, OllamaConfig, ProviderProfile, ProviderSpecificConfig};
     use crate::providers::{ChatResponse, Role, ToolDefinition};
     use async_trait::async_trait;
     use std::collections::VecDeque;
@@ -445,6 +466,7 @@ mod tests {
             }],
             agent: AgentMode::Safe,
             verbose_tool_output: true,
+            context_mode: ContextMode::All,
         }
     }
 
@@ -495,9 +517,10 @@ mod tests {
         let provider = MockProvider::new(vec![ChatResponse::Message("COMMAND: ls -la".to_string())]);
         let tool_registry = ToolRegistry::with_builtins(AgentMode::Safe);
 
-        let response = run_agent_loop_with_confirm("list files", &provider, &test_config(), &tool_registry, |_| ToolConfirmResult::Allow)
-            .await
-            .unwrap();
+        let response =
+            run_agent_loop_with_confirm("list files", &provider, &test_config(), &tool_registry, &[], |_| ToolConfirmResult::Allow)
+                .await
+                .unwrap();
 
         assert_eq!(
             response,
@@ -515,8 +538,9 @@ mod tests {
         let provider = MockProvider::new(vec![ChatResponse::Message("MESSAGE: no command needed".to_string())]);
         let tool_registry = ToolRegistry::with_builtins(AgentMode::Safe);
 
-        let response =
-            run_agent_loop_with_confirm("say hi", &provider, &test_config(), &tool_registry, |_| ToolConfirmResult::Allow).await.unwrap();
+        let response = run_agent_loop_with_confirm("say hi", &provider, &test_config(), &tool_registry, &[], |_| ToolConfirmResult::Allow)
+            .await
+            .unwrap();
 
         assert_eq!(
             response,
@@ -537,7 +561,7 @@ mod tests {
         let tool_registry = ToolRegistry::with_builtins(AgentMode::Safe);
 
         let response =
-            run_agent_loop_with_confirm("install package", &provider, &test_config(), &tool_registry, |_| ToolConfirmResult::Allow)
+            run_agent_loop_with_confirm("install package", &provider, &test_config(), &tool_registry, &[], |_| ToolConfirmResult::Allow)
                 .await
                 .unwrap();
 
@@ -557,9 +581,10 @@ mod tests {
         let provider = MockProvider::new(vec![ChatResponse::Message("COMMAND: echo one\necho two".to_string())]);
         let tool_registry = ToolRegistry::with_builtins(AgentMode::Safe);
 
-        let response = run_agent_loop_with_confirm("echo twice", &provider, &test_config(), &tool_registry, |_| ToolConfirmResult::Allow)
-            .await
-            .unwrap();
+        let response =
+            run_agent_loop_with_confirm("echo twice", &provider, &test_config(), &tool_registry, &[], |_| ToolConfirmResult::Allow)
+                .await
+                .unwrap();
 
         assert_eq!(
             response,
@@ -578,7 +603,7 @@ mod tests {
         let tool_registry = ToolRegistry::with_builtins(AgentMode::Safe);
 
         let response =
-            run_agent_loop_with_confirm("describe thing", &provider, &test_config(), &tool_registry, |_| ToolConfirmResult::Allow)
+            run_agent_loop_with_confirm("describe thing", &provider, &test_config(), &tool_registry, &[], |_| ToolConfirmResult::Allow)
                 .await
                 .unwrap();
 
@@ -612,7 +637,7 @@ mod tests {
         let tool_registry = ToolRegistry::with_builtins(AgentMode::Safe);
 
         let response =
-            run_agent_loop_with_confirm("show me the file", &provider, &test_config(), &tool_registry, |_| ToolConfirmResult::Allow)
+            run_agent_loop_with_confirm("show me the file", &provider, &test_config(), &tool_registry, &[], |_| ToolConfirmResult::Allow)
                 .await
                 .unwrap();
 
@@ -644,7 +669,7 @@ mod tests {
         let provider = MockProvider::new(responses);
         let tool_registry = ToolRegistry::with_builtins(AgentMode::Safe);
 
-        let error = run_agent_loop_with_confirm("find main", &provider, &test_config(), &tool_registry, |_| ToolConfirmResult::Deny)
+        let error = run_agent_loop_with_confirm("find main", &provider, &test_config(), &tool_registry, &[], |_| ToolConfirmResult::Deny)
             .await
             .unwrap_err();
 

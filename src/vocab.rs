@@ -23,6 +23,9 @@ pub const AGENT_TOGGLES: &[&str] = &["off", "safe", "on"];
 /// `verbose`).
 pub const BOOL_TOGGLES: &[&str] = &["on", "off"];
 
+/// `context` mode values, in `all, single-prompt` order.
+pub const CONTEXT_MODES: &[&str] = &["all", "single-prompt"];
+
 /// `prompt` kind argument values.
 pub const PROMPT_KINDS: &[&str] = &["system", "explain", "agent", "agent-safe"];
 

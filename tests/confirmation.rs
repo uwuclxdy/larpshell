@@ -278,8 +278,15 @@ fn confirm_from_reader_with_explain_on_e_returns_explain() {
 }
 
 #[test]
-fn confirm_from_reader_with_explain_on_n_returns_cancel() {
+fn confirm_from_reader_with_explain_on_n_returns_declined() {
     let mut keys = vec![KeyEvent::Char('n')].into_iter();
+    let result = confirm_from_reader(|| keys.next().unwrap(), ConfirmPromptMode::WithExplain, 1, 0);
+    assert!(matches!(result, ConfirmResult::Declined));
+}
+
+#[test]
+fn confirm_from_reader_with_explain_on_ctrl_c_returns_cancel() {
+    let mut keys = vec![KeyEvent::CtrlC].into_iter();
     let result = confirm_from_reader(|| keys.next().unwrap(), ConfirmPromptMode::WithExplain, 1, 0);
     assert!(matches!(result, ConfirmResult::Cancel));
 }

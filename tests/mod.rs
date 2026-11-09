@@ -15,6 +15,7 @@ use toml::from_str;
 mod agent;
 mod cli;
 mod confirmation;
+mod context;
 mod edit;
 mod error;
 mod explain;

@@ -15,6 +15,9 @@ pub enum ConfirmResult {
     No,
     Explain,
     Edit,
+    /// Declined with `n`: resubmits the request like a cancel, but the session
+    /// records the turn.
+    Declined,
     Cancel,
 }
 
@@ -591,7 +594,12 @@ pub fn confirm_from_reader(
                 clear_n_lines(lines_to_clear);
                 return ConfirmResult::Edit;
             }
-            KeyEvent::Char('n' | 'N') | KeyEvent::CtrlC | KeyEvent::Esc => {
+            KeyEvent::Char('n' | 'N') => {
+                clear_n_lines(lines_to_clear);
+                show_cursor();
+                return ConfirmResult::Declined;
+            }
+            KeyEvent::CtrlC | KeyEvent::Esc => {
                 clear_n_lines(lines_to_clear);
                 show_cursor();
                 return ConfirmResult::Cancel;

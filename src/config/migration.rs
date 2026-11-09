@@ -10,8 +10,9 @@ const OLD_EXPLAIN_PROMPT_V1: &str = include_str!("../prompts/old/explain_v1.md")
 const OLD_EXPLAIN_PROMPT_V2: &str = include_str!("../prompts/old/explain_v2.md");
 
 use super::{
-    ActiveProvider, Config, GeminiConfig, OllamaConfig, OpenAIConfig, OpenRouterConfig, ProviderProfile, ProviderSpecificConfig,
-    atomic_write, config_base_dir, default_verbose_tool_output, deserialize_agent_mode, ensure_config_dir, explain_prompt_path,
+    ActiveProvider, Config, ContextMode, GeminiConfig, OllamaConfig, OpenAIConfig, OpenRouterConfig, ProviderProfile,
+    ProviderSpecificConfig, atomic_write, config_base_dir, default_verbose_tool_output, deserialize_agent_mode, ensure_config_dir,
+    explain_prompt_path,
 };
 
 /// Pre-profile `[providers.<kind>]` tables, one slot per provider type.
@@ -81,6 +82,7 @@ fn migrate_config_content(content: &str) -> Result<String, LarpshellError> {
         providers: old_config.providers.into_profiles(),
         agent: AgentMode::Off,
         verbose_tool_output: true,
+        context_mode: ContextMode::All,
     };
 
     Ok(toml::to_string_pretty(&new_config)?)
@@ -97,6 +99,8 @@ struct OldLarpshellConfig {
     agent: AgentMode,
     #[serde(default = "default_verbose_tool_output")]
     verbose_tool_output: bool,
+    #[serde(default)]
+    context_mode: ContextMode,
 }
 
 /// Distinguishes the old per-type tables from the new `[[providers]]` array:
@@ -113,6 +117,7 @@ fn migrate_old_larpshell_content(content: &str) -> Result<String, LarpshellError
         providers: old_config.providers.into_profiles(),
         agent: old_config.agent,
         verbose_tool_output: old_config.verbose_tool_output,
+        context_mode: old_config.context_mode,
     };
 
     Ok(toml::to_string_pretty(&new_config)?)

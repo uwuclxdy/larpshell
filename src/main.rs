@@ -20,6 +20,7 @@ mod uninstall;
 mod update;
 mod vocab;
 
+use std::borrow::Cow;
 use std::io::{IsTerminal, Write};
 use std::process::ExitCode;
 use tokio::io::AsyncReadExt;
@@ -33,7 +34,7 @@ use colored::Colorize;
 #[cfg(unix)]
 use common::setup_terminal;
 use common::{CTP_BLUE, EXIT_SIGINT, clear_line, eprint_flush, show_cursor};
-use config::{AgentMode, Config, interactive_setup, load_config};
+use config::{AgentMode, Config, ContextMode, interactive_setup, load_config};
 use confirmation::style_message_markup;
 use confirmation::{
     ConfirmResult, ResponseStyle, confirm_execution, confirm_with_explain, display_explanation, display_response, edit_command,
@@ -73,6 +74,8 @@ struct Runtime {
     provider: Box<dyn AIProvider>,
     tool_registry: Option<ToolRegistry>,
     update_task: Option<JoinHandle<bool>>,
+    /// Request→command turns confirmed this session, carried to later requests.
+    turns: Vec<SessionTurn>,
 }
 
 enum SlashOutcome {
@@ -369,6 +372,17 @@ async fn dispatch_slash_command(cmd: SlashCmd, runtime: &mut Runtime, command_mo
                 cli::print_ok(tool_output_status_message(runtime.config.verbose_tool_output));
             }
         }
+        SlashCmd::Context { mode } => {
+            if let Some(mode) = mode {
+                config::set_context_mode(mode)?;
+                cli::print_ok(context_mode_status_message(mode));
+                if command_mode == CommandMode::Interactive {
+                    runtime.config = reload_config()?;
+                }
+            } else {
+                cli::print_ok(context_mode_status_message(runtime.config.context_mode));
+            }
+        }
         SlashCmd::Prompt { kind, action } => handle_prompt_subcommand(&kind, &action)?,
         SlashCmd::Explain { args } => {
             handle_explain_subcommand(args, runtime.provider.as_ref()).await?;
@@ -414,7 +428,7 @@ impl Runtime {
         let provider = create_provider(&config)?;
         let tool_registry = Self::build_registry(config.agent).await;
         let update_task = Some(tokio::task::spawn(update::is_update_available()));
-        Ok(Self { config, provider, tool_registry, update_task })
+        Ok(Self { config, provider, tool_registry, update_task, turns: Vec::new() })
     }
 
     async fn reload_all(&mut self) -> Result<(), LarpshellError> {
@@ -535,6 +549,13 @@ const fn agent_mode_status_message(mode: AgentMode) -> &'static str {
         AgentMode::Off => "agent mode: off",
         AgentMode::Safe => "agent mode: safe (restricted to read-only commands)",
         AgentMode::On => "agent mode: on",
+    }
+}
+
+const fn context_mode_status_message(mode: ContextMode) -> &'static str {
+    match mode {
+        ContextMode::All => "conversation context: all",
+        ContextMode::SinglePrompt => "conversation context: single-prompt",
     }
 }
 
@@ -703,6 +724,57 @@ fn open_in_editor(path: &std::path::Path) -> Result<(), LarpshellError> {
     }
 }
 
+// ── session context ─────────────────────────────────────────────────────────
+
+/// One confirmed REPL exchange, carried to later requests so followups like
+/// "i meant ..." resolve against it.
+struct SessionTurn {
+    request: String,
+    command: String,
+    executed: bool,
+}
+
+const CONTEXT_TURN_LIMIT: usize = 8;
+const CONTEXT_REQUEST_CAP: usize = 500;
+const CONTEXT_COMMAND_CAP: usize = 200;
+
+/// The carried window: the newest `CONTEXT_TURN_LIMIT` turns, oldest first.
+fn context_turns(turns: &[SessionTurn]) -> &[SessionTurn] {
+    let skip = turns.len().saturating_sub(CONTEXT_TURN_LIMIT);
+    &turns[skip..]
+}
+
+/// Caps `text` at `cap` chars, marking a cut with an ellipsis.
+fn cap_chars(text: &str, cap: usize) -> String {
+    if text.chars().count() <= cap {
+        return text.to_string();
+    }
+    text.chars().take(cap).chain(std::iter::once('…')).collect()
+}
+
+/// The request text the provider receives: the current request, prefixed with
+/// the rendered prior turns when context mode carries them. History rides
+/// inside the request, so the `{request}` placeholder stays the only template
+/// injection point.
+fn build_effective_request<'a>(user_input: &'a str, context_mode: ContextMode, turns: &[SessionTurn]) -> Cow<'a, str> {
+    if context_mode == ContextMode::SinglePrompt || turns.is_empty() {
+        return Cow::Borrowed(user_input);
+    }
+    Cow::Owned(format!("{}\n\n{user_input}", render_context_block(turns)))
+}
+
+fn render_context_block(turns: &[SessionTurn]) -> String {
+    let mut block = String::from("Earlier in this session:");
+    for turn in context_turns(turns) {
+        block.push_str("\nrequest: ");
+        block.push_str(&cap_chars(&turn.request, CONTEXT_REQUEST_CAP));
+        block.push_str("\ncommand: ");
+        block.push_str(&cap_chars(&turn.command, CONTEXT_COMMAND_CAP));
+        block.push_str(if turn.executed { " (executed)" } else { " (not executed)" });
+    }
+    block
+}
+
 // ── command processing ──────────────────────────────────────────────────────
 
 async fn process_user_input(user_input: &str, runtime: &mut Runtime, mode: CommandMode) -> Result<Option<String>, LarpshellError> {
@@ -714,20 +786,21 @@ async fn process_user_input(user_input: &str, runtime: &mut Runtime, mode: Comma
             Some(registry) => registry,
             None => unreachable!("tool registry ensured above"),
         };
-        process_command_agent(user_input, runtime.provider.as_ref(), &runtime.config, mode, registry).await
+        process_command_agent(user_input, runtime.provider.as_ref(), &runtime.config, mode, registry, &mut runtime.turns).await
     } else {
-        process_command(user_input, runtime.provider.as_ref(), &runtime.config, mode).await
+        process_command(user_input, runtime.provider.as_ref(), &runtime.config, mode, &mut runtime.turns).await
     }
 }
 
 async fn process_command(
-    user_input: &str, provider: &dyn AIProvider, config: &Config, mode: CommandMode,
+    user_input: &str, provider: &dyn AIProvider, config: &Config, mode: CommandMode, turns: &mut Vec<SessionTurn>,
 ) -> Result<Option<String>, LarpshellError> {
     let model_name = config.provider_config()?.model().to_string();
     let status = StatusLine::start(&format!("generating with {model_name}"));
 
     let effective_sys = config::load_sys_prompt().filter(|prompt| validate_sys_prompt(prompt));
-    let prompt = create_system_prompt(user_input, effective_sys.as_deref());
+    let effective_request = build_effective_request(user_input, config.context_mode, turns);
+    let prompt = create_system_prompt(&effective_request, effective_sys.as_deref());
 
     let response = match &mode {
         CommandMode::Interactive => generate_with_cancellation(provider, &prompt).await?,
@@ -740,26 +813,30 @@ async fn process_command(
         return Err(LarpshellError::EmptyResponse(provider.name()));
     }
 
-    confirm_loop(command, user_input, provider, &mode, ResponseStyle::Command).await
+    let outcome = confirm_loop(command, provider, &mode, ResponseStyle::Command).await?;
+    settle_confirm(outcome, user_input, turns, mode)
 }
 
 async fn process_command_agent(
     user_input: &str, provider: &dyn AIProvider, config: &Config, mode: CommandMode, tool_registry: &ToolRegistry,
+    turns: &mut Vec<SessionTurn>,
 ) -> Result<Option<String>, LarpshellError> {
-    let response = agent::run_agent_loop(user_input, provider, config, tool_registry).await?;
+    let response = agent::run_agent_loop(user_input, provider, config, tool_registry, turns).await?;
     let message = response.message.as_deref().map(str::trim).filter(|msg| !msg.is_empty());
     let command = response.command.as_deref().map(str::trim).filter(|cmd| !cmd.is_empty());
 
     if let Some(message) = message {
         display_response(message, ResponseStyle::Message);
         if let Some(command) = command {
-            return confirm_loop(command.to_string(), user_input, provider, &mode, ResponseStyle::Command).await;
+            let outcome = confirm_loop(command.to_string(), provider, &mode, ResponseStyle::Command).await?;
+            return settle_confirm(outcome, user_input, turns, mode);
         }
         return Ok(None);
     }
 
     if let Some(command) = command {
-        return confirm_loop(command.to_string(), user_input, provider, &mode, ResponseStyle::Command).await;
+        let outcome = confirm_loop(command.to_string(), provider, &mode, ResponseStyle::Command).await?;
+        return settle_confirm(outcome, user_input, turns, mode);
     }
 
     match response.kind {
@@ -768,7 +845,8 @@ async fn process_command_agent(
             if command.trim().is_empty() {
                 return Err(LarpshellError::EmptyResponse(provider.name()));
             }
-            confirm_loop(command, user_input, provider, &mode, ResponseStyle::Command).await
+            let outcome = confirm_loop(command, provider, &mode, ResponseStyle::Command).await?;
+            settle_confirm(outcome, user_input, turns, mode)
         }
         agent::FinalResponseKind::Message => {
             let message = response.content.trim().to_string();
@@ -819,25 +897,48 @@ async fn generate_single_shot(provider: &dyn AIProvider, prompt: &str) -> Result
 
 // ── confirmation loop ───────────────────────────────────────────────────────
 
+/// How a confirmation loop resolved.
+struct ConfirmOutcome {
+    /// Esc/Ctrl-C at the prompt: interactive callers resubmit the request and
+    /// nothing records a turn.
+    cancelled: bool,
+    /// Declined with `n`: resubmits like a cancel, but the turn records with
+    /// `executed = false`.
+    declined: bool,
+    /// Whether the command ran successfully; a declined request or a failed
+    /// execution lands here with `false`.
+    executed: bool,
+    /// The command as it left the loop, edits included.
+    command: String,
+    /// Failure from running the command, deferred so the caller records the
+    /// turn before surfacing it.
+    execution_error: Option<LarpshellError>,
+}
+
 /// What the confirmation loop should do next after a non-`Explain` choice.
 enum ConfirmStep {
-    /// Stop the loop without cancelling (Yes after execute, or No).
-    Done,
+    /// Stop the loop; carries whether the command executed and, on failure,
+    /// the error to surface after the turn records.
+    Done(bool, Option<LarpshellError>),
+    /// The request was declined with `n`.
+    Declined,
     /// Cancel was chosen; the loop maps this to its `CommandMode`.
     Cancel,
     /// Edit was chosen (and possibly applied); re-prompt with the command.
     Retry,
 }
 
-/// Handles the `Yes`/`No`/`Cancel`/`Edit` arms shared by the with-explain prompt
-/// and the post-explanation prompt. `Explain` is handled by the caller.
+/// Handles the `Yes`/`No`/`Declined`/`Cancel`/`Edit` arms shared by the
+/// with-explain prompt and the post-explanation prompt. `Explain` is handled by
+/// the caller.
 fn resolve_confirm(result: ConfirmResult, command: &mut String) -> Result<ConfirmStep, LarpshellError> {
     match result {
         ConfirmResult::Yes => {
-            execute_or_print(command)?;
-            Ok(ConfirmStep::Done)
+            let execution = execute_or_print(command);
+            Ok(ConfirmStep::Done(execution.is_ok(), execution.err()))
         }
-        ConfirmResult::No => Ok(ConfirmStep::Done),
+        ConfirmResult::No => Ok(ConfirmStep::Done(false, None)),
+        ConfirmResult::Declined => Ok(ConfirmStep::Declined),
         ConfirmResult::Cancel => Ok(ConfirmStep::Cancel),
         ConfirmResult::Edit => {
             if let Some(new_cmd) = edit_command(command) {
@@ -852,9 +953,9 @@ fn resolve_confirm(result: ConfirmResult, command: &mut String) -> Result<Confir
 }
 
 async fn confirm_loop(
-    mut command: String, user_input: &str, provider: &dyn AIProvider, mode: &CommandMode, response_style: ResponseStyle,
-) -> Result<Option<String>, LarpshellError> {
-    let cancelled = 'outer: loop {
+    mut command: String, provider: &dyn AIProvider, mode: &CommandMode, response_style: ResponseStyle,
+) -> Result<ConfirmOutcome, LarpshellError> {
+    let outcome = 'outer: loop {
         let cmd_lines = display_response(&command, response_style);
         let result = confirm_with_explain(cmd_lines);
 
@@ -869,16 +970,42 @@ async fn confirm_loop(
         };
 
         match step {
-            ConfirmStep::Done => break 'outer false,
+            ConfirmStep::Done(executed, execution_error) => {
+                break 'outer ConfirmOutcome { cancelled: false, declined: false, executed, command, execution_error };
+            }
+            ConfirmStep::Declined => match mode {
+                CommandMode::Interactive => {
+                    break 'outer ConfirmOutcome { cancelled: false, declined: true, executed: false, command, execution_error: None };
+                }
+                CommandMode::Single => return Err(LarpshellError::Cancelled),
+            },
             ConfirmStep::Retry => {}
             ConfirmStep::Cancel => match mode {
-                CommandMode::Interactive => break 'outer true,
+                CommandMode::Interactive => {
+                    break 'outer ConfirmOutcome { cancelled: true, declined: false, executed: false, command, execution_error: None };
+                }
                 CommandMode::Single => return Err(LarpshellError::Cancelled),
             },
         }
     };
 
-    Ok(cancelled.then(|| user_input.to_string()))
+    Ok(outcome)
+}
+
+/// Records the resolved turn (interactive sessions only: single-shot sessions
+/// exit before any followup could read it; a failed command records with
+/// `executed = false`) and maps the outcome to the REPL's resubmit prefill,
+/// surfacing any execution error after the record.
+fn settle_confirm(
+    outcome: ConfirmOutcome, user_input: &str, turns: &mut Vec<SessionTurn>, mode: CommandMode,
+) -> Result<Option<String>, LarpshellError> {
+    if mode == CommandMode::Interactive && !outcome.cancelled {
+        turns.push(SessionTurn { request: user_input.to_string(), command: outcome.command, executed: outcome.executed });
+    }
+    if let Some(error) = outcome.execution_error {
+        return Err(error);
+    }
+    Ok((outcome.cancelled || outcome.declined).then(|| user_input.to_string()))
 }
 
 fn execute_or_print(command: &str) -> Result<(), LarpshellError> {

@@ -88,6 +88,18 @@ where
     })
 }
 
+/// Whether REPL requests carry the session's earlier turns to the provider.
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ContextMode {
+    /// Prior turns ride along, so followups resolve against them.
+    #[default]
+    All,
+    /// Each request is translated from its own text alone.
+    #[serde(rename = "single-prompt")]
+    SinglePrompt,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Config {
     #[serde(rename = "provider")]
@@ -98,6 +110,8 @@ pub struct Config {
     pub agent: AgentMode,
     #[serde(default = "default_verbose_tool_output")]
     pub verbose_tool_output: bool,
+    #[serde(default)]
+    pub context_mode: ContextMode,
 }
 
 impl Config {
@@ -353,6 +367,7 @@ fn default_config() -> Config {
         providers: Vec::new(),
         agent: AgentMode::Off,
         verbose_tool_output: default_verbose_tool_output(),
+        context_mode: ContextMode::All,
     }
 }
 
@@ -374,6 +389,13 @@ pub fn set_agent_mode(mode: AgentMode) -> Result<(), LarpshellError> {
 pub fn set_verbose_tool_output(enabled: bool) -> Result<(), LarpshellError> {
     let mut config = load_config_or_default()?;
     config.verbose_tool_output = enabled;
+    save_config(&config)?;
+    Ok(())
+}
+
+pub fn set_context_mode(mode: ContextMode) -> Result<(), LarpshellError> {
+    let mut config = load_config_or_default()?;
+    config.context_mode = mode;
     save_config(&config)?;
     Ok(())
 }
@@ -475,6 +497,7 @@ pub fn interactive_setup() -> Result<(), LarpshellError> {
         providers: profiles,
         agent: existing_config.as_ref().map_or(AgentMode::Off, |c| c.agent),
         verbose_tool_output: existing_config.as_ref().is_none_or(|c| c.verbose_tool_output),
+        context_mode: existing_config.as_ref().map_or(ContextMode::All, |c| c.context_mode),
     };
 
     save_config(&config)?;
@@ -772,8 +795,13 @@ mod tests {
                 }),
             },
         ];
-        let config =
-            Config { active_provider: "home-ollama".to_string(), providers: profiles, agent: AgentMode::Off, verbose_tool_output: true };
+        let config = Config {
+            active_provider: "home-ollama".to_string(),
+            providers: profiles,
+            agent: AgentMode::Off,
+            verbose_tool_output: true,
+            context_mode: ContextMode::All,
+        };
 
         let toml_string = toml::to_string_pretty(&config).unwrap();
         let parsed: Config = toml::from_str(&toml_string).unwrap();
@@ -823,6 +851,7 @@ model = "gpt-4"
             providers: vec![ollama_profile("home-ollama"), ollama_profile("office-ollama")],
             agent: AgentMode::Off,
             verbose_tool_output: true,
+            context_mode: ContextMode::All,
         };
 
         let provider_config = config.provider_config().unwrap();
@@ -837,6 +866,7 @@ model = "gpt-4"
             providers: vec![ollama_profile("home-ollama")],
             agent: AgentMode::Off,
             verbose_tool_output: true,
+            context_mode: ContextMode::All,
         };
 
         match config.provider_config().unwrap_err() {
@@ -870,6 +900,34 @@ model = "gpt-4"
         assert_eq!(reusable_saved_key(Some("   ")), None);
         assert_eq!(reusable_saved_key(Some("")), None);
         assert_eq!(reusable_saved_key(None), None);
+    }
+
+    #[test]
+    fn context_mode_defaults_to_all_and_parses_single_prompt() {
+        let config_toml = r#"
+provider = "ollama"
+
+[[providers]]
+name = "ollama"
+kind = "ollama"
+base_url = "http://localhost:11434"
+model = "test"
+"#;
+        let config: Config = toml::from_str(config_toml).expect("should parse without context_mode field");
+        assert_eq!(config.context_mode, ContextMode::All);
+
+        let config_toml = r#"
+provider = "ollama"
+context_mode = "single-prompt"
+
+[[providers]]
+name = "ollama"
+kind = "ollama"
+base_url = "http://localhost:11434"
+model = "test"
+"#;
+        let config: Config = toml::from_str(config_toml).expect("should parse single-prompt context mode");
+        assert_eq!(config.context_mode, ContextMode::SinglePrompt);
     }
 
     #[test]

@@ -1,5 +1,5 @@
 use crate::cli::{PromptAction, PromptKind};
-use crate::config::AgentMode;
+use crate::config::{AgentMode, ContextMode};
 use crate::vocab;
 
 pub struct SlashCommand {
@@ -38,6 +38,11 @@ static TOOL_OUTPUT_TOGGLES: &[ArgChoice] = &[
     ArgChoice { value: vocab::BOOL_TOGGLES[1], description: "show tool output summaries only" },
 ];
 
+static CONTEXT_MODES: &[ArgChoice] = &[
+    ArgChoice { value: vocab::CONTEXT_MODES[0], description: "carry earlier session turns to the provider" },
+    ArgChoice { value: vocab::CONTEXT_MODES[1], description: "send each request alone" },
+];
+
 static AGENT_TOGGLES: &[ArgChoice] = &[
     ArgChoice { value: vocab::AGENT_TOGGLES[0], description: "disable agent mode" },
     ArgChoice { value: vocab::AGENT_TOGGLES[1], description: "enable restricted agent tool mode" },
@@ -51,6 +56,7 @@ pub const COMMANDS: &[SlashCommand] = &[
     SlashCommand { name: "explain", description: "explain a shell command" },
     SlashCommand { name: "history", description: "enable or disable prompt history" },
     SlashCommand { name: "verbose", description: "enable or disable verbose agent tool output" },
+    SlashCommand { name: "context", description: "carry earlier session turns to the provider" },
     SlashCommand { name: "prompt", description: "manage system, explain, or agent prompts" },
     SlashCommand { name: "help", description: "list available slash commands" },
     SlashCommand { name: "quit", description: "exit interactive mode" },
@@ -87,6 +93,10 @@ pub fn arg_completions(line: &str) -> Option<(usize, Vec<&'static ArgChoice>)> {
         },
         "/verbose" => match prior_args.len() {
             0 => TOOL_OUTPUT_TOGGLES,
+            _ => return None,
+        },
+        "/context" => match prior_args.len() {
+            0 => CONTEXT_MODES,
             _ => return None,
         },
         "/agent" => match prior_args.len() {
@@ -141,6 +151,7 @@ pub enum SlashCmd {
     Uninstall,
     History { enable: Option<bool> },
     Verbose { enable: Option<bool> },
+    Context { mode: Option<ContextMode> },
     Prompt { kind: PromptKind, action: PromptAction },
     Explain { args: Vec<String> },
     Help,
@@ -165,6 +176,15 @@ fn parse_bool_toggle_strict(command: &'static str, arg: Option<&str>) -> Result<
         Some("on") => Ok(Some(true)),
         Some("off") => Ok(Some(false)),
         Some(_) => Err((command, "on or off")),
+    }
+}
+
+fn parse_context_mode_strict(arg: Option<&str>) -> Result<Option<ContextMode>, (&'static str, &'static str)> {
+    match arg {
+        None => Ok(None),
+        Some("all") => Ok(Some(ContextMode::All)),
+        Some("single-prompt") => Ok(Some(ContextMode::SinglePrompt)),
+        Some(_) => Err(("context", "all or single-prompt")),
     }
 }
 
@@ -205,6 +225,10 @@ pub fn parse(input: &str) -> SlashCmd {
         },
         Some("/verbose") => match parse_bool_toggle_strict("verbose", parts.next()) {
             Ok(enable) => SlashCmd::Verbose { enable },
+            Err((cmd, expected)) => SlashCmd::InvalidArgs { command: cmd, expected },
+        },
+        Some("/context") => match parse_context_mode_strict(parts.next()) {
+            Ok(mode) => SlashCmd::Context { mode },
             Err((cmd, expected)) => SlashCmd::InvalidArgs { command: cmd, expected },
         },
         Some("/explain") => SlashCmd::Explain { args: parts.map(std::string::ToString::to_string).collect() },
@@ -382,6 +406,43 @@ mod tests {
     }
 
     #[test]
+    fn parse_context_all() {
+        match parse("/context all") {
+            SlashCmd::Context { mode } => assert_eq!(mode, Some(ContextMode::All)),
+            _ => panic!("expected Context"),
+        }
+    }
+
+    #[test]
+    fn parse_context_single_prompt() {
+        match parse("/context single-prompt") {
+            SlashCmd::Context { mode } => assert_eq!(mode, Some(ContextMode::SinglePrompt)),
+            _ => panic!("expected Context"),
+        }
+    }
+
+    #[test]
+    fn parse_context_no_arg_shows_status() {
+        match parse("/context") {
+            SlashCmd::Context { mode } => assert_eq!(mode, None),
+            _ => panic!("expected Context"),
+        }
+    }
+
+    #[test]
+    fn parse_context_bad_mode_returns_invalid_args() {
+        assert!(matches!(parse("/context garbage"), SlashCmd::InvalidArgs { command: "context", .. }));
+    }
+
+    #[test]
+    fn arg_completions_context_returns_modes() {
+        let (start, candidates) = arg_completions("/context ").unwrap();
+        assert_eq!(start, 9);
+        let values: Vec<_> = candidates.iter().map(|candidate| candidate.value).collect();
+        assert_eq!(values, ["all", "single-prompt"]);
+    }
+
+    #[test]
     fn arg_completions_agent_returns_toggles() {
         let (start, candidates) = arg_completions("/agent ").unwrap();
         assert_eq!(start, 7);
@@ -509,6 +570,7 @@ mod tests {
         assert_eq!(values(PROMPT_ACTIONS), vocab::PROMPT_ACTIONS);
         assert_eq!(values(HISTORY_TOGGLES), vocab::BOOL_TOGGLES);
         assert_eq!(values(TOOL_OUTPUT_TOGGLES), vocab::BOOL_TOGGLES);
+        assert_eq!(values(CONTEXT_MODES), vocab::CONTEXT_MODES);
         assert_eq!(values(AGENT_TOGGLES), vocab::AGENT_TOGGLES);
     }
 

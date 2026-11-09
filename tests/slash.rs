@@ -29,3 +29,43 @@ fn agent_slash_command_updates_config_and_keeps_session_running() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("agent mode: safe"), "stderr: {stderr}");
 }
+
+#[test]
+fn context_all_persists_and_prints_status() {
+    let home = temp_home("slash_context_all");
+    let port = mock_ollama(&[]);
+    write_ollama_config(&home, port);
+
+    let out = super::run_with_stdin_interactive(&home, &[], b"/context all\n/quit\n");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "stderr: {stderr}");
+    assert!(stderr.contains("conversation context: all"), "stderr: {stderr}");
+
+    let config = fs::read_to_string(home.join("config").join("larpshell").join("config.toml")).unwrap();
+    assert!(config.contains("context_mode = \"all\""), "config: {config}");
+}
+
+#[test]
+fn context_without_arg_prints_current_mode() {
+    let home = temp_home("slash_context_bare");
+    let port = mock_ollama(&[]);
+    write_ollama_config(&home, port);
+
+    let out = super::run_with_stdin_interactive(&home, &[], b"/context\n/quit\n");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "stderr: {stderr}");
+    assert!(stderr.contains("conversation context: all"), "default mode should print; stderr: {stderr}");
+}
+
+#[test]
+fn context_invalid_arg_prints_expected_values() {
+    let home = temp_home("slash_context_invalid");
+    let port = mock_ollama(&[]);
+    write_ollama_config(&home, port);
+
+    let out = super::run_with_stdin_interactive(&home, &[], b"/context bogus\n/quit\n");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "a bad arg must not kill the session; stderr: {stderr}");
+    assert!(stderr.contains("invalid argument for /context"), "stderr: {stderr}");
+    assert!(stderr.contains("all or single-prompt"), "stderr: {stderr}");
+}
