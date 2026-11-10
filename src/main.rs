@@ -33,7 +33,7 @@ use cli::{PromptAction, PromptKind, execute_shell_command, parse_cli_args, print
 use colored::Colorize;
 #[cfg(unix)]
 use common::setup_terminal;
-use common::{CTP_BLUE, EXIT_SIGINT, clear_line, eprint_flush, show_cursor};
+use common::{CTP_BLUE, EXIT_SIGINT, clear_line, clear_n_lines, eprint_flush, show_cursor};
 use config::{AgentMode, Config, ContextMode, interactive_setup, load_config};
 use confirmation::style_message_markup;
 use confirmation::{
@@ -813,7 +813,13 @@ async fn process_command(
         return Err(LarpshellError::EmptyResponse(provider.name()));
     }
 
-    let outcome = confirm_loop(command, provider, &mode, ResponseStyle::Command).await?;
+    let outcome = confirm_loop(command, provider, &mode, ResponseStyle::Command, async || {
+        let status = StatusLine::start(&format!("generating with {model_name}"));
+        let response = generate_with_cancellation(provider, &prompt).await?;
+        status.finish();
+        Ok(agent::FinalResponse { kind: agent::FinalResponseKind::Command, content: response, message: None, command: None })
+    })
+    .await?;
     settle_confirm(outcome, user_input, turns, mode)
 }
 
@@ -825,17 +831,19 @@ async fn process_command_agent(
     let message = response.message.as_deref().map(str::trim).filter(|msg| !msg.is_empty());
     let command = response.command.as_deref().map(str::trim).filter(|cmd| !cmd.is_empty());
 
+    let mut regenerate = async || agent::run_agent_loop(user_input, provider, config, tool_registry, turns).await;
+
     if let Some(message) = message {
         display_response(message, ResponseStyle::Message);
         if let Some(command) = command {
-            let outcome = confirm_loop(command.to_string(), provider, &mode, ResponseStyle::Command).await?;
+            let outcome = confirm_loop(command.to_string(), provider, &mode, ResponseStyle::Command, &mut regenerate).await?;
             return settle_confirm(outcome, user_input, turns, mode);
         }
         return Ok(None);
     }
 
     if let Some(command) = command {
-        let outcome = confirm_loop(command.to_string(), provider, &mode, ResponseStyle::Command).await?;
+        let outcome = confirm_loop(command.to_string(), provider, &mode, ResponseStyle::Command, &mut regenerate).await?;
         return settle_confirm(outcome, user_input, turns, mode);
     }
 
@@ -845,7 +853,7 @@ async fn process_command_agent(
             if command.trim().is_empty() {
                 return Err(LarpshellError::EmptyResponse(provider.name()));
             }
-            let outcome = confirm_loop(command, provider, &mode, ResponseStyle::Command).await?;
+            let outcome = confirm_loop(command, provider, &mode, ResponseStyle::Command, &mut regenerate).await?;
             settle_confirm(outcome, user_input, turns, mode)
         }
         agent::FinalResponseKind::Message => {
@@ -908,8 +916,9 @@ struct ConfirmOutcome {
     /// Whether the command ran successfully; a declined request or a failed
     /// execution lands here with `false`.
     executed: bool,
-    /// The command as it left the loop, edits included.
-    command: String,
+    /// The command as it left the loop, edits included; `None` when a
+    /// message-only regeneration resolved the loop with nothing to confirm.
+    command: Option<String>,
     /// Failure from running the command, deferred so the caller records the
     /// turn before surfacing it.
     execution_error: Option<LarpshellError>,
@@ -926,11 +935,14 @@ enum ConfirmStep {
     Cancel,
     /// Edit was chosen (and possibly applied); re-prompt with the command.
     Retry,
+    /// Try-again was chosen (`r`); the loop runs `regenerate` and handles the
+    /// regenerated response like a fresh one.
+    TryAgain,
 }
 
-/// Handles the `Yes`/`No`/`Declined`/`Cancel`/`Edit` arms shared by the
-/// with-explain prompt and the post-explanation prompt. `Explain` is handled by
-/// the caller.
+/// Handles the `Yes`/`No`/`Declined`/`Cancel`/`Edit`/`TryAgain` arms shared by
+/// the with-explain prompt and the post-explanation prompt. `Explain` is
+/// handled by the caller.
 fn resolve_confirm(result: ConfirmResult, command: &mut String) -> Result<ConfirmStep, LarpshellError> {
     match result {
         ConfirmResult::Yes => {
@@ -946,14 +958,21 @@ fn resolve_confirm(result: ConfirmResult, command: &mut String) -> Result<Confir
             }
             Ok(ConfirmStep::Retry)
         }
+        ConfirmResult::TryAgain => Ok(ConfirmStep::TryAgain),
         // Explain is handled by the caller (with-explain) and not offered by the
         // post-explanation prompt (Simple mode).
         ConfirmResult::Explain => unreachable!(),
     }
 }
 
+/// Confirms `command` until it resolves. `regenerate` serves the try-again key:
+/// the non-agent closure resends the already-built prompt, the agent closure
+/// re-runs the agent loop with the same input, and the loop re-prompts with the
+/// regenerated response (a message-only response ends the loop with nothing to
+/// confirm).
 async fn confirm_loop(
     mut command: String, provider: &dyn AIProvider, mode: &CommandMode, response_style: ResponseStyle,
+    mut regenerate: impl AsyncFnMut() -> Result<agent::FinalResponse, LarpshellError>,
 ) -> Result<ConfirmOutcome, LarpshellError> {
     let outcome = 'outer: loop {
         let cmd_lines = display_response(&command, response_style);
@@ -961,9 +980,10 @@ async fn confirm_loop(
 
         // The post-explanation prompt is the only path that isn't a plain
         // non-Explain choice; everything else funnels through `resolve_confirm`.
+        let mut expl_lines = 0;
         let step = if let ConfirmResult::Explain = result {
             let explanation = get_explanation(&command, provider).await?;
-            let expl_lines = display_explanation(&explanation);
+            expl_lines = display_explanation(&explanation);
             resolve_confirm(confirm_execution(cmd_lines, expl_lines), &mut command)?
         } else {
             resolve_confirm(result, &mut command)?
@@ -971,18 +991,70 @@ async fn confirm_loop(
 
         match step {
             ConfirmStep::Done(executed, execution_error) => {
-                break 'outer ConfirmOutcome { cancelled: false, declined: false, executed, command, execution_error };
+                break 'outer ConfirmOutcome { cancelled: false, declined: false, executed, command: Some(command), execution_error };
             }
             ConfirmStep::Declined => match mode {
                 CommandMode::Interactive => {
-                    break 'outer ConfirmOutcome { cancelled: false, declined: true, executed: false, command, execution_error: None };
+                    break 'outer ConfirmOutcome {
+                        cancelled: false,
+                        declined: true,
+                        executed: false,
+                        command: Some(command),
+                        execution_error: None,
+                    };
                 }
                 CommandMode::Single => return Err(LarpshellError::Cancelled),
             },
             ConfirmStep::Retry => {}
+            ConfirmStep::TryAgain => {
+                // `r` cleared only the prompt lines; the regenerated response
+                // replaces the whole block shown so far, handled like the first
+                // pass.
+                clear_n_lines(cmd_lines + expl_lines);
+                let response = regenerate().await?;
+                let message = response.message.as_deref().map(str::trim).filter(|msg| !msg.is_empty());
+                if let Some(message) = message {
+                    display_response(message, ResponseStyle::Message);
+                }
+                let new_command = match response.command.as_deref().map(str::trim).filter(|cmd| !cmd.is_empty()) {
+                    Some(new_command) => new_command.to_string(),
+                    None => match response.kind {
+                        agent::FinalResponseKind::Command => {
+                            let new_command = normalize_model_output(&response.content);
+                            if new_command.trim().is_empty() {
+                                return Err(LarpshellError::EmptyResponse(provider.name()));
+                            }
+                            new_command
+                        }
+                        agent::FinalResponseKind::Message => {
+                            if message.is_none() {
+                                let message = response.content.trim();
+                                if message.is_empty() {
+                                    return Err(LarpshellError::EmptyResponse(provider.name()));
+                                }
+                                display_response(message, ResponseStyle::Message);
+                            }
+                            break 'outer ConfirmOutcome {
+                                cancelled: false,
+                                declined: false,
+                                executed: false,
+                                command: None,
+                                execution_error: None,
+                            };
+                        }
+                    },
+                };
+                command = new_command;
+            }
             ConfirmStep::Cancel => match mode {
                 CommandMode::Interactive => {
-                    break 'outer ConfirmOutcome { cancelled: true, declined: false, executed: false, command, execution_error: None };
+                    break 'outer ConfirmOutcome {
+                        cancelled: true,
+                        declined: false,
+                        executed: false,
+                        command: Some(command),
+                        execution_error: None,
+                    };
                 }
                 CommandMode::Single => return Err(LarpshellError::Cancelled),
             },
@@ -999,8 +1071,11 @@ async fn confirm_loop(
 fn settle_confirm(
     outcome: ConfirmOutcome, user_input: &str, turns: &mut Vec<SessionTurn>, mode: CommandMode,
 ) -> Result<Option<String>, LarpshellError> {
-    if mode == CommandMode::Interactive && !outcome.cancelled {
-        turns.push(SessionTurn { request: user_input.to_string(), command: outcome.command, executed: outcome.executed });
+    if mode == CommandMode::Interactive
+        && !outcome.cancelled
+        && let Some(command) = outcome.command
+    {
+        turns.push(SessionTurn { request: user_input.to_string(), command, executed: outcome.executed });
     }
     if let Some(error) = outcome.execution_error {
         return Err(error);

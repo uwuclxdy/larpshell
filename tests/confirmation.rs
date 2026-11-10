@@ -327,3 +327,44 @@ fn confirm_from_reader_ignores_e_in_simple_mode() {
     let result = confirm_from_reader(|| keys.next().unwrap(), ConfirmPromptMode::Simple, 1, 0);
     assert!(matches!(result, ConfirmResult::Yes));
 }
+
+// ── try-again hotkey (driven through the binary) ────────────────────────────
+
+use super::{mock_ollama_scripted, run_with_stdin_interactive, temp_home, write_ollama_config};
+
+#[test]
+fn try_again_hotkey_resends_and_reconfirms() {
+    let home = temp_home("try_again_hotkey");
+    let (port, requests) = mock_ollama_scripted(&["COMMAND: echo FIRST_CMD", "COMMAND: echo SECOND_CMD"]);
+    write_ollama_config(&home, port);
+
+    // "show files" reaches the first confirmation; `r` resends the same request;
+    // the regenerated command re-enters confirmation and `y` executes it.
+    let out = run_with_stdin_interactive(&home, &[], b"show files\nry");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "stderr: {stderr}");
+    assert_eq!(requests.lock().unwrap().len(), 2, "try-again must issue a second provider request");
+    assert!(requests.lock().unwrap()[1].contains("show files"), "the retry must resend the same prompt text");
+    assert!(!String::from_utf8_lossy(&out.stdout).contains("FIRST_CMD"), "the first command must not execute on a try-again");
+    assert!(stderr.contains("echo FIRST_CMD"), "the first command must have been shown; stderr: {stderr}");
+    assert!(stderr.contains("echo SECOND_CMD"), "the regenerated command must re-enter confirmation; stderr: {stderr}");
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("SECOND_CMD"),
+        "accepting the regenerated command must execute it; stdout: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+}
+
+#[test]
+fn confirm_from_reader_with_explain_on_r_returns_try_again() {
+    let mut keys = vec![KeyEvent::Char('r')].into_iter();
+    let result = confirm_from_reader(|| keys.next().unwrap(), ConfirmPromptMode::WithExplain, 1, 0);
+    assert!(matches!(result, ConfirmResult::TryAgain));
+}
+
+#[test]
+fn confirm_from_reader_simple_on_r_returns_try_again() {
+    let mut keys = vec![KeyEvent::Char('r')].into_iter();
+    let result = confirm_from_reader(|| keys.next().unwrap(), ConfirmPromptMode::Simple, 1, 0);
+    assert!(matches!(result, ConfirmResult::TryAgain));
+}

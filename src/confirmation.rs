@@ -19,6 +19,9 @@ pub enum ConfirmResult {
     /// records the turn.
     Declined,
     Cancel,
+    /// Try-again with `r`: the caller re-issues the same request and handles
+    /// the regenerated response like a fresh one.
+    TryAgain,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -590,6 +593,10 @@ pub fn confirm_from_reader(
                 clear_n_lines(prompt_lines);
                 return ConfirmResult::Explain;
             }
+            KeyEvent::Char('r' | 'R') => {
+                clear_n_lines(prompt_lines);
+                return ConfirmResult::TryAgain;
+            }
             KeyEvent::ArrowUp => {
                 clear_n_lines(lines_to_clear);
                 return ConfirmResult::Edit;
@@ -654,7 +661,7 @@ fn confirmation_prompt(mode: ConfirmPromptMode) -> usize {
     eprintln!("{header}");
     let hint = if matches!(mode, ConfirmPromptMode::WithExplain) {
         format!(
-            "{} {}   {} {}   {} {}   {} {}",
+            "{} {}   {} {}   {} {}   {} {}   {} {}",
             "↵".custom_color(CTP_BLUE).bold(),
             "execute".custom_color(CTP_OVERLAY0),
             "e".custom_color(CTP_BLUE).bold(),
@@ -663,16 +670,20 @@ fn confirmation_prompt(mode: ConfirmPromptMode) -> usize {
             "edit".custom_color(CTP_OVERLAY0),
             "n".custom_color(CTP_BLUE).bold(),
             "cancel".custom_color(CTP_OVERLAY0),
+            "r".custom_color(CTP_BLUE).bold(),
+            "retry".custom_color(CTP_OVERLAY0),
         )
     } else {
         format!(
-            "{} {}   {} {}   {} {}",
+            "{} {}   {} {}   {} {}   {} {}",
             "↵".custom_color(CTP_BLUE).bold(),
             "execute".custom_color(CTP_OVERLAY0),
             "↑".custom_color(CTP_BLUE).bold(),
             "edit".custom_color(CTP_OVERLAY0),
             "n".custom_color(CTP_BLUE).bold(),
             "cancel".custom_color(CTP_OVERLAY0),
+            "r".custom_color(CTP_BLUE).bold(),
+            "retry".custom_color(CTP_OVERLAY0),
         )
     };
     visual += count_visual_lines(&hint, width);
