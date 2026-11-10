@@ -5,6 +5,9 @@ Environment context:
 - Home dir: {home}
 - User: {user}
 - Shell: {shell}
+- Project type: {project_type}
+{dir_summary}
+{git_context}
 
 Rules:
 - Output ONLY the command, nothing else
