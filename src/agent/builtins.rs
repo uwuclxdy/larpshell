@@ -17,6 +17,7 @@ use super::tools::{RegisteredTool, ToolRegistry};
 const MAX_FILE_SIZE: usize = 100 * 1024;
 const MAX_FETCH_SIZE: usize = 100 * 1024;
 const MAX_SEARCH_MATCHES: usize = 50;
+const MAX_RUN_COMMAND_FEEDBACK: usize = 2 * 1024;
 const SAFE_COMMANDS: &[&str] = &[
     "ls", "cat", "echo", "grep", "ps", "whoami", "uname", "date", "pwd", "env", "printenv", "which", "whereis", "file", "stat", "id",
     "groups", "hostname", "uptime", "free", "df", "du", "vmstat", "iostat", "mpstat", "sar", "netstat", "ss", "dig", "nslookup", "host",
@@ -373,11 +374,8 @@ fn execute_fetch_url(url: &str) -> Result<String, String> {
 
     let content = response.text().map_err(|error| format!("cannot read response body: {error}"))?;
     if content.len() > MAX_FETCH_SIZE {
-        // Floor to the nearest char boundary at or below MAX_FETCH_SIZE so we
-        // always truncate an oversize body regardless of codepoint widths.
-        let cut = content.char_indices().rev().find(|(i, _)| *i <= MAX_FETCH_SIZE).map_or(0, |(i, _)| i);
-        let truncated = &content[..cut];
-        Ok(format!("{truncated}\n\n[truncated — response is {} bytes, showing first {cut}]", content.len()))
+        let truncated = cut_on_char_boundary(&content, MAX_FETCH_SIZE);
+        Ok(format!("{truncated}\n\n[truncated — response is {} bytes, showing first {}]", content.len(), truncated.len()))
     } else {
         Ok(content)
     }
@@ -571,20 +569,59 @@ fn execute_run_command(agent_mode: AgentMode, command: &str, args: &[String]) ->
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
         let mut message = format!("command failed with status {}", output.status);
-        let stdout = stdout.trim();
-        let stderr = stderr.trim();
+        let stdout = cap_stream(stdout.trim(), stdout.len(), "stdout");
+        let stderr = cap_stream(stderr.trim(), stderr.len(), "stderr");
         if !stdout.is_empty() {
             message.push_str("\nstdout:\n");
-            message.push_str(stdout);
+            message.push_str(&stdout);
         }
         if !stderr.is_empty() {
             message.push_str("\nstderr:\n");
-            message.push_str(stderr);
+            message.push_str(&stderr);
         }
         return Err(message);
     }
 
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = cap_stream(stderr.trim(), stderr.len(), "stderr");
+    if stderr.is_empty() {
+        Ok(stdout)
+    } else if stdout.is_empty() {
+        Ok(format!("stderr:\n{stderr}"))
+    } else {
+        Ok(format!("{stdout}\nstderr:\n{stderr}"))
+    }
+}
+
+/// Cuts `text` to at most `max_bytes` bytes, dropping a cut codepoint whole
+/// rather than emitting U+FFFD.
+fn cut_on_char_boundary(text: &str, max_bytes: usize) -> &str {
+    if text.len() <= max_bytes {
+        return text;
+    }
+    let mut end = 0;
+    for (index, _) in text.char_indices() {
+        if index > max_bytes {
+            break;
+        }
+        end = index;
+    }
+    &text[..end]
+}
+
+/// Caps a run_command feedback stream at MAX_RUN_COMMAND_FEEDBACK bytes,
+/// appending a truncation marker naming the stream and its true byte count
+/// when a tail was dropped. `raw_bytes` is the stream's byte count before the
+/// caller trimmed it, so the marker does not understate what the stream emitted.
+fn cap_stream<'a>(text: &'a str, raw_bytes: usize, label: &str) -> Cow<'a, str> {
+    let cut = cut_on_char_boundary(text, MAX_RUN_COMMAND_FEEDBACK);
+    if cut.len() == text.len() {
+        return Cow::Borrowed(cut);
+    }
+    // The marker stays ASCII: it decorates a cut section that may itself carry
+    // multibyte input, while the sibling markers decorate complete reads.
+    Cow::Owned(format!("{cut}\n\n[truncated - {label} is {raw_bytes} bytes, showing first {}]", cut.len()))
 }
 
 fn expand_tilde(path: &str) -> Cow<'_, str> {
@@ -1112,5 +1149,56 @@ bar",
         assert!(showing_count <= MAX_FILE_SIZE, "showing count {showing_count} exceeds MAX_FILE_SIZE {MAX_FILE_SIZE}");
         // For an all-ASCII file, the actual read should equal the cap exactly.
         assert_eq!(showing_count, MAX_FILE_SIZE, "ASCII file should fill the buffer completely");
+    }
+
+    // ── run_command feedback cap and cut helper ──────────────────────────────
+
+    #[test]
+    fn run_command_failure_marks_truncated_streams() {
+        let result = execute_run_command(
+            AgentMode::On,
+            "sh",
+            &["-c".to_string(), "head -c 3000 /dev/zero | tr '\\0' a; head -c 3000 /dev/zero | tr '\\0' e >&2; exit 3".to_string()],
+        );
+
+        let error = result.unwrap_err();
+        assert!(error.contains("command failed with status"), "the failure header must survive: {error}");
+        assert!(
+            error.contains("[truncated - stdout is 3000 bytes, showing first 2048]"),
+            "a cut stdout must carry a marker naming the stream and the byte counts: {error}"
+        );
+        assert!(
+            error.contains("[truncated - stderr is 3000 bytes, showing first 2048]"),
+            "a cut stderr must carry a marker naming the stream and the byte counts: {error}"
+        );
+        assert!(error.contains("a".repeat(2048).as_str()), "the stdout section must keep 2 KiB");
+        assert!(error.contains("e".repeat(2048).as_str()), "the stderr section must keep 2 KiB");
+        assert!(!error.contains("a".repeat(2049).as_str()), "the stdout section must be cut at 2 KiB");
+        assert!(!error.contains("e".repeat(2049).as_str()), "the stderr section must be cut at 2 KiB");
+    }
+
+    #[test]
+    fn cut_on_char_boundary_drops_a_codepoint_starting_at_the_cap_whole() {
+        let text = format!("{}日", "a".repeat(MAX_RUN_COMMAND_FEEDBACK));
+        assert!(text.len() > MAX_RUN_COMMAND_FEEDBACK, "the input must exceed the cap for the test to be meaningful");
+
+        let cut = cut_on_char_boundary(&text, MAX_RUN_COMMAND_FEEDBACK);
+
+        assert_eq!(cut.len(), MAX_RUN_COMMAND_FEEDBACK, "the prefix must stay within the cap");
+        assert_eq!(cut, "a".repeat(MAX_RUN_COMMAND_FEEDBACK), "a codepoint starting exactly at the cap must be dropped whole");
+    }
+
+    #[test]
+    fn cut_on_char_boundary_keeps_a_codepoint_fitting_exactly_within_the_cap() {
+        // 2045 ASCII bytes plus a 3-byte codepoint ends exactly at the cap; the
+        // codepoint is kept whole and the text following it is dropped.
+        let text = format!("{}€tail", "a".repeat(MAX_RUN_COMMAND_FEEDBACK - '€'.len_utf8()));
+        assert!(text.len() > MAX_RUN_COMMAND_FEEDBACK, "the input must exceed the cap for the test to be meaningful");
+
+        let cut = cut_on_char_boundary(&text, MAX_RUN_COMMAND_FEEDBACK);
+
+        assert_eq!(cut.len(), MAX_RUN_COMMAND_FEEDBACK, "the codepoint must be kept whole within the cap");
+        assert!(cut.ends_with('€'), "a codepoint fitting exactly within the cap must be kept");
+        assert!(!cut.contains("tail"), "text following the cap must be dropped");
     }
 }

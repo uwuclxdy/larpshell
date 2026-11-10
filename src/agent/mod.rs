@@ -895,4 +895,175 @@ mod tests {
 
         assert!(plain_tip("dangerous argument detected: --force").is_none());
     }
+
+    // ── run_command tool-result feedback ────────────────────────────────────
+
+    fn tool_call(arguments: serde_json::Value) -> crate::providers::ToolCall {
+        crate::providers::ToolCall { id: "call-1".to_string(), name: "run_command".to_string(), arguments, thought_signature: None }
+    }
+
+    fn write_emit_script(dir: &std::path::Path, name: &str, body: &str) -> std::path::PathBuf {
+        let script = dir.join(name);
+        fs::write(&script, body).unwrap();
+        script
+    }
+
+    fn tool_result_text(messages: &[ChatMessage]) -> String {
+        let message =
+            messages.iter().find(|message| message.role == Role::Tool).expect("a tool result message rides the follow-up request");
+        message.content.clone().expect("the tool result carries text content")
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn failed_run_command_truncates_both_streams_at_two_kib_in_the_tool_result() {
+        let dir = make_test_directory("stderr_cap");
+        let script = write_emit_script(
+            &dir,
+            "emit.sh",
+            "#!/bin/sh\nhead -c 3000 /dev/zero | tr '\\0' a\nhead -c 3000 /dev/zero | tr '\\0' e >&2\nexit 3\n",
+        );
+        let provider = MockProvider::new(vec![
+            ChatResponse::ToolCalls(vec![tool_call(serde_json::json!({ "command": format!("sh {}", script.display()) }))]),
+            ChatResponse::Message("COMMAND: echo DONE_CMD".to_string()),
+        ]);
+        let tool_registry = ToolRegistry::with_builtins(AgentMode::On);
+
+        let response =
+            run_agent_loop_with_confirm("show files", &provider, &test_config(), &tool_registry, &[], |_| ToolConfirmResult::Allow)
+                .await
+                .unwrap();
+
+        assert_eq!(response.command.as_deref(), Some("echo DONE_CMD"), "the loop must continue past the failed tool call");
+        let captured = provider.captured_messages.lock().unwrap();
+        assert_eq!(captured.len(), 2, "the failure must feed a second provider request");
+        let tool_result = tool_result_text(&captured[1]);
+        assert!(tool_result.contains("command failed with status"), "the failure shape must survive: {tool_result}");
+        assert!(tool_result.contains("a".repeat(2048).as_str()), "the stdout section must keep 2 KiB");
+        assert!(tool_result.contains("e".repeat(2048).as_str()), "the stderr section must keep 2 KiB");
+        assert!(!tool_result.contains("a".repeat(2049).as_str()), "the stdout section must be cut at 2 KiB");
+        assert!(!tool_result.contains("e".repeat(2049).as_str()), "the stderr section must be cut at 2 KiB");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn failed_run_command_cuts_streams_on_a_utf8_boundary() {
+        let dir = make_test_directory("stderr_boundary");
+        // 2046 ASCII bytes plus a 3-byte codepoint: the 2 KiB cut lands mid-codepoint
+        // and must back off to 2046 rather than mangle or panic.
+        let script = write_emit_script(&dir, "emit.sh", "#!/bin/sh\nhead -c 2046 /dev/zero | tr '\\0' a >&2\nprintf '日' >&2\nexit 3\n");
+        let provider = MockProvider::new(vec![
+            ChatResponse::ToolCalls(vec![tool_call(serde_json::json!({ "command": format!("sh {}", script.display()) }))]),
+            ChatResponse::Message("COMMAND: echo DONE_CMD".to_string()),
+        ]);
+        let tool_registry = ToolRegistry::with_builtins(AgentMode::On);
+
+        let response =
+            run_agent_loop_with_confirm("show files", &provider, &test_config(), &tool_registry, &[], |_| ToolConfirmResult::Allow)
+                .await
+                .unwrap();
+
+        assert_eq!(response.command.as_deref(), Some("echo DONE_CMD"));
+        let captured = provider.captured_messages.lock().unwrap();
+        assert_eq!(captured.len(), 2);
+        let tool_result = tool_result_text(&captured[1]);
+        assert!(tool_result.contains("a".repeat(2046).as_str()), "the kept portion must end at the boundary");
+        assert!(!tool_result.contains("a".repeat(2047).as_str()), "the cut must sit at 2 KiB");
+        assert!(!tool_result.contains('日'), "a cut codepoint must be dropped whole, not partially included");
+        assert!(!tool_result.contains('\u{FFFD}'), "the truncated section must not carry U+FFFD");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn zero_exit_run_command_feeds_stderr_alongside_stdout() {
+        let dir = make_test_directory("stderr_success");
+        let script = write_emit_script(&dir, "emit.sh", "#!/bin/sh\necho OUT_MARK\necho ERR_MARK >&2\n");
+        let provider = MockProvider::new(vec![
+            ChatResponse::ToolCalls(vec![tool_call(serde_json::json!({ "command": format!("sh {}", script.display()) }))]),
+            ChatResponse::Message("COMMAND: echo DONE_CMD".to_string()),
+        ]);
+        let tool_registry = ToolRegistry::with_builtins(AgentMode::On);
+
+        let response =
+            run_agent_loop_with_confirm("show files", &provider, &test_config(), &tool_registry, &[], |_| ToolConfirmResult::Allow)
+                .await
+                .unwrap();
+
+        assert_eq!(response.command.as_deref(), Some("echo DONE_CMD"));
+        let captured = provider.captured_messages.lock().unwrap();
+        assert_eq!(captured.len(), 2, "the follow-up request must carry the tool result");
+        let tool_result = tool_result_text(&captured[1]);
+        assert!(tool_result.contains("OUT_MARK"), "stdout must reach the model on a zero exit");
+        assert!(tool_result.contains("ERR_MARK"), "stderr must ride along on a zero exit too");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn corrected_command_reaches_confirmation_after_failed_run_command() {
+        let dir = make_test_directory("corrected");
+        let script = write_emit_script(&dir, "emit.sh", "#!/bin/sh\necho bad >&2\nexit 3\n");
+        let provider = MockProvider::new(vec![
+            ChatResponse::ToolCalls(vec![tool_call(serde_json::json!({ "command": format!("sh {}", script.display()) }))]),
+            ChatResponse::Message("COMMAND: echo CORRECTED_CMD".to_string()),
+        ]);
+        let tool_registry = ToolRegistry::with_builtins(AgentMode::On);
+
+        let response =
+            run_agent_loop_with_confirm("show files", &provider, &test_config(), &tool_registry, &[], |_| ToolConfirmResult::Allow)
+                .await
+                .unwrap();
+
+        assert_eq!(response.command.as_deref(), Some("echo CORRECTED_CMD"), "the corrected command must reach confirmation");
+        assert_eq!(provider.captured_messages.lock().unwrap().len(), 2, "the failure must feed a second provider request");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn zero_exit_run_command_caps_stderr_at_two_kib_with_a_truncation_marker() {
+        let dir = make_test_directory("stderr_success_cap");
+        // the trailing newline makes the raw stderr 3001 bytes against 3000 trimmed:
+        // the marker must name the raw count, not the trimmed one
+        let script =
+            write_emit_script(&dir, "emit.sh", "#!/bin/sh\necho OUT_MARK\nhead -c 3000 /dev/zero | tr '\\0' e >&2\nprintf '\\n' >&2\n");
+        let provider = MockProvider::new(vec![
+            ChatResponse::ToolCalls(vec![tool_call(serde_json::json!({ "command": format!("sh {}", script.display()) }))]),
+            ChatResponse::Message("COMMAND: echo DONE_CMD".to_string()),
+        ]);
+        let tool_registry = ToolRegistry::with_builtins(AgentMode::On);
+
+        let response =
+            run_agent_loop_with_confirm("show files", &provider, &test_config(), &tool_registry, &[], |_| ToolConfirmResult::Allow)
+                .await
+                .unwrap();
+
+        assert_eq!(response.command.as_deref(), Some("echo DONE_CMD"));
+        let captured = provider.captured_messages.lock().unwrap();
+        assert_eq!(captured.len(), 2, "the follow-up request must carry the tool result");
+        let tool_result = tool_result_text(&captured[1]);
+        assert!(tool_result.contains("OUT_MARK"), "stdout must reach the model on a zero exit: {tool_result}");
+        assert!(tool_result.contains("OUT_MARK\n\nstderr:\n"), "the stderr section must follow stdout: {tool_result}");
+        assert!(tool_result.contains("e".repeat(2048).as_str()), "the stderr section must keep 2 KiB");
+        assert!(
+            tool_result.contains("[truncated - stderr is 3001 bytes, showing first 2048]"),
+            "a cut stderr must carry a marker naming the stream and the byte counts: {tool_result}"
+        );
+        assert!(!tool_result.contains("e".repeat(2049).as_str()), "the stderr section must be cut at 2 KiB");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn zero_exit_run_command_with_empty_stdout_reports_stderr_without_a_leading_blank_line() {
+        let dir = make_test_directory("stderr_only_success");
+        let script = write_emit_script(&dir, "emit.sh", "#!/bin/sh\nprintf '\\n' >&2\necho ERR_ONLY >&2\n");
+        let provider = MockProvider::new(vec![
+            ChatResponse::ToolCalls(vec![tool_call(serde_json::json!({ "command": format!("sh {}", script.display()) }))]),
+            ChatResponse::Message("COMMAND: echo DONE_CMD".to_string()),
+        ]);
+        let tool_registry = ToolRegistry::with_builtins(AgentMode::On);
+
+        let response =
+            run_agent_loop_with_confirm("show files", &provider, &test_config(), &tool_registry, &[], |_| ToolConfirmResult::Allow)
+                .await
+                .unwrap();
+
+        assert_eq!(response.command.as_deref(), Some("echo DONE_CMD"));
+        let captured = provider.captured_messages.lock().unwrap();
+        assert_eq!(captured.len(), 2, "the follow-up request must carry the tool result");
+        let tool_result = tool_result_text(&captured[1]);
+        assert_eq!(tool_result, "stderr:\nERR_ONLY", "empty stdout must not prefix a blank line before the stderr section");
+    }
 }
