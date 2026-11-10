@@ -75,6 +75,8 @@ larpshell api
 | **LM Studio** | local models at `http://localhost:1234` (default, no key) |
 | **OpenAI-compatible** | any compatible API (custom base URL support) |
 
+Each `[[providers]]` profile takes an optional `timeout_secs` that caps each request in seconds (minimum 1; `timeout_secs = 0` rejects at load; a request may legitimately spend minutes before answering, so leave it out for no cap).
+
 ## Usage
 
 ### One-shot
@@ -83,7 +85,7 @@ larpshell api
 $ larpshell show disk usage
 > df -h
 Run this?
-↵ execute   e explain   ↑ edit   n cancel
+↵ execute   e explain   ↑ edit   n cancel   r retry
 ```
 
 ### Interactive REPL
@@ -93,7 +95,7 @@ $ larpshell
 larpshell> show disk usage
 > df -h
 Run this?
-↵ execute   e explain   ↑ edit   n cancel
+↵ execute   e explain   ↑ edit   n cancel   r retry
 ```
 
 ### Stdin / pipe
@@ -110,13 +112,15 @@ If piped input starts with `/`, `larpshell` treats it as a slash command.
 $ larpshell explain df -h
 > df -h
 ✅ Displays free disk space of mounted filesystems in a human readable format.
-Run this?
-↵ execute   ↑ edit   n cancel
 ```
 
 ### Edit before running
 
 Press Arrow Up at the confirmation prompt to resend the generated command into the input editor.
+
+### Try again
+
+Press `r` at the confirmation prompt to resend the same request to the provider; the fresh command re-enters the same prompt.
 
 ## Agent mode
 
@@ -129,7 +133,7 @@ Built-in tools:
 - `search_files`
 - `run_command`
 
-Every tool call asks for confirmation before it runs.
+Every tool call asks for confirmation before it runs. A failed `run_command` feeds the model its exit status plus stdout and stderr (each stream capped at 2 KiB with a truncation marker), and a zero-exit command that wrote to stderr feeds that stderr too, so the model can correct its own attempt.
 
 Modes:
 
@@ -149,7 +153,7 @@ $ larpshell what's the largest file in this repo
   result (28 lines)
 > du -ah . | sort -rh | head -n 1
 Run this?
-↵ execute   e explain   ↑ edit   n cancel
+↵ execute   e explain   ↑ edit   n cancel   r retry
 ```
 
 ### MCP servers
@@ -197,6 +201,8 @@ In the REPL, `! <command>` runs a shell command directly.
 - `agent-safe-prompt.md`
 
 Use the CLI or slash commands to show, edit, or reset them.
+
+The default system template accepts `{git_context}`, `{project_type}` and `{dir_summary}` beside `{cwd}`, `{home}`, `{user}`, `{shell}`, `{os}` and `{request}`: the git block renders empty outside a repository, project type detects node/python/rust/go markers nearest the working directory, and the directory summary lists the working directory capped at 30 entries.
 
 Prompt history is on by default. Toggle it with `larpshell history on|off` or `/history on|off`.
 
