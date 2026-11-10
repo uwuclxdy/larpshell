@@ -153,11 +153,16 @@ impl LarpshellError {
         }
     }
 
-    pub fn from_reqwest(error: &reqwest::Error, provider: &str) -> Self {
-        if error.is_timeout() {
-            Self::timeout(crate::common::DEFAULT_PROVIDER_TIMEOUT_SECS)
-        } else if error.is_connect() {
+    pub fn from_reqwest(error: &reqwest::Error, provider: &str, timeout_secs: Option<u64>) -> Self {
+        // Connect checks first: `is_timeout` also fires on io::ErrorKind::TimedOut
+        // anywhere in the source chain, so an OS-level TCP connect timeout with no
+        // configured cap would otherwise miss this remedy.
+        if error.is_connect() {
             Self::connection_failed(provider, "check if the service is running and the URL is correct")
+        } else if error.is_timeout() {
+            // The configured total is the only request timeout this client raises;
+            // with none set, surface the raw reqwest error instead.
+            timeout_secs.map_or_else(|| Self::NetworkError(error.to_string()), Self::timeout)
         } else if error.is_request() {
             Self::NetworkError("invalid request".to_string())
         } else if let Some(status) = error.status() {

@@ -389,7 +389,7 @@ where
         let label = if iteration == 0 { format!("agent · {model}") } else { "thinking".to_string() };
         let status = StatusLine::start(&label);
 
-        let response = provider.generate_with_tools(&messages, &tool_definitions).await;
+        let response = crate::with_cancellation(provider.generate_with_tools(&messages, &tool_definitions)).await;
         status.finish();
 
         let response = response?;
@@ -459,6 +459,7 @@ mod tests {
             active_provider: "ollama".to_string(),
             providers: vec![ProviderProfile {
                 name: "ollama".to_string(),
+                timeout_secs: None,
                 config: ProviderSpecificConfig::Ollama(OllamaConfig {
                     base_url: "http://localhost:11434".to_string(),
                     model: "llama3".to_string(),

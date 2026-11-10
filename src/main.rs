@@ -21,6 +21,7 @@ mod update;
 mod vocab;
 
 use std::borrow::Cow;
+use std::future::Future;
 use std::io::{IsTerminal, Write};
 use std::process::ExitCode;
 use tokio::io::AsyncReadExt;
@@ -869,7 +870,10 @@ async fn process_command_agent(
 
 // ── generation with cancellation ────────────────────────────────────────────
 
-async fn generate_with_cancellation(provider: &dyn AIProvider, prompt: &str) -> Result<String, LarpshellError> {
+async fn with_cancellation<F, T>(fut: F) -> Result<T, LarpshellError>
+where
+    F: Future<Output = Result<T, LarpshellError>>,
+{
     #[cfg(unix)]
     let saved_echo = common::disable_terminal_echo();
 
@@ -880,17 +884,22 @@ async fn generate_with_cancellation(provider: &dyn AIProvider, prompt: &str) -> 
         cancel_clone.cancel();
     });
     let result = tokio::select! {
-        res = provider.generate(prompt) => {
+        res = fut => {
             ctrl_c.abort();
             res
         }
         () = cancel_token.cancelled() => Err(LarpshellError::Cancelled),
     };
+
     #[cfg(unix)]
     if let Some(saved) = saved_echo.as_ref() {
         common::restore_terminal_echo(saved);
     }
     result
+}
+
+async fn generate_with_cancellation(provider: &dyn AIProvider, prompt: &str) -> Result<String, LarpshellError> {
+    with_cancellation(provider.generate(prompt)).await
 }
 
 /// In single-command mode, Ctrl-C cancels generation and returns

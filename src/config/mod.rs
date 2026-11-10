@@ -117,20 +117,26 @@ pub struct Config {
 impl Config {
     /// The active profile's kind-specific settings.
     pub fn provider_config(&self) -> Result<ProviderSpecificConfig, LarpshellError> {
-        let profile = self
-            .providers
+        Ok(self.active_profile()?.config.clone())
+    }
+
+    /// The profile named by `active_provider`.
+    pub fn active_profile(&self) -> Result<&ProviderProfile, LarpshellError> {
+        self.providers
             .iter()
             .find(|profile| profile.name == self.active_provider)
-            .ok_or_else(|| LarpshellError::ConfigError(format!("config not found for active provider \"{}\"", self.active_provider)))?;
-        Ok(profile.config.clone())
+            .ok_or_else(|| LarpshellError::ConfigError(format!("config not found for active provider \"{}\"", self.active_provider)))
     }
 }
 
 /// One saved provider instance. `name` is the toggling key; `config` carries
 /// `kind` plus the kind-specific fields, flattened into the same TOML table.
+/// `timeout_secs` caps each provider request in seconds; absent means no cap.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ProviderProfile {
     pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_secs: Option<u64>,
     #[serde(flatten)]
     pub config: ProviderSpecificConfig,
 }
@@ -405,20 +411,39 @@ pub fn set_context_mode(mode: ContextMode) -> Result<(), LarpshellError> {
     Ok(())
 }
 
+/// `timeout_secs = 0` is a zero-length cap no request can survive — reject at
+/// load rather than brick the profile per request.
+fn validate_profile_timeouts(config: &Config) -> Result<(), LarpshellError> {
+    if let Some(profile) = config.providers.iter().find(|profile| profile.timeout_secs == Some(0)) {
+        return Err(LarpshellError::ConfigError(format!(
+            "profile \"{}\": timeout_secs must be at least 1 second (0 would fail every request)",
+            profile.name
+        )));
+    }
+    Ok(())
+}
+
+fn parse_config(contents: &str) -> Result<Config, LarpshellError> {
+    let config: Config = toml::from_str(contents)?;
+    validate_profile_timeouts(&config)?;
+    Ok(config)
+}
+
 pub fn load_config() -> Result<Config, LarpshellError> {
     let config_path = config_path()?;
     let contents = fs::read_to_string(&config_path)?;
 
-    match toml::from_str::<Config>(&contents) {
+    match parse_config(&contents) {
         Ok(config) => Ok(config),
-        Err(e) => {
+        Err(LarpshellError::TomlDeError(e)) => {
             if migration::migrate_config(&config_path)? {
                 let contents = fs::read_to_string(&config_path)?;
-                Ok(toml::from_str(&contents)?)
+                parse_config(&contents)
             } else {
                 Err(LarpshellError::TomlDeError(e))
             }
         }
+        Err(error) => Err(error),
     }
 }
 
@@ -587,7 +612,7 @@ fn configure_new_profile(profiles: &[ProviderProfile]) -> Result<ProviderProfile
         break input;
     };
 
-    Ok(ProviderProfile { name, config: configure_provider(kind, None)? })
+    Ok(ProviderProfile { name, timeout_secs: None, config: configure_provider(kind, None)? })
 }
 
 fn configure_provider(kind: ActiveProvider, existing: Option<&ProviderSpecificConfig>) -> Result<ProviderSpecificConfig, LarpshellError> {
@@ -765,6 +790,7 @@ mod tests {
     fn ollama_profile(name: &str) -> ProviderProfile {
         ProviderProfile {
             name: name.to_string(),
+            timeout_secs: None,
             config: ProviderSpecificConfig::Ollama(OllamaConfig {
                 base_url: "http://localhost:11434".to_string(),
                 model: "llama3".to_string(),
@@ -787,6 +813,7 @@ mod tests {
         let profiles = vec![
             ProviderProfile {
                 name: "home-ollama".to_string(),
+                timeout_secs: None,
                 config: ProviderSpecificConfig::Ollama(OllamaConfig {
                     base_url: "http://localhost:11434".to_string(),
                     model: "llama3".to_string(),
@@ -794,6 +821,7 @@ mod tests {
             },
             ProviderProfile {
                 name: "anthropic".to_string(),
+                timeout_secs: None,
                 config: ProviderSpecificConfig::Anthropic(AnthropicConfig {
                     api_key: "sk-ant-test".to_string(),
                     model: "claude-sonnet-4-6".to_string(),

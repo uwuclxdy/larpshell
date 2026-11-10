@@ -10,7 +10,6 @@ use strip_ansi_escapes::strip;
 use unicode_width::UnicodeWidthChar;
 
 pub const EXIT_SIGINT: i32 = 130;
-pub const DEFAULT_PROVIDER_TIMEOUT_SECS: u64 = 30;
 
 // Catppuccin Mocha palette — terminal truecolor tokens. CTP_PRIMARY is the brand mark's
 // color, used by the mark, the key anchors and the update notice; CTP_BLUE is the working accent.

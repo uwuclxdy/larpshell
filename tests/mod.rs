@@ -22,6 +22,7 @@ mod explain;
 mod interactive;
 mod prompt_context;
 mod slash;
+mod timeout;
 
 static TARGET_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
 
@@ -783,8 +784,6 @@ fn agent_subcommand_safe_prints_confirmation() {
 /// entry is served as raw ollama chat JSON; anything else is wrapped in the
 /// ollama chat format like [`mock_ollama`]. Returns the port plus every
 /// received request, headers included, in arrival order.
-// temp: dead until the pending provider-test rows land; drop the allows on the last landing.
-#[allow(dead_code)]
 fn mock_ollama_scripted(responses: &[&str]) -> (u16, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -823,7 +822,6 @@ fn mock_ollama_scripted(responses: &[&str]) -> (u16, std::sync::Arc<std::sync::M
 
 /// Reads until the headers plus their `Content-Length` body have arrived (a
 /// single read can stop mid-body, which would truncate a captured request).
-#[allow(dead_code)]
 fn read_full_request(stream: &mut std::net::TcpStream) -> Vec<u8> {
     let mut request = Vec::new();
     let mut buf = [0u8; 16384];
@@ -843,12 +841,10 @@ fn read_full_request(stream: &mut std::net::TcpStream) -> Vec<u8> {
     request
 }
 
-#[allow(dead_code)]
 fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     haystack.windows(needle.len()).position(|window| window == needle)
 }
 
-#[allow(dead_code)]
 fn content_length(headers: &[u8]) -> Option<usize> {
     let text = String::from_utf8_lossy(headers);
     text.lines().find_map(|line| {
@@ -859,7 +855,6 @@ fn content_length(headers: &[u8]) -> Option<usize> {
 
 /// Answers each connection with the next of `responses` after sleeping
 /// `delay`, so a request-level timeout ticks while the client waits.
-#[allow(dead_code)]
 fn mock_ollama_slow(responses: &[&str], delay: std::time::Duration) -> u16 {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -885,7 +880,6 @@ fn mock_ollama_slow(responses: &[&str], delay: std::time::Duration) -> u16 {
 }
 
 /// `write_ollama_config` with a per-profile `timeout_secs` line (`None` omits it).
-#[allow(dead_code)]
 fn write_ollama_config_with_timeout(home: &std::path::Path, port: u16, timeout_secs: Option<u64>) {
     let timeout_line = timeout_secs.map(|secs| format!("timeout_secs = {secs}\n")).unwrap_or_default();
     let config_dir = home.join("config").join("larpshell");

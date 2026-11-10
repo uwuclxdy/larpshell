@@ -34,16 +34,32 @@ impl MultiProviderConfig {
     fn into_profiles(self) -> Vec<ProviderProfile> {
         let mut profiles = Vec::new();
         if let Some(config) = self.gemini {
-            profiles.push(ProviderProfile { name: "gemini".to_string(), config: ProviderSpecificConfig::Gemini(config) });
+            profiles.push(ProviderProfile {
+                name: "gemini".to_string(),
+                timeout_secs: None,
+                config: ProviderSpecificConfig::Gemini(config),
+            });
         }
         if let Some(config) = self.ollama {
-            profiles.push(ProviderProfile { name: "ollama".to_string(), config: ProviderSpecificConfig::Ollama(config) });
+            profiles.push(ProviderProfile {
+                name: "ollama".to_string(),
+                timeout_secs: None,
+                config: ProviderSpecificConfig::Ollama(config),
+            });
         }
         if let Some(config) = self.openrouter {
-            profiles.push(ProviderProfile { name: "openrouter".to_string(), config: ProviderSpecificConfig::OpenRouter(config) });
+            profiles.push(ProviderProfile {
+                name: "openrouter".to_string(),
+                timeout_secs: None,
+                config: ProviderSpecificConfig::OpenRouter(config),
+            });
         }
         if let Some(config) = self.openai {
-            profiles.push(ProviderProfile { name: "openai".to_string(), config: ProviderSpecificConfig::OpenAI(config) });
+            profiles.push(ProviderProfile {
+                name: "openai".to_string(),
+                timeout_secs: None,
+                config: ProviderSpecificConfig::OpenAI(config),
+            });
         }
         profiles
     }
