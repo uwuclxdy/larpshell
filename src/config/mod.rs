@@ -281,6 +281,11 @@ pub fn sys_prompt_path() -> Result<PathBuf, LarpshellError> {
 pub fn load_sys_prompt() -> Option<String> {
     let path = sys_prompt_path().ok()?;
     migrate_txt_prompt(&path);
+    // migrate_sys_prompt reads the file; if it migrated, return the new content
+    // directly to avoid a second read.
+    if let Some(migrated) = migration::migrate_sys_prompt().ok().flatten() {
+        return Some(migrated);
+    }
     fs::read_to_string(path).ok()
 }
 

@@ -20,6 +20,7 @@ mod edit;
 mod error;
 mod explain;
 mod interactive;
+mod prompt_context;
 mod slash;
 
 static TARGET_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();

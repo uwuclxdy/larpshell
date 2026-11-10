@@ -5,14 +5,15 @@ use std::fs;
 use std::path::Path;
 
 use crate::error::LarpshellError;
-use crate::prompt::DEFAULT_EXPLAIN_PROMPT;
+use crate::prompt::{DEFAULT_EXPLAIN_PROMPT, DEFAULT_PROMPT_TEMPLATE};
 const OLD_EXPLAIN_PROMPT_V1: &str = include_str!("../prompts/old/explain_v1.md");
 const OLD_EXPLAIN_PROMPT_V2: &str = include_str!("../prompts/old/explain_v2.md");
+const OLD_SYS_PROMPT_V1: &str = include_str!("../prompts/old/sys_v1.md");
 
 use super::{
     ActiveProvider, Config, ContextMode, GeminiConfig, OllamaConfig, OpenAIConfig, OpenRouterConfig, ProviderProfile,
     ProviderSpecificConfig, atomic_write, config_base_dir, default_verbose_tool_output, deserialize_agent_mode, ensure_config_dir,
-    explain_prompt_path,
+    explain_prompt_path, sys_prompt_path,
 };
 
 /// Pre-profile `[providers.<kind>]` tables, one slot per provider type.
@@ -123,28 +124,35 @@ fn migrate_old_larpshell_content(content: &str) -> Result<String, LarpshellError
     Ok(toml::to_string_pretty(&new_config)?)
 }
 
-fn can_migrate_explain_prompt(content: &str) -> bool {
-    matches!(content, OLD_EXPLAIN_PROMPT_V1 | OLD_EXPLAIN_PROMPT_V2)
-}
-
-/// Migrates the explain prompt if it matches a known old version.
-/// Returns `Some(new_content)` when migration ran (caller need not re-read),
-/// `None` when no migration was needed, or an error.
-pub fn migrate_explain_prompt() -> Result<Option<String>, LarpshellError> {
-    let explain_prompt_path = explain_prompt_path()?;
-
-    if !explain_prompt_path.exists() {
+/// Migrates a prompt file whose saved content matches one of `old_defaults` to `new_default`.
+/// Returns `Some(new_content)` when migration ran (caller need not re-read), `None` when the
+/// file is missing or user-edited, or an error.
+fn migrate_prompt_file(path: &Path, old_defaults: &[&str], new_default: &str) -> Result<Option<String>, LarpshellError> {
+    if !path.exists() {
         return Ok(None);
     }
 
-    let content = fs::read_to_string(&explain_prompt_path)?;
+    let content = fs::read_to_string(path)?;
 
-    if can_migrate_explain_prompt(&content) {
-        atomic_write(&explain_prompt_path, DEFAULT_EXPLAIN_PROMPT)?;
-        return Ok(Some(DEFAULT_EXPLAIN_PROMPT.to_string()));
+    if old_defaults.contains(&content.as_str()) {
+        atomic_write(path, new_default)?;
+        return Ok(Some(new_default.to_string()));
     }
 
     Ok(None)
+}
+
+/// Migrates the explain prompt if it matches a known old version.
+pub fn migrate_explain_prompt() -> Result<Option<String>, LarpshellError> {
+    let path = explain_prompt_path()?;
+    migrate_prompt_file(&path, &[OLD_EXPLAIN_PROMPT_V1, OLD_EXPLAIN_PROMPT_V2], DEFAULT_EXPLAIN_PROMPT)
+}
+
+/// Migrates the sys prompt when the saved template matches the previous default
+/// (`create_prompts` only writes missing files); a user-edited template stays untouched.
+pub fn migrate_sys_prompt() -> Result<Option<String>, LarpshellError> {
+    let path = sys_prompt_path()?;
+    migrate_prompt_file(&path, &[OLD_SYS_PROMPT_V1], DEFAULT_PROMPT_TEMPLATE)
 }
 
 pub fn migrate_config(config_path: &Path) -> Result<bool, LarpshellError> {
@@ -296,6 +304,40 @@ model = "openrouter/auto"
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn sys_prompt_migration_rewrites_the_previous_default() {
+        let tmp = migrate_tmp("sys_old");
+        let path = tmp.join("sys-prompt.md");
+        fs::write(&path, OLD_SYS_PROMPT_V1).unwrap();
+
+        let migrated = migrate_prompt_file(&path, &[OLD_SYS_PROMPT_V1], DEFAULT_PROMPT_TEMPLATE).unwrap();
+        assert_ne!(
+            OLD_SYS_PROMPT_V1, DEFAULT_PROMPT_TEMPLATE,
+            "the previous default must differ from the new one, or migration rewrites nothing"
+        );
+        assert!(migrated.is_some(), "expected migration to run");
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            DEFAULT_PROMPT_TEMPLATE,
+            "the saved previous default must be rewritten to the new default"
+        );
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn sys_prompt_migration_leaves_user_edited_templates_alone() {
+        let tmp = migrate_tmp("sys_user");
+        let path = tmp.join("sys-prompt.md");
+        fs::write(&path, "custom rules: {request}\n").unwrap();
+
+        let migrated = migrate_prompt_file(&path, &[OLD_SYS_PROMPT_V1], DEFAULT_PROMPT_TEMPLATE).unwrap();
+        assert!(migrated.is_none(), "a user-edited template must not migrate");
+        assert_eq!(fs::read_to_string(&path).unwrap(), "custom rules: {request}\n", "a user-edited template must stay untouched");
+
+        let _ = fs::remove_dir_all(&tmp);
     }
 
     #[test]
