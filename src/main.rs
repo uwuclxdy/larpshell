@@ -229,6 +229,9 @@ fn select_run_mode(command: &[String]) -> RunMode {
 
 async fn run_piped(runtime: &mut Runtime) -> Result<(), LarpshellError> {
     let mut buf = String::new();
+    // Reads stdin to EOF up front: nothing later in the process (an agent tool
+    // call's confirmation) can still read piped bytes, so tests drive tool
+    // confirmations through the in-process seam, never through stdin.
     tokio::io::stdin().read_to_string(&mut buf).await?;
     let input = buf.trim();
 
