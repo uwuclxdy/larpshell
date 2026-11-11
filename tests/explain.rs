@@ -79,6 +79,8 @@ fn explain_subcommand_no_args_exits_error() {
     let out = tests::run(&home, &["explain"]);
 
     assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("no API provider configured"), "stderr: {stderr}");
 }
 
 // ── explain subcommand (single-run) ─────────────────────────────────────────
@@ -109,6 +111,8 @@ fn single_run_with_mock_executes_command() {
     let out = tests::run(&home, &["list files in current directory"]);
 
     assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("$ echo from_mock\n"), "expected displayed command; stderr: {stderr}");
     assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "echo from_mock");
 }
 
@@ -123,6 +127,8 @@ fn interactive_mode_with_piped_input_executes_command() {
     let out = tests::run_with_stdin(&home, &[], b"list files\n");
 
     assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("$ echo interactive_ok\n"), "expected displayed command; stderr: {stderr}");
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("interactive_ok"), "executed command output not in stdout: {stdout}");
 }

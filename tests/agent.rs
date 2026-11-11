@@ -48,10 +48,12 @@ fn assert_file_contains(path: &std::path::Path, expected: &str) {
     assert!(contents.contains(expected), "file contents were: {contents}");
 }
 
-fn assert_clean_home_agent_bootstrap(suffix: &str, args: &[&str], expected: &str) {
+fn assert_clean_home_agent_bootstrap(suffix: &str, args: &[&str], confirmation: &str, expected: &str) {
     let home = clean_home(suffix);
     let out = run_clean_home(&home, args);
     assert_success(&out);
+    let stderr = stderr_text(&out);
+    assert!(stderr.contains(confirmation), "expected agent mode confirmation; stderr: {stderr}");
     assert_agent_mode_written(&home, expected);
 }
 
@@ -107,14 +109,20 @@ fn agent_on_safe_off_subcommand_updates_config() {
 
     let out = run(&home, &["agent", "on"]);
     assert!(out.status.success());
+    let stderr = stderr_text(&out);
+    assert!(stderr.contains("agent mode: on"), "expected agent mode confirmation; stderr: {stderr}");
     assert_file_contains(&config_path, "agent = \"on\"");
 
     let out = run(&home, &["agent", "safe"]);
     assert!(out.status.success());
+    let stderr = stderr_text(&out);
+    assert!(stderr.contains("agent mode: safe"), "expected agent mode confirmation; stderr: {stderr}");
     assert_file_contains(&config_path, "agent = \"safe\"");
 
     let out = run(&home, &["agent", "off"]);
     assert!(out.status.success());
+    let stderr = stderr_text(&out);
+    assert!(stderr.contains("agent mode: off"), "expected agent mode confirmation; stderr: {stderr}");
     assert_file_contains(&config_path, "agent = \"off\"");
 }
 
@@ -125,12 +133,14 @@ fn agent_safe_subcommand_bootstraps_missing_config() {
 
     let out = run(&home, &["agent", "safe"]);
     assert_success(&out);
+    let stderr = stderr_text(&out);
+    assert!(stderr.contains("agent mode: safe"), "expected agent mode confirmation; stderr: {stderr}");
     assert_file_contains(&config_path, "agent = \"safe\"");
 }
 
 #[test]
 fn agent_safe_subcommand_bootstraps_missing_config_on_clean_home() {
-    assert_clean_home_agent_bootstrap("agent_safe_clean_home", &["agent", "safe"], SAFE_BOOTSTRAPPED);
+    assert_clean_home_agent_bootstrap("agent_safe_clean_home", &["agent", "safe"], "agent mode: safe", SAFE_BOOTSTRAPPED);
 }
 
 #[test]
@@ -139,6 +149,8 @@ fn agent_status_subcommand_does_not_require_shell_bootstrap() {
 
     let out = run_clean_home(&home, &["agent"]);
     assert_success(&out);
+    let stderr = stderr_text(&out);
+    assert!(stderr.contains("agent mode: off"), "expected agent mode status; stderr: {stderr}");
     assert_no_shell_bootstrap(&out);
 }
 
@@ -167,12 +179,12 @@ fn prompt_agent_safe_edit_creates_prompt_file_on_clean_home() {
 
 #[test]
 fn agent_on_subcommand_bootstraps_missing_config_on_clean_home() {
-    assert_clean_home_agent_bootstrap("agent_on_clean_home", &["agent", "on"], ON_BOOTSTRAPPED);
+    assert_clean_home_agent_bootstrap("agent_on_clean_home", &["agent", "on"], "agent mode: on", ON_BOOTSTRAPPED);
 }
 
 #[test]
 fn agent_off_subcommand_bootstraps_missing_config_on_clean_home() {
-    assert_clean_home_agent_bootstrap("agent_off_clean_home", &["agent", "off"], OFF_BOOTSTRAPPED);
+    assert_clean_home_agent_bootstrap("agent_off_clean_home", &["agent", "off"], "agent mode: off", OFF_BOOTSTRAPPED);
 }
 
 #[test]
@@ -196,9 +208,13 @@ fn history_status_commands_still_work_with_shell_bootstrap_home() {
 
     let out = run(&home, &["history", "on"]);
     assert!(out.status.success());
+    let stderr = stderr_text(&out);
+    assert!(stderr.contains("command history enabled."), "expected history confirmation; stderr: {stderr}");
 
     let out = run(&home, &["history", "off"]);
     assert!(out.status.success());
+    let stderr = stderr_text(&out);
+    assert!(stderr.contains("command history disabled."), "expected history confirmation; stderr: {stderr}");
 }
 
 #[test]
@@ -211,10 +227,14 @@ fn tool_output_subcommand_updates_config() {
 
     let out = run(&home, &["verbose", "off"]);
     assert_success(&out);
+    let stderr = stderr_text(&out);
+    assert!(stderr.contains("verbose tool output: off"), "expected verbose confirmation; stderr: {stderr}");
     assert_file_contains(&config_path, "verbose_tool_output = false");
 
     let out = run(&home, &["verbose", "on"]);
     assert_success(&out);
+    let stderr = stderr_text(&out);
+    assert!(stderr.contains("verbose tool output: on"), "expected verbose confirmation; stderr: {stderr}");
     assert_file_contains(&config_path, "verbose_tool_output = true");
 }
 
