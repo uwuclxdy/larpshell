@@ -5,6 +5,7 @@
 mod tests;
 
 mod agent;
+mod cache;
 mod cli;
 mod common;
 mod config;
@@ -810,9 +811,33 @@ async fn process_command(
     let effective_request = build_effective_request(user_input, config.context_mode, turns);
     let prompt = create_system_prompt(&effective_request, effective_sys.as_deref());
 
+    let regenerate = async || {
+        let status = StatusLine::start(&format!("generating with {model_name}"));
+        let response = generate_with_cancellation(provider, &prompt).await?;
+        status.finish();
+        Ok(agent::FinalResponse { kind: agent::FinalResponseKind::Command, content: response, message: None, command: None })
+    };
+
     let response = match &mode {
-        CommandMode::Interactive => generate_with_cancellation(provider, &prompt).await?,
-        CommandMode::Single => generate_single_shot(provider, &prompt).await?,
+        CommandMode::Interactive => generate_with_cancellation(provider, &prompt).await,
+        CommandMode::Single => generate_single_shot(provider, &prompt).await,
+    };
+    let response = match response {
+        Ok(response) => response,
+        Err(error @ LarpshellError::ConnectionFailed { .. }) => {
+            let Some(command) = cache::lookup(user_input) else {
+                return Err(error);
+            };
+            status.finish();
+            print_warning("provider unreachable — using cached translation");
+            if dry_run {
+                display_command(&command);
+                return Ok(None);
+            }
+            let outcome = confirm_loop(command, provider, &mode, ResponseStyle::Command, regenerate).await?;
+            return settle_confirm(outcome, user_input, turns, mode);
+        }
+        Err(error) => return Err(error),
     };
     status.finish();
 
@@ -826,13 +851,7 @@ async fn process_command(
         return Ok(None);
     }
 
-    let outcome = confirm_loop(command, provider, &mode, ResponseStyle::Command, async || {
-        let status = StatusLine::start(&format!("generating with {model_name}"));
-        let response = generate_with_cancellation(provider, &prompt).await?;
-        status.finish();
-        Ok(agent::FinalResponse { kind: agent::FinalResponseKind::Command, content: response, message: None, command: None })
-    })
-    .await?;
+    let outcome = confirm_loop(command, provider, &mode, ResponseStyle::Command, regenerate).await?;
     settle_confirm(outcome, user_input, turns, mode)
 }
 
@@ -1092,6 +1111,11 @@ async fn confirm_loop(
 fn settle_confirm(
     outcome: ConfirmOutcome, user_input: &str, turns: &mut Vec<SessionTurn>, mode: CommandMode,
 ) -> Result<Option<String>, LarpshellError> {
+    if outcome.executed
+        && let Some(command) = &outcome.command
+    {
+        cache::record(user_input, command);
+    }
     if mode == CommandMode::Interactive
         && !outcome.cancelled
         && let Some(command) = outcome.command

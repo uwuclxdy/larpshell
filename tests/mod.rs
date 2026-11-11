@@ -13,6 +13,7 @@ static BUILD_ONCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
 use toml::from_str;
 
 mod agent;
+mod cache;
 mod cli;
 mod confirmation;
 mod context;
