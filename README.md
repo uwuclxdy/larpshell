@@ -215,6 +215,7 @@ On the first interactive run without a subcommand, `larpshell` tries to install 
 Current support:
 
 - bash function in `~/.bashrc`
+- zsh function in `~/.zshrc`
 - fish function in `~/.config/fish/functions/larpshell.fish`
 - bash, zsh, and fish completions
 
