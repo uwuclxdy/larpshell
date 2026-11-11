@@ -16,6 +16,7 @@ mod agent;
 mod cli;
 mod confirmation;
 mod context;
+mod dry_run;
 mod edit;
 mod error;
 mod explain;

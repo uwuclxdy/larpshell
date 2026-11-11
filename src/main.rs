@@ -38,7 +38,8 @@ use common::{CTP_BLUE, EXIT_SIGINT, clear_line, clear_n_lines, eprint_flush, sho
 use config::{AgentMode, Config, ContextMode, interactive_setup, load_config};
 use confirmation::style_message_markup;
 use confirmation::{
-    ConfirmResult, ResponseStyle, confirm_execution, confirm_with_explain, display_explanation, display_response, edit_command,
+    ConfirmResult, ResponseStyle, confirm_execution, confirm_with_explain, display_command, display_explanation, display_response,
+    edit_command,
 };
 use error::LarpshellError;
 use interactive::{user_input, user_input_prefilled};
@@ -77,6 +78,9 @@ struct Runtime {
     update_task: Option<JoinHandle<bool>>,
     /// Request→command turns confirmed this session, carried to later requests.
     turns: Vec<SessionTurn>,
+    /// `--dry-run` from the CLI: print each translation to stderr and skip the
+    /// confirm/execute step. REPL keeps prompting; agent mode ignores it.
+    dry_run: bool,
 }
 
 enum SlashOutcome {
@@ -121,7 +125,7 @@ async fn run() -> Result<(), LarpshellError> {
         return dispatch_provider_less_subcommand(sub);
     }
 
-    let mut runtime = Runtime::create().await?;
+    let mut runtime = Runtime::create(cli.dry_run).await?;
 
     match cli.subcommand {
         Some(cli::Subcommands::Explain { command }) => {
@@ -420,7 +424,7 @@ fn dispatch_provider_less_subcommand(sub: &cli::Subcommands) -> Result<(), Larps
 // ── Runtime ─────────────────────────────────────────────────────────────────
 
 impl Runtime {
-    async fn create() -> Result<Self, LarpshellError> {
+    async fn create(dry_run: bool) -> Result<Self, LarpshellError> {
         let config = match load_config() {
             Ok(config) => config,
             Err(LarpshellError::IoError(error)) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -432,7 +436,7 @@ impl Runtime {
         let provider = create_provider(&config)?;
         let tool_registry = Self::build_registry(config.agent).await;
         let update_task = Some(tokio::task::spawn(update::is_update_available()));
-        Ok(Self { config, provider, tool_registry, update_task, turns: Vec::new() })
+        Ok(Self { config, provider, tool_registry, update_task, turns: Vec::new(), dry_run })
     }
 
     async fn reload_all(&mut self) -> Result<(), LarpshellError> {
@@ -792,12 +796,12 @@ async fn process_user_input(user_input: &str, runtime: &mut Runtime, mode: Comma
         };
         process_command_agent(user_input, runtime.provider.as_ref(), &runtime.config, mode, registry, &mut runtime.turns).await
     } else {
-        process_command(user_input, runtime.provider.as_ref(), &runtime.config, mode, &mut runtime.turns).await
+        process_command(user_input, runtime.provider.as_ref(), &runtime.config, mode, runtime.dry_run, &mut runtime.turns).await
     }
 }
 
 async fn process_command(
-    user_input: &str, provider: &dyn AIProvider, config: &Config, mode: CommandMode, turns: &mut Vec<SessionTurn>,
+    user_input: &str, provider: &dyn AIProvider, config: &Config, mode: CommandMode, dry_run: bool, turns: &mut Vec<SessionTurn>,
 ) -> Result<Option<String>, LarpshellError> {
     let model_name = config.provider_config()?.model().to_string();
     let status = StatusLine::start(&format!("generating with {model_name}"));
@@ -815,6 +819,11 @@ async fn process_command(
     let command = normalize_model_output(&response);
     if command.trim().is_empty() {
         return Err(LarpshellError::EmptyResponse(provider.name()));
+    }
+
+    if dry_run {
+        display_command(&command);
+        return Ok(None);
     }
 
     let outcome = confirm_loop(command, provider, &mode, ResponseStyle::Command, async || {

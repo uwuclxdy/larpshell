@@ -52,7 +52,7 @@ pub const fn generate_bash_autocomplete() -> &'static str {
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
     if [ $COMP_CWORD -eq 1 ]; then
-        COMPREPLY=( $(compgen -W "api provider agent history verbose prompt explain uninstall --help --version" -- "$cur") )
+        COMPREPLY=( $(compgen -W "api provider agent history verbose prompt explain uninstall --help --version --dry-run" -- "$cur") )
     elif [ $COMP_CWORD -eq 2 ]; then
         case "$prev" in
             agent)
@@ -97,6 +97,7 @@ _larpshell() {
         '1: :->cmds' \
         '--help[show help information]' \
         '--version[show version information]' \
+        '--dry-run[print the translated command without running it (no effect in agent mode)]' \
         '*::arg:->args'
 
     case "$state" in
@@ -154,6 +155,7 @@ complete -c larpshell -n "__fish_use_subcommand" -a prompt -d 'view or edit syst
 complete -c larpshell -n "__fish_use_subcommand" -a uninstall -d 'uninstall larpshell'
 complete -c larpshell -l help -d 'show help information'
 complete -c larpshell -l version -d 'show version information'
+complete -c larpshell -l dry-run -d 'print the translated command without running it (no effect in agent mode)'
 complete -c larpshell -n "__fish_seen_subcommand_from agent" -a "off safe on" -d 'set agent mode'
 complete -c larpshell -n "__fish_seen_subcommand_from history" -a "on off" -d 'toggle history'
 complete -c larpshell -n "__fish_seen_subcommand_from verbose" -a "on off" -d 'toggle verbose'

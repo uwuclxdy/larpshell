@@ -31,6 +31,7 @@ pub fn print_warning(message: &str) {
 #[derive(Debug)]
 pub struct CliArgs {
     pub command: Vec<String>,
+    pub dry_run: bool,
     pub subcommand: Option<Subcommands>,
 }
 
@@ -69,6 +70,10 @@ pub enum PromptAction {
 struct Cli {
     #[arg(value_name = "REQUEST", help = "Natural language request to convert to a shell command")]
     command: Vec<String>,
+
+    /// Print the translated command to stderr without running it (no effect in agent mode)
+    #[arg(long)]
+    dry_run: bool,
 
     #[command(subcommand)]
     subcommand: Option<Commands>,
@@ -183,7 +188,7 @@ pub fn parse_cli_args() -> CliArgs {
         None => None,
     };
 
-    CliArgs { command: cli.command, subcommand }
+    CliArgs { command: cli.command, dry_run: cli.dry_run, subcommand }
 }
 
 static CWD_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
