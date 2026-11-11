@@ -33,8 +33,10 @@ pub fn uninstall_larpshell() -> Result<(), LarpshellError> {
     eprintln!("{}", style_message_markup("larpshell successfully uninstalled.").custom_color(CTP_GREEN).bold());
     eprintln!(
         "{}",
-        style_message_markup("please restart your shell or run 'source ~/.bashrc' (or 'source ~/.config/fish/config.fish' for fish).",)
-            .custom_color(CTP_YELLOW)
+        style_message_markup(
+            "please restart your shell or run 'source ~/.bashrc', 'source ~/.zshrc' or 'source ~/.config/fish/config.fish'.",
+        )
+        .custom_color(CTP_YELLOW)
     );
 
     Ok(())

@@ -212,7 +212,7 @@ fn do_nlsh_rs_migration() {
 
 fn try_auto_install_shell() {
     if matches!(auto_setup_shell_function(), Ok(true)) {
-        print_warning("restart shell or run 'source ~/.bashrc' ('source ~/.config/fish/config.fish' for fish).");
+        print_warning("restart shell or run 'source ~/.bashrc', 'source ~/.zshrc' or 'source ~/.config/fish/config.fish'.");
         std::process::exit(0);
     }
 }

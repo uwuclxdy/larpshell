@@ -22,6 +22,7 @@ mod error;
 mod explain;
 mod interactive;
 mod prompt_context;
+mod shell_integration;
 mod slash;
 mod timeout;
 

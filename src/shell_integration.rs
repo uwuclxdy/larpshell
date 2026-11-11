@@ -195,7 +195,7 @@ pub const fn generate_bash_function() -> &'static str {
 }
 
 pub const fn generate_fish_function() -> &'static str {
-    r#"function larpshell
+    r#"function larpshell --description 'run larpshell and eval the command it generates'
     if test (count $argv) -eq 0
         command larpshell
         return $status
@@ -207,14 +207,15 @@ pub const fn generate_fish_function() -> &'static str {
             return $status
     end
 
-    set cmd (command larpshell $argv)
-    set exit_code $status
-    if test $exit_code -eq 0 -a -n "$cmd"
+    set cmd (command larpshell $argv | string collect)
+    # $pipestatus[1] not $status: string collect is last in the pipe.
+    set exit_code $pipestatus[1]
+    if test $exit_code -eq 0; and test -n "$cmd"
         if string match -qr '^(Usage:|error:|Commands:|larpshell [0-9]|\x1b|\e|✓|.*:$)' -- "$cmd"
             echo "$cmd"
             return 0
         end
-        eval $cmd
+        eval "$cmd"
     else
         return $exit_code
     end
@@ -224,13 +225,15 @@ end"#
 pub fn auto_setup_shell_function() -> Result<bool, LarpshellError> {
     verify_and_fix_integrations()?;
     let bash_added = setup_bash_integration()?;
+    let zsh_added = setup_zsh_integration()?;
     let fish_added = setup_fish_integration()?;
     let autocomplete_added = setup_autocomplete()?;
-    Ok(bash_added || fish_added || autocomplete_added)
+    Ok(bash_added || zsh_added || fish_added || autocomplete_added)
 }
 
 fn verify_and_fix_integrations() -> Result<(), LarpshellError> {
     verify_and_fix_bash_integration()?;
+    verify_and_fix_zsh_integration()?;
     verify_and_fix_fish_integration()?;
     verify_and_fix_autocomplete()?;
     Ok(())
@@ -299,6 +302,33 @@ fn verify_and_fix_bash_integration() -> Result<(), LarpshellError> {
     Ok(())
 }
 
+fn verify_and_fix_zsh_integration() -> Result<(), LarpshellError> {
+    let home = home_dir();
+    let zshrc_path = home.join(".zshrc");
+
+    if !zshrc_path.exists() {
+        return Ok(());
+    }
+
+    let content = fs::read_to_string(&zshrc_path)?;
+
+    // check if integration exists
+    if !content.contains("larpshell() {") {
+        return Ok(());
+    }
+
+    // extract the function and verify it matches
+    let expected_function = generate_bash_function();
+
+    if !content.contains(expected_function) {
+        // function exists but doesn't match - remove and reinstall
+        remove_zsh_integration()?;
+        setup_zsh_integration()?;
+    }
+
+    Ok(())
+}
+
 fn verify_and_fix_fish_integration() -> Result<(), LarpshellError> {
     let home = home_dir();
     let fish_function_path = home.join(".config/fish/functions/larpshell.fish");
@@ -336,6 +366,28 @@ fn setup_bash_integration() -> Result<bool, LarpshellError> {
     }
 
     let mut file = OpenOptions::new().append(true).open(&bashrc_path)?;
+    writeln!(file, "\n# larpshell shell integration")?;
+    writeln!(file, "{}", generate_bash_function())?;
+    Ok(true)
+}
+
+fn setup_zsh_integration() -> Result<bool, LarpshellError> {
+    let home = home_dir();
+    let zshrc_path = home.join(".zshrc");
+
+    if !zshrc_path.exists() {
+        return Ok(false);
+    }
+
+    let content = fs::read_to_string(&zshrc_path)?;
+
+    if content.contains("larpshell() {") || content.contains("larpshell()") {
+        return Ok(false);
+    }
+
+    // The bash wrapper body is zsh-native (local, [[ =~ ]] and $'...' behave the same; measured
+    // 2026-11-11 on zsh 5.9.2 + bash 5.3.20: byte-identical wrapper parity), so both shells share one body.
+    let mut file = OpenOptions::new().append(true).open(&zshrc_path)?;
     writeln!(file, "\n# larpshell shell integration")?;
     writeln!(file, "{}", generate_bash_function())?;
     Ok(true)
@@ -485,6 +537,29 @@ pub fn remove_bash_integration() -> Result<bool, LarpshellError> {
 
     if found {
         atomic_write(&bashrc_path, &new_content)?;
+    }
+
+    Ok(found)
+}
+
+pub fn remove_zsh_integration() -> Result<bool, LarpshellError> {
+    let home = home_dir();
+    let zshrc_path = home.join(".zshrc");
+
+    if !zshrc_path.exists() {
+        return Ok(false);
+    }
+
+    let content = fs::read_to_string(&zshrc_path)?;
+
+    if !content.contains("# larpshell shell integration") && !content.contains("larpshell() {") && !content.contains("larpshell()") {
+        return Ok(false);
+    }
+
+    let (new_content, found) = remove_marked_function_block(&content, "# larpshell shell integration", "larpshell()");
+
+    if found {
+        atomic_write(&zshrc_path, &new_content)?;
     }
 
     Ok(found)
@@ -659,9 +734,10 @@ fn remove_autocomplete() -> Result<bool, LarpshellError> {
 
 pub fn remove_shell_integration() -> Result<bool, LarpshellError> {
     let bash_removed = remove_bash_integration()?;
+    let zsh_removed = remove_zsh_integration()?;
     let fish_removed = remove_fish_integration()?;
     let autocomplete_removed = remove_autocomplete()?;
-    Ok(bash_removed || fish_removed || autocomplete_removed)
+    Ok(bash_removed || zsh_removed || fish_removed || autocomplete_removed)
 }
 
 // ── nlsh-rs → larpshell migration ──────────────────────────────────────────
