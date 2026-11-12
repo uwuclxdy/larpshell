@@ -96,6 +96,7 @@ fn migrate_config_content(content: &str) -> Result<String, LarpshellError> {
 
     let new_config = Config {
         active_provider: active_provider.as_str().to_string(),
+        proxy: None,
         providers: old_config.providers.into_profiles(),
         agent: AgentMode::Off,
         verbose_tool_output: true,
@@ -131,6 +132,7 @@ fn migrate_old_larpshell_content(content: &str) -> Result<String, LarpshellError
 
     let new_config = Config {
         active_provider: old_config.provider.as_str().to_string(),
+        proxy: None,
         providers: old_config.providers.into_profiles(),
         agent: old_config.agent,
         verbose_tool_output: old_config.verbose_tool_output,

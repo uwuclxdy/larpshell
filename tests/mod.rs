@@ -23,6 +23,7 @@ mod error;
 mod explain;
 mod interactive;
 mod prompt_context;
+mod proxy;
 mod shell_integration;
 mod slash;
 mod timeout;
@@ -554,6 +555,35 @@ model = "openrouter/auto"
     let provider = create_provider(&config).expect("openrouter provider should be created when support is implemented");
 
     assert!(provider.name().contains("OpenRouter"), "expected provider name to identify OpenRouter, got {}", provider.name());
+}
+
+#[test]
+fn create_provider_with_an_unparseable_proxy_url_fails_naming_field_and_url() {
+    let config_toml = r#"
+provider = "openai"
+
+proxy = "not a url"
+
+[[providers]]
+name = "openai"
+kind = "openai"
+base_url = "https://api.openai.com/v1"
+model = "gpt-4"
+"#;
+
+    let config: Config = from_str(config_toml).expect("openai TOML should parse");
+    let error = match create_provider(&config) {
+        Err(error) => error,
+        Ok(provider) => panic!("an unparseable proxy URL must fail provider creation; created {}", provider.name()),
+    };
+
+    match error {
+        LarpshellError::ConfigError(message) => {
+            assert!(message.contains("proxy"));
+            assert!(message.contains("not a url"));
+        }
+        other => panic!("expected config error, got {other:?}"),
+    }
 }
 
 // ── provider switch subcommand tests ────────────────────────────────────────

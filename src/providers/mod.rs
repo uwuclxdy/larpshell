@@ -115,13 +115,14 @@ pub trait AIProvider: Send + Sync {
 pub fn create_provider(config: &Config) -> Result<Box<dyn AIProvider>, LarpshellError> {
     let profile = config.active_profile()?;
     let timeout_secs = profile.timeout_secs;
+    let proxy = config.proxy.as_deref();
     match &profile.config {
-        ProviderSpecificConfig::Gemini(config) => Ok(Box::new(genai::GenaiProvider::gemini(config, timeout_secs)?)),
-        ProviderSpecificConfig::Anthropic(config) => Ok(Box::new(genai::GenaiProvider::anthropic(config, timeout_secs)?)),
-        ProviderSpecificConfig::Ollama(config) => Ok(Box::new(genai::GenaiProvider::ollama(config, timeout_secs)?)),
-        ProviderSpecificConfig::LMStudio(config) => Ok(Box::new(genai::GenaiProvider::lmstudio(config, timeout_secs)?)),
-        ProviderSpecificConfig::OpenRouter(config) => Ok(Box::new(genai::GenaiProvider::openrouter(config, timeout_secs)?)),
-        ProviderSpecificConfig::OpenAI(config) => Ok(Box::new(genai::GenaiProvider::openai(config, timeout_secs)?)),
+        ProviderSpecificConfig::Gemini(config) => Ok(Box::new(genai::GenaiProvider::gemini(config, timeout_secs, proxy)?)),
+        ProviderSpecificConfig::Anthropic(config) => Ok(Box::new(genai::GenaiProvider::anthropic(config, timeout_secs, proxy)?)),
+        ProviderSpecificConfig::Ollama(config) => Ok(Box::new(genai::GenaiProvider::ollama(config, timeout_secs, proxy)?)),
+        ProviderSpecificConfig::LMStudio(config) => Ok(Box::new(genai::GenaiProvider::lmstudio(config, timeout_secs, proxy)?)),
+        ProviderSpecificConfig::OpenRouter(config) => Ok(Box::new(genai::GenaiProvider::openrouter(config, timeout_secs, proxy)?)),
+        ProviderSpecificConfig::OpenAI(config) => Ok(Box::new(genai::GenaiProvider::openai(config, timeout_secs, proxy)?)),
     }
 }
 

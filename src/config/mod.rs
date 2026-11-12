@@ -104,6 +104,8 @@ pub enum ContextMode {
 pub struct Config {
     #[serde(rename = "provider")]
     pub active_provider: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy: Option<String>,
     #[serde(default)]
     pub providers: Vec<ProviderProfile>,
     #[serde(default, deserialize_with = "deserialize_agent_mode")]
@@ -375,6 +377,7 @@ const fn default_verbose_tool_output() -> bool {
 fn default_config() -> Config {
     Config {
         active_provider: String::new(),
+        proxy: None,
         providers: Vec::new(),
         agent: AgentMode::Off,
         verbose_tool_output: default_verbose_tool_output(),
@@ -524,6 +527,7 @@ pub fn interactive_setup() -> Result<(), LarpshellError> {
 
     let config = Config {
         active_provider: active_name.clone(),
+        proxy: existing_config.as_ref().and_then(|c| c.proxy.clone()),
         providers: profiles,
         agent: existing_config.as_ref().map_or(AgentMode::Off, |c| c.agent),
         verbose_tool_output: existing_config.as_ref().is_none_or(|c| c.verbose_tool_output),
@@ -830,6 +834,7 @@ mod tests {
         ];
         let config = Config {
             active_provider: "home-ollama".to_string(),
+            proxy: None,
             providers: profiles,
             agent: AgentMode::Off,
             verbose_tool_output: true,
@@ -881,6 +886,7 @@ model = "gpt-4"
     fn provider_config_resolves_by_active_name() {
         let config = Config {
             active_provider: "home-ollama".to_string(),
+            proxy: None,
             providers: vec![ollama_profile("home-ollama"), ollama_profile("office-ollama")],
             agent: AgentMode::Off,
             verbose_tool_output: true,
@@ -896,6 +902,7 @@ model = "gpt-4"
     fn provider_config_errors_for_unknown_active_name() {
         let config = Config {
             active_provider: "missing".to_string(),
+            proxy: None,
             providers: vec![ollama_profile("home-ollama")],
             agent: AgentMode::Off,
             verbose_tool_output: true,

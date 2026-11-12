@@ -23,8 +23,8 @@ pub struct GenaiProvider {
 }
 
 impl GenaiProvider {
-    pub fn gemini(config: &GeminiConfig, timeout_secs: Option<u64>) -> Result<Self, LarpshellError> {
-        let client = build_client(AdapterKind::Gemini, None, Some(&config.api_key), timeout_secs)?;
+    pub fn gemini(config: &GeminiConfig, timeout_secs: Option<u64>, proxy: Option<&str>) -> Result<Self, LarpshellError> {
+        let client = build_client(AdapterKind::Gemini, None, Some(&config.api_key), timeout_secs, proxy)?;
         Ok(Self {
             client,
             model: config.model.clone(),
@@ -35,15 +35,17 @@ impl GenaiProvider {
         })
     }
 
-    pub fn anthropic(config: &AnthropicConfig, timeout_secs: Option<u64>) -> Result<Self, LarpshellError> {
-        Self::anthropic_at(config, None, timeout_secs)
+    pub fn anthropic(config: &AnthropicConfig, timeout_secs: Option<u64>, proxy: Option<&str>) -> Result<Self, LarpshellError> {
+        Self::anthropic_at(config, None, timeout_secs, proxy)
     }
 
     /// The anthropic endpoint is fixed in production. The base-URL seam exists
     /// so the wire test can point the client at a local mock and pin the
     /// adapter's request contract (path plus auth header).
-    fn anthropic_at(config: &AnthropicConfig, base_url: Option<&str>, timeout_secs: Option<u64>) -> Result<Self, LarpshellError> {
-        let client = build_client(AdapterKind::Anthropic, base_url, Some(&config.api_key), timeout_secs)?;
+    fn anthropic_at(
+        config: &AnthropicConfig, base_url: Option<&str>, timeout_secs: Option<u64>, proxy: Option<&str>,
+    ) -> Result<Self, LarpshellError> {
+        let client = build_client(AdapterKind::Anthropic, base_url, Some(&config.api_key), timeout_secs, proxy)?;
         Ok(Self {
             client,
             model: config.model.clone(),
@@ -54,11 +56,11 @@ impl GenaiProvider {
         })
     }
 
-    pub fn lmstudio(config: &LMStudioConfig, timeout_secs: Option<u64>) -> Result<Self, LarpshellError> {
+    pub fn lmstudio(config: &LMStudioConfig, timeout_secs: Option<u64>, proxy: Option<&str>) -> Result<Self, LarpshellError> {
         // LM Studio speaks the OpenAI wire format on its local server; the
         // openai adapter plus a resolved base URL is the whole adapter.
         let base_url = openai_compat_base_url(&config.base_url);
-        let client = build_client(AdapterKind::OpenAI, Some(&base_url), None, timeout_secs)?;
+        let client = build_client(AdapterKind::OpenAI, Some(&base_url), None, timeout_secs, proxy)?;
         Ok(Self {
             client,
             model: config.model.clone(),
@@ -69,11 +71,11 @@ impl GenaiProvider {
         })
     }
 
-    pub fn ollama(config: &OllamaConfig, timeout_secs: Option<u64>) -> Result<Self, LarpshellError> {
+    pub fn ollama(config: &OllamaConfig, timeout_secs: Option<u64>, proxy: Option<&str>) -> Result<Self, LarpshellError> {
         // The ollama adapter concatenates `{base_url}api/chat` without a
         // separator, so a bare-host base URL must carry its trailing slash.
         let base_url = format!("{}/", config.base_url.trim_end_matches('/'));
-        let client = build_client(AdapterKind::Ollama, Some(&base_url), None, timeout_secs)?;
+        let client = build_client(AdapterKind::Ollama, Some(&base_url), None, timeout_secs, proxy)?;
         Ok(Self {
             client,
             model: config.model.clone(),
@@ -84,9 +86,9 @@ impl GenaiProvider {
         })
     }
 
-    pub fn openrouter(config: &OpenRouterConfig, timeout_secs: Option<u64>) -> Result<Self, LarpshellError> {
+    pub fn openrouter(config: &OpenRouterConfig, timeout_secs: Option<u64>, proxy: Option<&str>) -> Result<Self, LarpshellError> {
         let base_url = openai_compat_base_url(&config.base_url);
-        let client = build_client(AdapterKind::OpenRouter, Some(&base_url), config.api_key.as_deref(), timeout_secs)?;
+        let client = build_client(AdapterKind::OpenRouter, Some(&base_url), config.api_key.as_deref(), timeout_secs, proxy)?;
         Ok(Self {
             client,
             model: config.model.clone(),
@@ -97,9 +99,9 @@ impl GenaiProvider {
         })
     }
 
-    pub fn openai(config: &OpenAIConfig, timeout_secs: Option<u64>) -> Result<Self, LarpshellError> {
+    pub fn openai(config: &OpenAIConfig, timeout_secs: Option<u64>, proxy: Option<&str>) -> Result<Self, LarpshellError> {
         let base_url = openai_compat_base_url(&config.base_url);
-        let client = build_client(AdapterKind::OpenAI, Some(&base_url), config.api_key.as_deref(), timeout_secs)?;
+        let client = build_client(AdapterKind::OpenAI, Some(&base_url), config.api_key.as_deref(), timeout_secs, proxy)?;
         Ok(Self {
             client,
             model: config.model.clone(),
@@ -249,13 +251,20 @@ fn extract_tool_calls(response: &genai::chat::ChatResponse) -> Vec<ToolCall> {
 
 /// One reqwest client shared across adapters; `with_reqwest` injects it into
 /// genai so the profile's `timeout_secs` applies to every call. `None` sets no
-/// total request timeout.
+/// total request timeout. A `proxy` URL replaces the system proxy chain rather
+/// than adding to it: reqwest tries custom proxies before the system proxies it
+/// appends at build time, and the first match intercepts.
 fn build_client(
-    kind: AdapterKind, base_url: Option<&str>, api_key: Option<&str>, timeout_secs: Option<u64>,
+    kind: AdapterKind, base_url: Option<&str>, api_key: Option<&str>, timeout_secs: Option<u64>, proxy: Option<&str>,
 ) -> Result<Client, LarpshellError> {
     let mut http_builder = reqwest::Client::builder();
     if let Some(secs) = timeout_secs {
         http_builder = http_builder.timeout(Duration::from_secs(secs));
+    }
+    if let Some(url) = proxy {
+        let reqwest_proxy =
+            reqwest::Proxy::all(url).map_err(|error| LarpshellError::ConfigError(format!("invalid `proxy` URL \"{url}\": {error}")))?;
+        http_builder = http_builder.proxy(reqwest_proxy);
     }
     let http_client = http_builder.build().map_err(|error| LarpshellError::ConfigError(error.to_string()))?;
 
@@ -476,27 +485,27 @@ mod tests {
         let openai = ProviderSpecificConfig::OpenAI(OpenAIConfig { base_url: "https://x/v1".into(), api_key: None, model: "m".into() });
 
         match gemini {
-            ProviderSpecificConfig::Gemini(config) => assert!(GenaiProvider::gemini(&config, None).is_ok()),
+            ProviderSpecificConfig::Gemini(config) => assert!(GenaiProvider::gemini(&config, None, None).is_ok()),
             _ => unreachable!(),
         }
         match anthropic {
-            ProviderSpecificConfig::Anthropic(config) => assert!(GenaiProvider::anthropic(&config, None).is_ok()),
+            ProviderSpecificConfig::Anthropic(config) => assert!(GenaiProvider::anthropic(&config, None, None).is_ok()),
             _ => unreachable!(),
         }
         match ollama {
-            ProviderSpecificConfig::Ollama(config) => assert!(GenaiProvider::ollama(&config, None).is_ok()),
+            ProviderSpecificConfig::Ollama(config) => assert!(GenaiProvider::ollama(&config, None, None).is_ok()),
             _ => unreachable!(),
         }
         match lmstudio {
-            ProviderSpecificConfig::LMStudio(config) => assert!(GenaiProvider::lmstudio(&config, None).is_ok()),
+            ProviderSpecificConfig::LMStudio(config) => assert!(GenaiProvider::lmstudio(&config, None, None).is_ok()),
             _ => unreachable!(),
         }
         match openrouter {
-            ProviderSpecificConfig::OpenRouter(config) => assert!(GenaiProvider::openrouter(&config, None).is_ok()),
+            ProviderSpecificConfig::OpenRouter(config) => assert!(GenaiProvider::openrouter(&config, None, None).is_ok()),
             _ => unreachable!(),
         }
         match openai {
-            ProviderSpecificConfig::OpenAI(config) => assert!(GenaiProvider::openai(&config, None).is_ok()),
+            ProviderSpecificConfig::OpenAI(config) => assert!(GenaiProvider::openai(&config, None, None).is_ok()),
             _ => unreachable!(),
         }
     }
@@ -540,7 +549,7 @@ mod tests {
         });
 
         let config = AnthropicConfig { api_key: "sk-ant-test".into(), model: "claude-sonnet-4-6".into() };
-        let provider = GenaiProvider::anthropic_at(&config, Some(&format!("http://127.0.0.1:{port}/")), None).unwrap();
+        let provider = GenaiProvider::anthropic_at(&config, Some(&format!("http://127.0.0.1:{port}/")), None, None).unwrap();
 
         let text = provider.generate("list files").await.unwrap();
         assert_eq!(text, "ls");

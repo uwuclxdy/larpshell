@@ -457,6 +457,7 @@ mod tests {
     fn test_config() -> Config {
         Config {
             active_provider: "ollama".to_string(),
+            proxy: None,
             providers: vec![ProviderProfile {
                 name: "ollama".to_string(),
                 timeout_secs: None,
