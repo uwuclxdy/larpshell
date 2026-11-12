@@ -75,7 +75,7 @@ larpshell api
 | **LM Studio** | local models at `http://localhost:1234` (default, no key) |
 | **OpenAI-compatible** | any compatible API (custom base URL support) |
 
-Each `[[providers]]` profile takes an optional `timeout_secs` that caps each request in seconds (minimum 1; `timeout_secs = 0` rejects at load; a request may legitimately spend minutes before answering, so leave it out for no cap).
+Each `[[providers]]` profile takes an optional `timeout_secs` that caps each request in seconds (minimum 1; `timeout_secs = 0` rejects at load; a request may legitimately spend minutes before answering, so leave it out for no cap). The top-level `proxy` key sends all provider requests through that URL, overriding `HTTP_PROXY`/`HTTPS_PROXY` while set; an unparseable URL fails the run at startup.
 
 ## Usage
 
